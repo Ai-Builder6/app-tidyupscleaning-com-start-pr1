@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastSavedAt": "2026-10-18T19:12:30.458Z",
+  "lastSavedAt": "2026-10-18T23:02:35.226Z",
   "tickets": [
     {
       "id": "Z2lkOi8vSm9iYmVyL1Zpc2l0LzIzNTc2MjY0NTI=",
@@ -21254,15 +21254,15 @@
       "reason": "Blocked entire (408) area code from main website"
     }
   ],
-  "zipPrCounter": 4,
-  "lastZipFilename": "app.tidyups.cleaning-PR1-2026-10-18-Morning-11-47AM.zip",
-  "lastZipCreatedAt": "2026-10-18T17:47:30.053Z",
+  "zipPrCounter": 7,
+  "lastZipFilename": "app.tidyups.cleaning-PR2-2026-10-18-Afternoon-02-47PM.zip",
+  "lastZipCreatedAt": "2026-10-18T20:47:39.719Z",
   "explicitReplaceSpamShield": true,
   "githubConfig": {
     "owner": "Ai-Builder6",
-    "repo": "APP.TIDYUPSCLEANING.COM-START-PR1",
-    "lastPushedAt": "2026-10-18T19:12:19.163Z",
-    "lastPushedPr": "PR1",
-    "lastPushedUrl": "https://github.com/Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR1"
+    "repo": "APP.TIDYUPSCLEANING.COM-START-PR2",
+    "lastPushedAt": "2026-10-18T23:02:35.074Z",
+    "lastPushedPr": "PR7",
+    "lastPushedUrl": "https://github.com/Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR2"
   }
 }
