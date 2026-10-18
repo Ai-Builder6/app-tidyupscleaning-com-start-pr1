@@ -281,8 +281,9 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
   });
   const [showTwoAddressCompare, setShowTwoAddressCompare] = useState<boolean>(true);
   const [scheduleHorizon, setScheduleHorizon] = useState<
-    'TODAY' | 'WEEK' | 'WEEKS_3_4' | 'MONTH' | 'WEEK_1' | 'WEEK_2' | 'WEEK_3' | 'WEEK_4' | 'ALL'
-  >('MONTH');
+    'TODAY' | 'TOMORROW' | 'CUSTOM_DATE' | 'WEEK' | 'WEEKS_3_4' | 'MONTH' | 'WEEK_1' | 'WEEK_2' | 'WEEK_3' | 'WEEK_4' | 'ALL'
+  >('CUSTOM_DATE');
+  const [selectedQuickMapDate, setSelectedQuickMapDate] = useState<string>(() => getEdmontonToday().dateString);
   const [isGeocodingMap, setIsGeocodingMap] = useState<boolean>(false);
   const [quickMapType, setQuickMapType] = useState<'roadmap' | 'hybrid'>('roadmap');
   const [quickMapZoom, setQuickMapZoom] = useState<number>(1.2);
@@ -637,9 +638,52 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     return { straightKm, drivingKm, driveMins };
   }, [targetCoords, secondCoords]);
 
-  // Filtered Scheduled Jobs for Today, Week Forward, Week 1-4, Last 2 Weeks (15th-31st), Full Month (All 4 Weeks), or All
+  // Helper to shift ISO date string by N days
+  const shiftQuickDate = useCallback((isoDate: string, deltaDays: number): string => {
+    const base = isoDate || liveToday.dateString;
+    const [y, m, d] = base.split('-').map(Number);
+    const dt = new Date(Date.UTC(y || 2026, (m || 1) - 1, (d || 1) + deltaDays));
+    return dt.toISOString().slice(0, 10);
+  }, [liveToday.dateString]);
+
+  // 14-day (This Week Mon-Sun + Next Week Mon-Sun) selector pills for Quick Map
+  const quickMapTwoWeekDays = useMemo(() => {
+    const todayStr = liveToday.dateString;
+    const [ty, tm, td] = todayStr.split('-').map(Number);
+    const todayUtc = new Date(Date.UTC(ty, tm - 1, td));
+    const dow = todayUtc.getUTCDay();
+    const diffToMon = dow === 0 ? -6 : 1 - dow;
+    const monUtc = new Date(Date.UTC(ty, tm - 1, td + diffToMon));
+
+    const days: {
+      iso: string;
+      dayShort: string;
+      dateLabel: string;
+      isToday: boolean;
+      jobCount: number;
+    }[] = [];
+
+    for (let i = 0; i < 14; i++) {
+      const dUtc = new Date(Date.UTC(monUtc.getUTCFullYear(), monUtc.getUTCMonth(), monUtc.getUTCDate() + i));
+      const iso = dUtc.toISOString().slice(0, 10);
+      const dayShort = dUtc.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+      const dateLabel = dUtc.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      const jobCount = (visits || []).filter((v: any) => String(v.startAt || '').slice(0, 10) === iso).length;
+      days.push({
+        iso,
+        dayShort,
+        dateLabel,
+        isToday: iso === todayStr,
+        jobCount,
+      });
+    }
+    return days;
+  }, [visits, liveToday.dateString]);
+
+  // Filtered Scheduled Jobs for Selected Date, Today, Tomorrow, Week Forward, Full Month, or All
   const filteredScheduleVisits = useMemo(() => {
-    const todayStr = liveToday.dateString; // e.g. '2026-10-14' (Wednesday, October 14, 2026)
+    const todayStr = liveToday.dateString; // e.g. '2026-10-14'
+    const tomorrowStr = shiftQuickDate(todayStr, 1);
     const currentMonthPrefix = `${liveToday.year}-${String(liveToday.month).padStart(2, '0')}`;
     const anchorMs = new Date(liveToday.year, liveToday.monthIndex, liveToday.day).getTime();
 
@@ -649,6 +693,8 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
         if (!datePart) return true;
         if (scheduleHorizon === 'ALL') return true;
         if (scheduleHorizon === 'TODAY') return datePart === todayStr;
+        if (scheduleHorizon === 'TOMORROW') return datePart === tomorrowStr;
+        if (scheduleHorizon === 'CUSTOM_DATE') return datePart === selectedQuickMapDate;
 
         const parts = datePart.split('-').map(Number);
         const jobDay = parts[2] || 1;
@@ -665,7 +711,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
         return true;
       })
       .sort((a: any, b: any) => String(a.startAt || '').localeCompare(String(b.startAt || '')));
-  }, [visits, scheduleHorizon, liveToday]);
+  }, [visits, scheduleHorizon, selectedQuickMapDate, liveToday, shiftQuickDate]);
 
   // Auto-apply loyalty discount
   const handleApplyLoyaltyDiscount = (percent: number) => {
@@ -2174,21 +2220,65 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Schedule Horizon Filter Buttons: Today, 7d Forward, Last 2 Weeks, Full Month (All 4 Weeks), All */}
+            {/* Any-Date Picker Input */}
+            <div className="flex items-center gap-1 bg-[#191d2c] p-1 rounded-xl border border-purple-500/40">
+              <button
+                type="button"
+                onClick={() => {
+                  const next = shiftQuickDate(selectedQuickMapDate, -1);
+                  setSelectedQuickMapDate(next);
+                  setScheduleHorizon('CUSTOM_DATE');
+                }}
+                className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-black text-white cursor-pointer"
+                title="Previous Day"
+              >
+                &larr;
+              </button>
+              <input
+                type="date"
+                value={selectedQuickMapDate}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    setSelectedQuickMapDate(e.target.value);
+                    setScheduleHorizon('CUSTOM_DATE');
+                  }
+                }}
+                className="bg-transparent text-white text-xs font-mono font-black px-2 py-0.5 focus:outline-none cursor-pointer"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const next = shiftQuickDate(selectedQuickMapDate, 1);
+                  setSelectedQuickMapDate(next);
+                  setScheduleHorizon('CUSTOM_DATE');
+                }}
+                className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-black text-white cursor-pointer"
+                title="Next Day"
+              >
+                &rarr;
+              </button>
+            </div>
+
+            {/* Schedule Horizon Filter Buttons: Selected Date, Today, Tomorrow, 7d Forward, Full Month, All */}
             <div className="flex items-center bg-[#191d2c] p-1 rounded-xl border border-slate-700/80 gap-1 flex-wrap">
               {(
                 [
+                  { id: 'CUSTOM_DATE', label: `Selected Day (${selectedQuickMapDate})` },
                   { id: 'TODAY', label: `Today (${liveToday.formattedShort})` },
+                  { id: 'TOMORROW', label: 'Tomorrow' },
                   { id: 'WEEK', label: '7 Days Forward' },
-                  { id: 'WEEKS_3_4', label: 'Last 2 Weeks (15th–31st)' },
-                  { id: 'MONTH', label: 'Full Month (All 4 Weeks)' },
+                  { id: 'MONTH', label: 'Full Month' },
                   { id: 'ALL', label: 'All Scheduled' },
                 ] as const
               ).map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
-                  onClick={() => setScheduleHorizon(tab.id)}
+                  onClick={() => {
+                    if (tab.id === 'TODAY') setSelectedQuickMapDate(liveToday.dateString);
+                    if (tab.id === 'TOMORROW') setSelectedQuickMapDate(shiftQuickDate(liveToday.dateString, 1));
+                    setScheduleHorizon(tab.id);
+                  }}
                   className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
                     scheduleHorizon === tab.id
                       ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-sm'
@@ -2232,6 +2322,55 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
               </button>
             )}
           </div>
+        </div>
+
+        {/* 14-Day (This Week Mon-Sun + Next Week Mon-Sun) Quick Day-of-Week Selector Strip */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          {quickMapTwoWeekDays.map((d, idx) => {
+            const isSel = scheduleHorizon === 'CUSTOM_DATE' && selectedQuickMapDate === d.iso;
+            return (
+              <React.Fragment key={d.iso}>
+                {idx === 0 && (
+                  <span className="text-[9px] font-black uppercase text-purple-400 pr-1 shrink-0">This Wk:</span>
+                )}
+                {idx === 7 && (
+                  <span className="text-[9px] font-black uppercase text-pink-400 pl-2 pr-1 border-l border-slate-700 shrink-0">
+                    Next Wk:
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedQuickMapDate(d.iso);
+                    setScheduleHorizon('CUSTOM_DATE');
+                  }}
+                  className={`px-2.5 py-1 rounded-xl text-left shrink-0 cursor-pointer transition-all border flex items-center gap-1.5 ${
+                    isSel
+                      ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white border-pink-400 font-black shadow-md'
+                      : d.jobCount > 0
+                      ? 'bg-[#191d2c] hover:bg-slate-800 text-white border-slate-700'
+                      : 'bg-[#141724] hover:bg-slate-800 text-slate-400 border-slate-800'
+                  }`}
+                >
+                  <div>
+                    <div className="text-[10px] font-black leading-none">{d.dayShort}</div>
+                    <div className="text-[9px] font-mono opacity-80">{d.dateLabel}</div>
+                  </div>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono font-black ${
+                      isSel
+                        ? 'bg-white text-purple-900'
+                        : d.jobCount > 0
+                        ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
+                        : 'bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    {d.jobCount}
+                  </span>
+                </button>
+              </React.Fragment>
+            );
+          })}
         </div>
 
         {/* Two-Address Picker Bar (Address A ↔ Address B Distance & Drive Time Calculator) */}
@@ -2475,8 +2614,8 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                   </div>
                 )}
 
-                {/* Top 6 Closest Cleaners Pins */}
-                {closestCleaners.slice(0, 6).map((c) => {
+                {/* All 15 Cleaner Home Hubs & Cleaners Pins */}
+                {closestCleaners.map((c) => {
                   const pos = projectMapCoord(c.lat, c.lng);
                   const isAssigned = assignedCleaners.includes(c.tech.name);
                   return (

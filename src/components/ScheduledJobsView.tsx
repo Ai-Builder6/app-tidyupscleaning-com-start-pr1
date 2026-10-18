@@ -55,10 +55,12 @@ import {
   getCleanerInitials,
   getEdmontonToday,
   toEdmontonIsoString,
+  formatDateTime,
   JOBBER_TEAM_MEMBERS 
 } from '../data/jobberCalendarData';
 import { JobberQuote, JobberInvoice } from '../services/jobberSyncModules';
 import { JobVisitModal } from './JobVisitModal';
+import { forwardGeocode } from '../services/geocodingService';
 
 export type { ScheduledJobItem, UnscheduledJobItem };
 
@@ -87,6 +89,7 @@ interface ScheduledJobsViewProps {
   onNavigateToQuotes?: () => void;
   onNavigateToInvoices?: () => void;
   onOpenJobberSync?: () => void;
+  onInspectDateOnMap?: (dateString: string) => void;
   initialTab?: 'CALENDAR' | 'LIST' | 'UNSCHEDULED';
 }
 
@@ -177,6 +180,7 @@ export const ScheduledJobsView: React.FC<ScheduledJobsViewProps> = ({
   onNavigateToQuotes,
   onNavigateToInvoices,
   onOpenJobberSync,
+  onInspectDateOnMap,
   initialTab = 'CALENDAR',
 }) => {
   const [activeTab, setActiveTab] = useState<'CALENDAR' | 'LIST' | 'UNSCHEDULED' | 'QUOTES' | 'INVOICES'>(initialTab);
@@ -205,8 +209,12 @@ export const ScheduledJobsView: React.FC<ScheduledJobsViewProps> = ({
   // Focused date for schedule navigation (Default: Live Edmonton Today, e.g. Wednesday, October 14, 2026)
   const [selectedDate, setSelectedDate] = useState<Date>(() => getEdmontonToday().date);
 
-  // Day sub-view mode: 'TIMELINE' or 'LANES' (cleaner grid)
-  const [daySubView, setDaySubView] = useState<'TIMELINE' | 'LANES'>('TIMELINE');
+  // Day sub-view mode: 'TIMELINE', 'LANES' (cleaner grid), or 'MAP_RADAR' (Interactive Day Map + Cleaner Proximity)
+  const [daySubView, setDaySubView] = useState<'TIMELINE' | 'LANES' | 'MAP_RADAR'>('TIMELINE');
+  const [dayMapSearchAddress, setDayMapSearchAddress] = useState<string>('10405 Jasper Ave NW, Edmonton, AB');
+  const [dayMapTargetCoords, setDayMapTargetCoords] = useState<{ lat: number; lng: number }>({ lat: 53.5412, lng: -113.4988 });
+  const [dayMapLayerFilter, setDayMapLayerFilter] = useState<'ALL' | 'JOBS_AND_CLEANERS' | 'HUBS_ONLY'>('ALL');
+  const [isDayMapGeocoding, setIsDayMapGeocoding] = useState<boolean>(false);
 
   // Item type filter on schedule: Defaults strictly to 'JOBS' (Only Approved Scheduled Cleaner Visits)
   const [itemTypeFilter, setItemTypeFilter] = useState<'ALL' | 'JOBS' | 'QUOTES' | 'INVOICES'>('JOBS');
@@ -946,6 +954,50 @@ export const ScheduledJobsView: React.FC<ScheduledJobsViewProps> = ({
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
+
+            {/* Direct Any-Date Picker Input */}
+            <input
+              type="date"
+              value={singleDayInfo.dateString}
+              onChange={(e) => {
+                if (!e.target.value) return;
+                const [y, m, d] = e.target.value.split('-').map(Number);
+                if (y && m && d) {
+                  setSelectedDate(new Date(y, m - 1, d, 12, 0, 0));
+                }
+              }}
+              className="px-2.5 py-1 rounded-xl border border-purple-300 bg-purple-50/60 text-xs font-mono font-black text-purple-950 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500"
+              title="Pick any date to inspect on the schedule or map"
+            />
+
+            <button
+              type="button"
+              onClick={() => {
+                setCalendarViewMode('DAY');
+                setDaySubView('MAP_RADAR');
+              }}
+              className={`px-2.5 py-1 rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer transition-all border ${
+                calendarViewMode === 'DAY' && daySubView === 'MAP_RADAR'
+                  ? 'bg-purple-600 text-white border-purple-700 shadow-xs'
+                  : 'bg-sky-50 hover:bg-sky-100 text-sky-900 border-sky-300'
+              }`}
+              title="Open Interactive Day Map & Cleaner Distance Radar for this selected date"
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              <span>Day Map ({singleDayInfo.jobsOnDate.length})</span>
+            </button>
+
+            {onInspectDateOnMap && (
+              <button
+                type="button"
+                onClick={() => onInspectDateOnMap(singleDayInfo.dateString)}
+                className="px-2.5 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-black flex items-center gap-1 cursor-pointer shadow-2xs"
+                title={`Open ${singleDayInfo.dateString} on the Full Live Dispatch Map`}
+              >
+                <Navigation className="w-3.5 h-3.5 text-amber-400" />
+                <span>Inspect Date on Dispatch Map</span>
+              </button>
+            )}
 
             <div className="text-sm font-extrabold text-slate-900 px-1 flex items-center gap-2">
               <span>{currentPeriodLabel}</span>
@@ -2023,7 +2075,7 @@ export const ScheduledJobsView: React.FC<ScheduledJobsViewProps> = ({
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs font-bold">
                       <button
                         onClick={() => setDaySubView('TIMELINE')}
@@ -2041,7 +2093,29 @@ export const ScheduledJobsView: React.FC<ScheduledJobsViewProps> = ({
                       >
                         Cleaner Lanes Grid
                       </button>
+                      <button
+                        onClick={() => setDaySubView('MAP_RADAR')}
+                        className={`px-3 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                          daySubView === 'MAP_RADAR'
+                            ? 'bg-purple-600 text-white shadow-2xs font-black'
+                            : 'text-purple-700 hover:bg-purple-50 font-bold'
+                        }`}
+                      >
+                        <MapPin className="w-3.5 h-3.5" />
+                        <span>Day Map &amp; Closest Cleaners</span>
+                      </button>
                     </div>
+
+                    {onInspectDateOnMap && (
+                      <button
+                        type="button"
+                        onClick={() => onInspectDateOnMap(singleDayInfo.dateString)}
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                      >
+                        <Navigation className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Open {singleDayInfo.dateString} on Full Dispatch Map</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -2341,6 +2415,349 @@ export const ScheduledJobsView: React.FC<ScheduledJobsViewProps> = ({
                     })}
                   </div>
                 )}
+
+                {/* Day Sub-view: Interactive Day Map & Cleaner Distance Radar */}
+                {daySubView === 'MAP_RADAR' && (() => {
+                  const DAY_BOUNDS = { minLat: 53.35, maxLat: 53.66, minLng: -113.70, maxLng: -113.30 };
+                  const projectDayCoord = (lat: number, lng: number) => ({
+                    x: Math.max(4, Math.min(96, ((lng - DAY_BOUNDS.minLng) / (DAY_BOUNDS.maxLng - DAY_BOUNDS.minLng)) * 100)),
+                    y: Math.max(4, Math.min(96, ((DAY_BOUNDS.maxLat - lat) / (DAY_BOUNDS.maxLat - DAY_BOUNDS.minLat)) * 100)),
+                  });
+                  const targetPos = projectDayCoord(dayMapTargetCoords.lat, dayMapTargetCoords.lng);
+
+                  // Rank all cleaners by distance to dayMapTargetCoords (comparing both Home Hub and any job they have on this day)
+                  const rankedDayCleaners = technicians
+                    .map((tech) => {
+                      const hubLat = tech.depotLocation?.lat || tech.currentLocation.lat;
+                      const hubLng = tech.depotLocation?.lng || tech.currentLocation.lng;
+                      const hubAddr = tech.depotLocation?.address || tech.homeAddress || tech.currentLocation.address;
+                      const hubTravel = calculateEdmontonTravel(hubLat, hubLng, dayMapTargetCoords.lat, dayMapTargetCoords.lng);
+
+                      const techFirstName = tech.name.split(' ')[0].toLowerCase();
+                      const jobsForTechToday = singleDayInfo.jobsOnDate.filter((j) =>
+                        j.assignedCleaners?.some(
+                          (c) => c.toLowerCase().includes(techFirstName) || c.toLowerCase().includes(tech.name.toLowerCase())
+                        )
+                      );
+                      const firstJob = jobsForTechToday[0];
+                      const jobTravel = firstJob
+                        ? calculateEdmontonTravel(firstJob.lat, firstJob.lng, dayMapTargetCoords.lat, dayMapTargetCoords.lng)
+                        : null;
+
+                      const bestDistanceKm = jobTravel
+                        ? Math.min(hubTravel.distanceKm, jobTravel.distanceKm)
+                        : hubTravel.distanceKm;
+                      const bestDriveMin = jobTravel
+                        ? Math.min(hubTravel.driveMinutes, jobTravel.driveMinutes)
+                        : hubTravel.driveMinutes;
+
+                      return {
+                        tech,
+                        hubLat,
+                        hubLng,
+                        hubAddr,
+                        hubTravel,
+                        jobsForTechToday,
+                        firstJob,
+                        jobTravel,
+                        bestDistanceKm,
+                        bestDriveMin,
+                      };
+                    })
+                    .sort((a, b) => a.bestDistanceKm - b.bestDistanceKm);
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Address Search & Layer Filter Bar for Selected Day */}
+                      <div className="p-3.5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-purple-950 text-white border border-purple-700/40 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                        <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-2">
+                          <span className="text-xs font-black uppercase tracking-wider text-purple-300 shrink-0 flex items-center gap-1.5">
+                            <Search className="w-3.5 h-3.5 text-pink-400" />
+                            <span>Check Distance From Address:</span>
+                          </span>
+                          <div className="flex-1 flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={dayMapSearchAddress}
+                              onChange={(e) => setDayMapSearchAddress(e.target.value)}
+                              onKeyDown={async (e) => {
+                                if (e.key === 'Enter' && dayMapSearchAddress.trim()) {
+                                  setIsDayMapGeocoding(true);
+                                  try {
+                                    const g = await forwardGeocode(dayMapSearchAddress.trim());
+                                    setDayMapTargetCoords({ lat: g.lat, lng: g.lng });
+                                    setDayMapSearchAddress(g.formattedAddress || dayMapSearchAddress);
+                                  } finally {
+                                    setIsDayMapGeocoding(false);
+                                  }
+                                }
+                              }}
+                              placeholder="Type any Edmonton street address or postal code & press Find..."
+                              className="flex-1 px-3 py-1.5 rounded-xl bg-white text-slate-900 text-xs font-bold border border-purple-300 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!dayMapSearchAddress.trim()) return;
+                                setIsDayMapGeocoding(true);
+                                try {
+                                  const g = await forwardGeocode(dayMapSearchAddress.trim());
+                                  setDayMapTargetCoords({ lat: g.lat, lng: g.lng });
+                                  setDayMapSearchAddress(g.formattedAddress || dayMapSearchAddress);
+                                } finally {
+                                  setIsDayMapGeocoding(false);
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-black cursor-pointer shrink-0"
+                            >
+                              {isDayMapGeocoding ? 'Locating...' : 'Find Closest Cleaners'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {(
+                            [
+                              { id: 'ALL', label: `All Pins (Hubs + ${singleDayInfo.jobsOnDate.length} Jobs)` },
+                              { id: 'JOBS_AND_CLEANERS', label: `Day's Jobs (${singleDayInfo.jobsOnDate.length})` },
+                              { id: 'HUBS_ONLY', label: `Cleaner Hubs (${technicians.length})` },
+                            ] as const
+                          ).map((mode) => (
+                            <button
+                              key={mode.id}
+                              type="button"
+                              onClick={() => setDayMapLayerFilter(mode.id)}
+                              className={`px-2.5 py-1 rounded-xl text-[11px] font-black cursor-pointer transition-all ${
+                                dayMapLayerFilter === mode.id
+                                  ? 'bg-amber-400 text-slate-950 shadow-2xs'
+                                  : 'bg-white/10 hover:bg-white/20 text-white'
+                              }`}
+                            >
+                              {mode.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Map + Ranked Cleaners & Day Jobs Split Grid */}
+                      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+                        {/* Left 7 Cols: Interactive Multi-Pin Edmonton Map for Selected Day */}
+                        <div className="xl:col-span-7 h-[460px] rounded-2xl overflow-hidden border-2 border-purple-200 relative bg-slate-200 shadow-inner">
+                          {/* Georeferenced Edmonton Street Map Tiles */}
+                          <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
+                            {[665, 666, 667, 668, 669, 670].map((ty) =>
+                              [376, 377, 378, 379, 380].map((tx) => {
+                                const z = 11;
+                                const nTiles = Math.pow(2, z);
+                                const tileMinLng = (tx / nTiles) * 360 - 180;
+                                const tileMaxLng = ((tx + 1) / nTiles) * 360 - 180;
+                                const tileMaxLat = (180 / Math.PI) * Math.atan(Math.sinh(Math.PI * (1 - (2 * ty) / nTiles)));
+                                const tileMinLat = (180 / Math.PI) * Math.atan(Math.sinh(Math.PI * (1 - (2 * (ty + 1)) / nTiles)));
+
+                                const leftPct = ((tileMinLng - DAY_BOUNDS.minLng) / (DAY_BOUNDS.maxLng - DAY_BOUNDS.minLng)) * 100;
+                                const rightPct = ((tileMaxLng - DAY_BOUNDS.minLng) / (DAY_BOUNDS.maxLng - DAY_BOUNDS.minLng)) * 100;
+                                const topPct = ((DAY_BOUNDS.maxLat - tileMaxLat) / (DAY_BOUNDS.maxLat - DAY_BOUNDS.minLat)) * 100;
+                                const bottomPct = ((DAY_BOUNDS.maxLat - tileMinLat) / (DAY_BOUNDS.maxLat - DAY_BOUNDS.minLat)) * 100;
+
+                                return (
+                                  <img
+                                    key={`day-tile-${tx}-${ty}`}
+                                    src={`https://basemaps.cartocdn.com/rastertiles/voyager/${z}/${tx}/${ty}@2x.png`}
+                                    alt=""
+                                    draggable={false}
+                                    style={{
+                                      position: 'absolute',
+                                      left: `${leftPct}%`,
+                                      top: `${topPct}%`,
+                                      width: `${rightPct - leftPct + 0.08}%`,
+                                      height: `${bottomPct - topPct + 0.08}%`,
+                                      maxWidth: 'none',
+                                    }}
+                                    className="select-none pointer-events-none object-fill"
+                                  />
+                                );
+                              })
+                            )}
+                          </div>
+
+                          {/* SVG Radar Lines from Top 3 Closest Cleaners to Target Address */}
+                          <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                            {rankedDayCleaners.slice(0, 3).map((rc, idx) => {
+                              const originLat = rc.firstJob ? rc.firstJob.lat : rc.hubLat;
+                              const originLng = rc.firstJob ? rc.firstJob.lng : rc.hubLng;
+                              const cPos = projectDayCoord(originLat, originLng);
+                              return (
+                                <path
+                                  key={`day-line-${rc.tech.id}`}
+                                  d={`M ${cPos.x} ${cPos.y} L ${targetPos.x} ${targetPos.y}`}
+                                  fill="none"
+                                  stroke={idx === 0 ? '#10B981' : '#9333EA'}
+                                  strokeWidth={idx === 0 ? '0.7' : '0.45'}
+                                  strokeDasharray={idx === 0 ? undefined : '1.2,0.8'}
+                                />
+                              );
+                            })}
+                          </svg>
+
+                          {/* Cleaner Home Hub Pins */}
+                          {(dayMapLayerFilter === 'ALL' || dayMapLayerFilter === 'HUBS_ONLY') &&
+                            rankedDayCleaners.map((rc, idx) => {
+                              const pos = projectDayCoord(rc.hubLat, rc.hubLng);
+                              return (
+                                <div
+                                  key={`day-hub-${rc.tech.id}`}
+                                  onClick={() => {
+                                    setDayMapSearchAddress(rc.hubAddr);
+                                    setDayMapTargetCoords({ lat: rc.hubLat, lng: rc.hubLng });
+                                  }}
+                                  style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                                  className="absolute -translate-x-1/2 -translate-y-1/2 z-15 flex flex-col items-center cursor-pointer group"
+                                  title={`${rc.tech.name} Hub: ${rc.hubAddr} (${rc.hubTravel.distanceKm} km)`}
+                                >
+                                  <div className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow border whitespace-nowrap mb-0.5 flex items-center gap-1 ${
+                                    idx === 0 ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-white/95 text-slate-900 border-slate-300'
+                                  }`}>
+                                    <span>🏠 {rc.tech.name.split(' ')[0]}</span>
+                                    <span className="font-mono text-[8px] px-1 rounded bg-purple-100 text-purple-800">
+                                      {rc.hubTravel.distanceKm}km
+                                    </span>
+                                  </div>
+                                  <div
+                                    className="w-5 h-5 rounded-lg border-2 border-white shadow-md flex items-center justify-center text-white text-[9px] font-black"
+                                    style={{ backgroundColor: rc.tech.color || '#6366F1' }}
+                                  >
+                                    H
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                          {/* Scheduled Job Pins on Selected Day */}
+                          {(dayMapLayerFilter === 'ALL' || dayMapLayerFilter === 'JOBS_AND_CLEANERS') &&
+                            singleDayInfo.jobsOnDate.map((job, jIdx) => {
+                              const pos = projectDayCoord(job.lat, job.lng);
+                              const primaryCleaner = job.assignedCleaners[0] || 'Unassigned';
+                              const cColor = getCleanerColor(primaryCleaner);
+                              return (
+                                <div
+                                  key={`day-job-${job.id}`}
+                                  onClick={() => {
+                                    setSelectedItem({ type: 'JOB', id: job.id });
+                                    setSelectedJobId(job.id);
+                                    setDayMapSearchAddress(job.serviceAddress);
+                                    setDayMapTargetCoords({ lat: job.lat, lng: job.lng });
+                                  }}
+                                  style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                                  className="absolute -translate-x-1/2 -translate-y-1/2 z-25 flex flex-col items-center cursor-pointer group"
+                                  title={`Click to inspect ${job.clientName} (${job.serviceAddress}) & see closest cleaners`}
+                                >
+                                  <div className="px-2 py-0.5 rounded-lg bg-slate-900/95 text-white border border-amber-400 text-[9.5px] font-extrabold shadow-xl whitespace-nowrap mb-0.5 flex items-center gap-1">
+                                    <span className="text-amber-300 font-mono">{formatDateTime(job.startAt).timeStr}</span>
+                                    <span>{job.clientName}</span>
+                                    <span className="px-1 rounded text-[8px]" style={{ backgroundColor: cColor }}>
+                                      {primaryCleaner.split(' ')[0]}
+                                    </span>
+                                  </div>
+                                  <div
+                                    className="w-6 h-6 rounded-lg border-2 border-amber-300 shadow-xl flex items-center justify-center text-white font-black text-[9px]"
+                                    style={{ backgroundColor: cColor }}
+                                  >
+                                    #{jIdx + 1}
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                          {/* Searched Target Address Pin */}
+                          <div
+                            style={{ left: `${targetPos.x}%`, top: `${targetPos.y}%` }}
+                            className="absolute -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center pointer-events-none"
+                          >
+                            <div className="px-2.5 py-0.5 rounded-lg bg-pink-600 text-white border border-white text-[10px] font-black shadow-xl whitespace-nowrap mb-1">
+                              🎯 TARGET: {dayMapSearchAddress.split(',')[0]}
+                            </div>
+                            <div className="w-7 h-7 rounded-full bg-pink-600 border-2 border-white shadow-2xl flex items-center justify-center text-white font-black text-xs relative">
+                              <span>★</span>
+                              <span className="absolute -inset-1.5 rounded-full border-2 border-pink-400 animate-ping opacity-80" />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right 5 Cols: Closest Cleaners on Selected Day + Scheduled Visits List */}
+                        <div className="xl:col-span-5 flex flex-col gap-3 max-h-[460px] overflow-y-auto pr-1">
+                          <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                                Closest Cleaners to Target ({singleDayInfo.dateString})
+                              </h4>
+                              <span className="text-[10px] font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                Top #1: {rankedDayCleaners[0]?.tech.name} ({rankedDayCleaners[0]?.bestDistanceKm} km)
+                              </span>
+                            </div>
+
+                            <div className="space-y-2">
+                              {rankedDayCleaners.map((rc, idx) => (
+                                <div
+                                  key={rc.tech.id}
+                                  onClick={() => {
+                                    setDayMapSearchAddress(rc.firstJob ? rc.firstJob.serviceAddress : rc.hubAddr);
+                                    setDayMapTargetCoords(
+                                      rc.firstJob
+                                        ? { lat: rc.firstJob.lat, lng: rc.firstJob.lng }
+                                        : { lat: rc.hubLat, lng: rc.hubLng }
+                                    );
+                                  }}
+                                  className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
+                                    idx === 0
+                                      ? 'bg-emerald-50/90 border-emerald-300 shadow-2xs'
+                                      : 'bg-white hover:bg-slate-50 border-slate-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span
+                                        className="w-6 h-6 rounded-lg text-white font-black text-[10px] flex items-center justify-center shrink-0"
+                                        style={{ backgroundColor: rc.tech.color || '#6366F1' }}
+                                      >
+                                        #{idx + 1}
+                                      </span>
+                                      <div className="min-w-0">
+                                        <div className="font-black text-slate-900 truncate flex items-center gap-1.5">
+                                          <span>{rc.tech.name}</span>
+                                          {rc.jobsForTechToday.length > 0 && (
+                                            <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 text-[9px] font-bold">
+                                              {rc.jobsForTechToday.length} job{rc.jobsForTechToday.length > 1 ? 's' : ''} this day
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 truncate">
+                                          🏠 Hub: {rc.hubAddr} ({rc.hubTravel.distanceKm} km)
+                                        </div>
+                                        {rc.firstJob && rc.jobTravel && (
+                                          <div className="text-[10px] text-purple-700 font-bold truncate">
+                                            📅 Day&apos;s Job: {rc.firstJob.clientName} — {rc.firstJob.serviceAddress} ({rc.jobTravel.distanceKm} km)
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <span className="font-mono font-black text-sm text-emerald-700 block">
+                                        {rc.bestDistanceKm} km
+                                      </span>
+                                      <span className="text-[10px] font-mono text-slate-500">
+                                        ~{rc.bestDriveMin} min
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}

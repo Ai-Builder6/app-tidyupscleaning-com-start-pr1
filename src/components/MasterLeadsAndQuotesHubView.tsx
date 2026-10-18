@@ -34,10 +34,12 @@ import {
 import { AdLeadItem } from '../types/lead';
 import { Technician, ServiceTicket } from '../types/dispatch';
 import { ScheduledJobItem } from './ScheduledJobsView';
+import { getEdmontonToday, getCleanerColor } from '../data/jobberCalendarData';
 import { JobberQuote, JobberInvoice, extractJobberNumericId } from '../services/jobberSyncModules';
 import { ClientRecord } from '../types/client';
 import { LEADS_SPREADSHEET_ID } from '../services/leadSheetSync';
 import { syncLeadsToLiveGoogleSheetInDrive } from '../services/googleDriveBackupService';
+import { forwardGeocode } from '../services/geocodingService';
 
 export type MasterHubFocusBlock = 'ALL' | 'PASTE_TABLE' | 'MASTER_TABLE' | 'SCHEDULE_SEARCH' | 'QUICK_MAPS';
 
@@ -333,8 +335,12 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
   // Block 3: Schedule & Search states
   const [scheduleSearchQuery, setScheduleSearchQuery] = useState('');
   const [selectedCleanerFilter, setSelectedCleanerFilter] = useState<string>('ALL');
-  const [selectedDateFilter, setSelectedDateFilter] = useState<string>('');
-  const [radarAddressInput, setRadarAddressInput] = useState<string>('7112 49 Street NW, Edmonton, AB');
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string>(() => getEdmontonToday().dateString);
+  const [radarAddressInput, setRadarAddressInput] = useState<string>('10405 Jasper Ave NW, Edmonton, AB');
+  const [radarTargetCoords, setRadarTargetCoords] = useState<{ lat: number; lng: number }>(() =>
+    estimateAddressCoords('10405 Jasper Ave NW, Edmonton, AB')
+  );
+  const [isQuickMapGeocoding, setIsQuickMapGeocoding] = useState<boolean>(false);
 
   // Block 4: Quick Maps states
   const [pinnedMapItem, setPinnedMapItem] = useState<{
@@ -345,9 +351,61 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
     amount?: number;
     lat: number;
     lng: number;
-    type: 'LEAD' | 'QUOTE' | 'VISIT';
+    type: 'LEAD' | 'QUOTE' | 'VISIT' | 'HUB';
   } | null>(null);
-  const [quickMapFilter, setQuickMapFilter] = useState<'ALL' | 'LEADS_QUOTES' | 'VISITS' | 'CLEANERS'>('ALL');
+  const [quickMapFilter, setQuickMapFilter] = useState<'ALL' | 'CLEANERS' | 'HUBS_AND_CLEANERS' | 'VISITS' | 'LEADS_QUOTES'>('ALL');
+  const [quickMapSurfaceMode, setQuickMapSurfaceMode] = useState<'RADAR_MAP' | 'GOOGLE_EMBED'>('RADAR_MAP');
+  const [quickMapInspectorTab, setQuickMapInspectorTab] = useState<'CLEANERS_AND_HUBS' | 'DAY_SCHEDULE' | 'LEADS_QUOTES'>('CLEANERS_AND_HUBS');
+
+  // Helper to shift ISO date string by N days
+  const shiftQuickMapDate = (isoDate: string, deltaDays: number): string => {
+    const base = isoDate || getEdmontonToday().dateString;
+    const [y, m, d] = base.split('-').map(Number);
+    const dt = new Date(Date.UTC(y || 2026, (m || 1) - 1, (d || 1) + deltaDays));
+    return dt.toISOString().slice(0, 10);
+  };
+
+  // Build 14-day (This Week Mon-Sun + Next Week Mon-Sun) strip for Quick Map & Schedule
+  const quickMapTwoWeekDays = useMemo(() => {
+    const todayStr = getEdmontonToday().dateString;
+    const [ty, tm, td] = todayStr.split('-').map(Number);
+    const todayUtc = new Date(Date.UTC(ty, tm - 1, td));
+    const dow = todayUtc.getUTCDay();
+    const diffToMon = dow === 0 ? -6 : 1 - dow;
+    const monUtc = new Date(Date.UTC(ty, tm - 1, td + diffToMon));
+
+    const list: {
+      iso: string;
+      dayShort: string;
+      dateLabel: string;
+      isToday: boolean;
+      jobCount: number;
+    }[] = [];
+
+    for (let i = 0; i < 14; i++) {
+      const dUtc = new Date(Date.UTC(monUtc.getUTCFullYear(), monUtc.getUTCMonth(), monUtc.getUTCDate() + i));
+      const iso = dUtc.toISOString().slice(0, 10);
+      const dayShort = dUtc.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+      const dateLabel = dUtc.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      const jobCount = scheduledJobs.filter((j) => String(j.startAt || '').slice(0, 10) === iso).length;
+      list.push({
+        iso,
+        dayShort,
+        dateLabel,
+        isToday: iso === todayStr,
+        jobCount,
+      });
+    }
+    return list;
+  }, [scheduledJobs]);
+
+  // Scheduled jobs on the selected Quick Map / Schedule date
+  const quickMapDateJobs = useMemo(() => {
+    if (!selectedDateFilter) return scheduledJobs.slice(0, 20);
+    return scheduledJobs
+      .filter((j) => String(j.startAt || '').slice(0, 10) === selectedDateFilter)
+      .sort((a, b) => String(a.startAt || '').localeCompare(String(b.startAt || '')));
+  }, [scheduledJobs, selectedDateFilter]);
 
   // Load connected Google Sheet URL
   useEffect(() => {
@@ -576,27 +634,69 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
       .slice(0, 25);
   }, [scheduledJobs, scheduleSearchQuery, selectedCleanerFilter, selectedDateFilter]);
 
-  // Closest Cleaners to the searched/pinned address
+  // Closest Cleaners & Hubs to the searched/pinned address (including each cleaner's scheduled jobs on selectedDateFilter!)
   const rankedCleanersByDistance = useMemo(() => {
     const targetAddr = pinnedMapItem?.address || radarAddressInput || 'Edmonton, AB';
     const targetCoords = pinnedMapItem
       ? { lat: pinnedMapItem.lat, lng: pinnedMapItem.lng }
-      : estimateAddressCoords(targetAddr);
+      : radarTargetCoords || estimateAddressCoords(targetAddr);
 
     return technicians
       .map((tech) => {
-        const tLat = tech.depotLocation?.lat || tech.currentLocation?.lat || 53.5412;
-        const tLng = tech.depotLocation?.lng || tech.currentLocation?.lng || -113.4988;
-        const distKm = calcDistanceKm(targetCoords.lat, targetCoords.lng, tLat, tLng);
-        const estMinutes = Math.max(6, Math.round(distKm * 1.65));
+        const hubLat = tech.depotLocation?.lat || tech.currentLocation?.lat || 53.5412;
+        const hubLng = tech.depotLocation?.lng || tech.currentLocation?.lng || -113.4988;
+        const hubAddr = tech.depotLocation?.address || tech.homeAddress || tech.currentLocation?.address || 'Edmonton Hub';
+        const hubDistKm = calcDistanceKm(targetCoords.lat, targetCoords.lng, hubLat, hubLng);
+        const hubEstMinutes = Math.max(6, Math.round(hubDistKm * 1.65));
+
+        const techFirst = tech.name.split(' ')[0].toLowerCase();
+        const jobsOnSelectedDay = quickMapDateJobs.filter((j) =>
+          (j.assignedCleaners || []).some(
+            (c) => c.toLowerCase().includes(techFirst) || c.toLowerCase().includes(tech.name.toLowerCase())
+          )
+        );
+        const activeJobOnDay = jobsOnSelectedDay[0];
+        const jobDistKm = activeJobOnDay
+          ? calcDistanceKm(targetCoords.lat, targetCoords.lng, activeJobOnDay.lat, activeJobOnDay.lng)
+          : null;
+        const jobEstMinutes = jobDistKm !== null ? Math.max(6, Math.round(jobDistKm * 1.65)) : null;
+
+        const distKm = jobDistKm !== null ? Math.min(hubDistKm, jobDistKm) : hubDistKm;
+        const estMinutes = jobEstMinutes !== null ? Math.min(hubEstMinutes, jobEstMinutes) : hubEstMinutes;
+
         return {
           tech,
+          hubLat,
+          hubLng,
+          hubAddr,
+          hubDistKm,
+          hubEstMinutes,
+          jobsOnSelectedDay,
+          activeJobOnDay,
+          jobDistKm,
+          jobEstMinutes,
           distKm,
           estMinutes,
         };
       })
       .sort((a, b) => a.distKm - b.distKm);
-  }, [technicians, pinnedMapItem, radarAddressInput]);
+  }, [technicians, pinnedMapItem, radarAddressInput, radarTargetCoords, quickMapDateJobs]);
+
+  const handleGeocodeQuickMapAddress = async (addrToSearch?: string) => {
+    const query = (addrToSearch ?? radarAddressInput).trim();
+    if (!query) return;
+    setPinnedMapItem(null);
+    setIsQuickMapGeocoding(true);
+    try {
+      const geo = await forwardGeocode(query);
+      setRadarTargetCoords({ lat: geo.lat, lng: geo.lng });
+      if (geo.formattedAddress) setRadarAddressInput(geo.formattedAddress);
+    } catch {
+      setRadarTargetCoords(estimateAddressCoords(query));
+    } finally {
+      setIsQuickMapGeocoding(false);
+    }
+  };
 
   const handlePinItemOnQuickMap = (item: {
     title: string;
@@ -606,7 +706,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
     amount?: number;
     lat?: number;
     lng?: number;
-    type: 'LEAD' | 'QUOTE' | 'VISIT';
+    type: 'LEAD' | 'QUOTE' | 'VISIT' | 'HUB';
   }) => {
     const coords =
       item.lat && item.lng ? { lat: item.lat, lng: item.lng } : estimateAddressCoords(item.address);
@@ -616,6 +716,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
       lng: coords.lng,
     });
     setRadarAddressInput(item.address);
+    setRadarTargetCoords(coords);
     if (quickMapsBlockRef.current) {
       quickMapsBlockRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
@@ -2108,7 +2209,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
           </section>
         )}
 
-        {/* BLOCK 4: THE QUICK MAPS */}
+        {/* BLOCK 4: THE QUICK MAPS (Interactive Address Radar + Cleaner Hubs + Day-of-Week Schedule Map) */}
         {(focusBlock === 'ALL' || focusBlock === 'QUICK_MAPS') && (
           <section
             ref={quickMapsBlockRef}
@@ -2124,36 +2225,217 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                 </div>
                 <div>
                   <h2 className="text-base font-black tracking-tight flex items-center gap-2">
-                    <span>BLOCK 4: QUICK MAPS (Edmonton Territory &amp; Lead Pins)</span>
+                    <span>BLOCK 4: QUICK MAP &amp; SCHEDULE RADAR</span>
                   </h2>
                   <p className="text-[11px] text-sky-100">
-                    Click any Lead, Quote, or Scheduled Job to pin it on Quick Maps &amp; see closest vans
+                    Search any address • Pick any day of the week • View Cleaner Hubs, Cleaners &amp; Day&apos;s Schedule Events
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setQuickMapSurfaceMode((m) => (m === 'RADAR_MAP' ? 'GOOGLE_EMBED' : 'RADAR_MAP'))
+                  }
+                  className="px-2.5 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs cursor-pointer"
+                >
+                  {quickMapSurfaceMode === 'RADAR_MAP' ? 'Switch to Street Embed' : 'Switch to Multi-Pin Radar'}
+                </button>
+                <button
+                  type="button"
+                  onClick={onNavigateToAddressRadar}
+                  className="px-2.5 py-1.5 rounded-xl bg-purple-500 hover:bg-purple-400 text-white font-black text-xs flex items-center gap-1 cursor-pointer shadow-2xs"
+                >
+                  <Navigation className="w-3.5 h-3.5" />
+                  <span>Full Address Radar</span>
+                </button>
                 <button
                   type="button"
                   onClick={onNavigateToFullMap}
                   className="px-3 py-1.5 rounded-xl bg-white text-sky-950 hover:bg-sky-50 font-black text-xs flex items-center gap-1 cursor-pointer shadow-2xs"
                 >
                   <Maximize2 className="w-3.5 h-3.5 text-sky-700" />
-                  <span>Open Full Dispatch Map</span>
+                  <span>Full Dispatch Map</span>
                 </button>
               </div>
             </div>
 
             <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-              {/* Filter Pills for Quick Map */}
+              {/* 1. ADDRESS SEARCH & INPUT BAR RIGHT ON QUICK MAP */}
+              <div className="p-3 rounded-2xl bg-sky-50/90 border border-sky-200 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <div className="relative flex-1">
+                    <MapPin className="w-4 h-4 text-rose-600 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={radarAddressInput}
+                      onChange={(e) => {
+                        setPinnedMapItem(null);
+                        setRadarAddressInput(e.target.value);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleGeocodeQuickMapAddress(radarAddressInput);
+                        }
+                      }}
+                      placeholder="Enter or paste any Edmonton street address or postal code..."
+                      className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-sky-300 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleGeocodeQuickMapAddress(radarAddressInput)}
+                    className="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-black cursor-pointer shrink-0 shadow-2xs flex items-center gap-1.5"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span>{isQuickMapGeocoding ? 'Locating...' : 'Search Address'}</span>
+                  </button>
+                </div>
+
+                {/* Quick Edmonton Presets */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-[10px]">
+                  <span className="font-black uppercase text-sky-800 shrink-0">Quick Address:</span>
+                  {[
+                    { label: 'Downtown', addr: '10405 Jasper Ave NW, Edmonton, AB' },
+                    { label: 'Chappelle (SW)', addr: '7221 Chivers Pl SW, Edmonton, AB' },
+                    { label: 'Mill Woods (SE)', addr: '740 Knottwood Rd S NW, Edmonton, AB' },
+                    { label: 'West Edm Mall', addr: '8882 170 St NW, Edmonton, AB' },
+                    { label: 'Clareview (NE)', addr: '3751 139 Ave NW, Edmonton, AB' },
+                    { label: 'Sherwood Park', addr: '2000 Premier Way, Sherwood Park, AB' },
+                  ].map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => {
+                        setRadarAddressInput(p.addr);
+                        handleGeocodeQuickMapAddress(p.addr);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-white hover:bg-sky-100 text-slate-700 border border-sky-200 font-bold shrink-0 cursor-pointer"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. SCHEDULE DAY-OF-WEEK & ANY-DATE PICKER BAR FOR QUICK MAP */}
+              <div className="p-2.5 rounded-2xl bg-slate-900 text-white border border-slate-800 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] font-black text-sky-300 uppercase tracking-wider flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Schedule Day on Map:</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDateFilter(shiftQuickMapDate(selectedDateFilter, -1))}
+                      className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-black cursor-pointer"
+                      title="Previous Day"
+                    >
+                      &larr;
+                    </button>
+                    <input
+                      type="date"
+                      value={selectedDateFilter}
+                      onChange={(e) => setSelectedDateFilter(e.target.value)}
+                      className="px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-xs font-mono font-black text-white cursor-pointer"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDateFilter(shiftQuickMapDate(selectedDateFilter, 1))}
+                      className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-black cursor-pointer"
+                      title="Next Day"
+                    >
+                      &rarr;
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDateFilter(getEdmontonToday().dateString)}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black cursor-pointer ${
+                        selectedDateFilter === getEdmontonToday().dateString
+                          ? 'bg-emerald-500 text-slate-950'
+                          : 'bg-white/10 hover:bg-white/20 text-white'
+                      }`}
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDateFilter(shiftQuickMapDate(getEdmontonToday().dateString, 1))}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black cursor-pointer ${
+                        selectedDateFilter === shiftQuickMapDate(getEdmontonToday().dateString, 1)
+                          ? 'bg-amber-400 text-slate-950'
+                          : 'bg-white/10 hover:bg-white/20 text-white'
+                      }`}
+                    >
+                      Tomorrow
+                    </button>
+                  </div>
+
+                  <span className="text-[11px] font-mono font-bold text-amber-300">
+                    {quickMapDateJobs.length} Visit{quickMapDateJobs.length === 1 ? '' : 's'} on {selectedDateFilter || 'All Dates'}
+                  </span>
+                </div>
+
+                {/* 14-Day (This Week + Next Week) Day-of-Week Pills */}
+                <div className="flex items-center gap-1 overflow-x-auto pb-1">
+                  {quickMapTwoWeekDays.map((d, idx) => {
+                    const isSel = d.iso === selectedDateFilter;
+                    return (
+                      <React.Fragment key={d.iso}>
+                        {idx === 0 && (
+                          <span className="text-[9px] font-black uppercase text-sky-400 pr-1 shrink-0">This Wk:</span>
+                        )}
+                        {idx === 7 && (
+                          <span className="text-[9px] font-black uppercase text-purple-400 pl-1.5 pr-1 border-l border-white/15 shrink-0">
+                            Next Wk:
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDateFilter(d.iso)}
+                          className={`px-2 py-1 rounded-xl text-left shrink-0 cursor-pointer transition-all border flex items-center gap-1 ${
+                            isSel
+                              ? 'bg-white text-slate-950 border-white font-black shadow-xs'
+                              : d.jobCount > 0
+                              ? 'bg-white/10 hover:bg-white/20 text-white border-white/15'
+                              : 'bg-white/5 hover:bg-white/10 text-slate-400 border-transparent'
+                          }`}
+                        >
+                          <div>
+                            <div className="text-[9.5px] font-black leading-none">{d.dayShort}</div>
+                            <div className="text-[8.5px] font-mono opacity-80">{d.dateLabel}</div>
+                          </div>
+                          <span
+                            className={`px-1.5 py-0.2 rounded-full text-[8.5px] font-mono font-black ${
+                              isSel
+                                ? 'bg-sky-600 text-white'
+                                : d.jobCount > 0
+                                ? 'bg-amber-400/25 text-amber-300'
+                                : 'bg-white/10 text-slate-400'
+                            }`}
+                          >
+                            {d.jobCount}
+                          </span>
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. LAYER FILTER PILLS FOR QUICK MAP (All of It, Cleaner Hubs, Hubs + Cleaners, Day's Schedule) */}
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   {(
                     [
-                      { id: 'ALL', label: 'All Map Pins' },
-                      { id: 'LEADS_QUOTES', label: `Leads & Quotes (${leads.length + quotes.length})` },
-                      { id: 'VISITS', label: `Scheduled Jobs (${scheduledJobs.length})` },
+                      { id: 'ALL', label: `All of It (Hubs + Cleaners + ${quickMapDateJobs.length} Day Jobs)` },
                       { id: 'CLEANERS', label: `Cleaner Hubs (${technicians.length})` },
+                      { id: 'HUBS_AND_CLEANERS', label: 'Hubs + Cleaners' },
+                      { id: 'VISITS', label: `Day's Schedule (${quickMapDateJobs.length}) & Cleaners` },
+                      { id: 'LEADS_QUOTES', label: `Leads & Quotes (${leads.length + quotes.length})` },
                     ] as const
                   ).map((tab) => (
                     <button
@@ -2181,19 +2463,218 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                 )}
               </div>
 
-              {/* Interactive Live Google Maps Embed + Territory Pin Overlay */}
-              <div className="relative rounded-2xl overflow-hidden border-2 border-sky-200 bg-slate-900 h-[280px] sm:h-[310px] shadow-inner">
-                <iframe
-                  title="TidyUps Quick Map Edmonton"
-                  width="100%"
-                  height="100%"
-                  style={{ border: 0 }}
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                  src={`https://maps.google.com/maps?q=${encodeURIComponent(
-                    pinnedMapItem?.address || radarAddressInput || 'Edmonton, AB'
-                  )}&t=&z=${pinnedMapItem ? '13' : '11'}&ie=UTF8&iwloc=&output=embed`}
-                />
+              {/* 4. INTERACTIVE MULTI-PIN QUICK MAP SURFACE (OR GOOGLE EMBED) */}
+              <div className="relative rounded-2xl overflow-hidden border-2 border-sky-300 bg-slate-900 h-[330px] sm:h-[360px] shadow-inner">
+                {quickMapSurfaceMode === 'GOOGLE_EMBED' ? (
+                  <iframe
+                    title="TidyUps Quick Map Edmonton"
+                    width="100%"
+                    height="100%"
+                    style={{ border: 0 }}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    src={`https://maps.google.com/maps?q=${encodeURIComponent(
+                      pinnedMapItem?.address || radarAddressInput || 'Edmonton, AB'
+                    )}&t=&z=${pinnedMapItem ? '13' : '11'}&ie=UTF8&iwloc=&output=embed`}
+                  />
+                ) : (
+                  (() => {
+                    const QM_BOUNDS = { minLat: 53.35, maxLat: 53.66, minLng: -113.70, maxLng: -113.30 };
+                    const projectQm = (lat: number, lng: number) => ({
+                      x: Math.max(4, Math.min(96, ((lng - QM_BOUNDS.minLng) / (QM_BOUNDS.maxLng - QM_BOUNDS.minLng)) * 100)),
+                      y: Math.max(4, Math.min(96, ((QM_BOUNDS.maxLat - lat) / (QM_BOUNDS.maxLat - QM_BOUNDS.minLat)) * 100)),
+                    });
+                    const activeTargetCoords = pinnedMapItem
+                      ? { lat: pinnedMapItem.lat, lng: pinnedMapItem.lng }
+                      : radarTargetCoords;
+                    const targetPin = projectQm(activeTargetCoords.lat, activeTargetCoords.lng);
+
+                    const showHubs =
+                      quickMapFilter === 'ALL' ||
+                      quickMapFilter === 'CLEANERS' ||
+                      quickMapFilter === 'HUBS_AND_CLEANERS';
+                    const showScheduleVisits =
+                      quickMapFilter === 'ALL' ||
+                      quickMapFilter === 'VISITS' ||
+                      quickMapFilter === 'HUBS_AND_CLEANERS';
+
+                    return (
+                      <div className="w-full h-full relative bg-slate-200 overflow-hidden select-none">
+                        {/* Real Georeferenced Edmonton Street Map Tiles */}
+                        <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
+                          {[665, 666, 667, 668, 669, 670].map((ty) =>
+                            [376, 377, 378, 379, 380].map((tx) => {
+                              const z = 11;
+                              const nTiles = Math.pow(2, z);
+                              const tileMinLng = (tx / nTiles) * 360 - 180;
+                              const tileMaxLng = ((tx + 1) / nTiles) * 360 - 180;
+                              const tileMaxLat = (180 / Math.PI) * Math.atan(Math.sinh(Math.PI * (1 - (2 * ty) / nTiles)));
+                              const tileMinLat = (180 / Math.PI) * Math.atan(Math.sinh(Math.PI * (1 - (2 * (ty + 1)) / nTiles)));
+
+                              const leftPct = ((tileMinLng - QM_BOUNDS.minLng) / (QM_BOUNDS.maxLng - QM_BOUNDS.minLng)) * 100;
+                              const rightPct = ((tileMaxLng - QM_BOUNDS.minLng) / (QM_BOUNDS.maxLng - QM_BOUNDS.minLng)) * 100;
+                              const topPct = ((QM_BOUNDS.maxLat - tileMaxLat) / (QM_BOUNDS.maxLat - QM_BOUNDS.minLat)) * 100;
+                              const bottomPct = ((QM_BOUNDS.maxLat - tileMinLat) / (QM_BOUNDS.maxLat - QM_BOUNDS.minLat)) * 100;
+
+                              return (
+                                <img
+                                  key={`qm-tile-${tx}-${ty}`}
+                                  src={`https://basemaps.cartocdn.com/rastertiles/voyager/${z}/${tx}/${ty}@2x.png`}
+                                  alt=""
+                                  draggable={false}
+                                  style={{
+                                    position: 'absolute',
+                                    left: `${leftPct}%`,
+                                    top: `${topPct}%`,
+                                    width: `${rightPct - leftPct + 0.08}%`,
+                                    height: `${bottomPct - topPct + 0.08}%`,
+                                    maxWidth: 'none',
+                                  }}
+                                  className="select-none pointer-events-none object-fill"
+                                />
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {/* Radar Rings & Route Lines from Top 3 Closest Cleaners */}
+                        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                          {[5, 10, 15].map((km) => (
+                            <ellipse
+                              key={`qm-ring-${km}`}
+                              cx={targetPin.x}
+                              cy={targetPin.y}
+                              rx={(km / 30) * 100}
+                              ry={(km / 44) * 100}
+                              fill="none"
+                              stroke="#0284C7"
+                              strokeWidth="0.25"
+                              strokeDasharray="1,1"
+                              strokeOpacity="0.6"
+                            />
+                          ))}
+                          {rankedCleanersByDistance.slice(0, 3).map((rc, idx) => {
+                            const originLat = rc.activeJobOnDay ? rc.activeJobOnDay.lat : rc.hubLat;
+                            const originLng = rc.activeJobOnDay ? rc.activeJobOnDay.lng : rc.hubLng;
+                            const cPos = projectQm(originLat, originLng);
+                            return (
+                              <path
+                                key={`qm-conn-${rc.tech.id}`}
+                                d={`M ${cPos.x} ${cPos.y} L ${targetPin.x} ${targetPin.y}`}
+                                fill="none"
+                                stroke={idx === 0 ? '#10B981' : '#7C3AED'}
+                                strokeWidth={idx === 0 ? '0.7' : '0.45'}
+                                strokeDasharray={idx === 0 ? undefined : '1.2,0.8'}
+                              />
+                            );
+                          })}
+                        </svg>
+
+                        {/* 15 Cleaner Home Hub Pins */}
+                        {showHubs &&
+                          rankedCleanersByDistance.map((rc, idx) => {
+                            const pos = projectQm(rc.hubLat, rc.hubLng);
+                            return (
+                              <div
+                                key={`qm-hub-${rc.tech.id}`}
+                                onClick={() =>
+                                  handlePinItemOnQuickMap({
+                                    title: `${rc.tech.name} Home Hub`,
+                                    subtitle: `${rc.tech.vanNumber} • ${rc.distKm} km`,
+                                    address: rc.hubAddr,
+                                    phone: rc.tech.phone,
+                                    lat: rc.hubLat,
+                                    lng: rc.hubLng,
+                                    type: 'HUB',
+                                  })
+                                }
+                                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                                className="absolute -translate-x-1/2 -translate-y-1/2 z-15 flex flex-col items-center cursor-pointer group"
+                                title={`${rc.tech.name} Home Hub: ${rc.hubAddr} (${rc.hubDistKm} km)`}
+                              >
+                                <div
+                                  className={`px-1.5 py-0.5 rounded-full text-[8.5px] font-black shadow border whitespace-nowrap mb-0.5 flex items-center gap-1 ${
+                                    idx === 0
+                                      ? 'bg-emerald-600 text-white border-emerald-300'
+                                      : 'bg-white/95 text-slate-900 border-slate-300'
+                                  }`}
+                                >
+                                  <span>🏠 {rc.tech.name.split(' ')[0]}</span>
+                                  <span className="font-mono text-[8px] px-1 rounded bg-sky-100 text-sky-900">
+                                    {rc.hubDistKm}km
+                                  </span>
+                                </div>
+                                <div
+                                  className="w-5 h-5 rounded-lg border-2 border-white shadow-md flex items-center justify-center text-white text-[8px] font-black"
+                                  style={{ backgroundColor: rc.tech.color || '#0284C7' }}
+                                >
+                                  H
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                        {/* Scheduled Events for Selected Day of the Week */}
+                        {showScheduleVisits &&
+                          quickMapDateJobs.map((job, jIdx) => {
+                            const pos = projectQm(job.lat, job.lng);
+                            const primaryCleaner = job.assignedCleaners?.[0] || 'Unassigned';
+                            const badgeCol = getCleanerColor(primaryCleaner);
+                            const tStr = job.startAt
+                              ? new Date(job.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                              : '';
+                            return (
+                              <div
+                                key={`qm-job-${job.id}`}
+                                onClick={() =>
+                                  handlePinItemOnQuickMap({
+                                    title: job.clientName,
+                                    subtitle: `${tStr} • ${(job.assignedCleaners || []).join(', ')}`,
+                                    address: job.serviceAddress,
+                                    phone: job.clientPhone,
+                                    lat: job.lat,
+                                    lng: job.lng,
+                                    type: 'VISIT',
+                                  })
+                                }
+                                style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                                className="absolute -translate-x-1/2 -translate-y-1/2 z-25 flex flex-col items-center cursor-pointer group"
+                                title={`Scheduled Visit (${selectedDateFilter}): ${job.clientName} — ${job.serviceAddress} (${primaryCleaner})`}
+                              >
+                                <div className="px-2 py-0.5 rounded-lg bg-slate-900/95 text-white border border-amber-400 text-[9px] font-black shadow-xl whitespace-nowrap mb-0.5 flex items-center gap-1">
+                                  <span className="text-amber-300 font-mono">{tStr}</span>
+                                  <span>{job.clientName.split(' ')[0]}</span>
+                                  <span className="px-1 rounded text-[8px]" style={{ backgroundColor: badgeCol }}>
+                                    {primaryCleaner.split(' ')[0]}
+                                  </span>
+                                </div>
+                                <div
+                                  className="w-6 h-6 rounded-lg border-2 border-amber-300 shadow-xl flex items-center justify-center text-white font-black text-[9px]"
+                                  style={{ backgroundColor: badgeCol }}
+                                >
+                                  #{jIdx + 1}
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                        {/* Searched / Pinned Target Address Pin */}
+                        <div
+                          style={{ left: `${targetPin.x}%`, top: `${targetPin.y}%` }}
+                          className="absolute -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center pointer-events-none"
+                        >
+                          <div className="px-2.5 py-0.5 rounded-lg bg-rose-600 text-white border border-white text-[9.5px] font-black shadow-xl whitespace-nowrap mb-1">
+                            🎯 {pinnedMapItem ? pinnedMapItem.title : radarAddressInput.split(',')[0]}
+                          </div>
+                          <div className="w-7 h-7 rounded-full bg-rose-600 border-2 border-white shadow-2xl flex items-center justify-center text-white font-black text-xs relative">
+                            <span>★</span>
+                            <span className="absolute -inset-1.5 rounded-full border-2 border-rose-400 animate-ping opacity-85" />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
 
                 {/* Floating Quick Pin Selector Overlay */}
                 <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2 pointer-events-none">
@@ -2202,72 +2683,225 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                     <span className="truncate">
                       {pinnedMapItem
                         ? `${pinnedMapItem.title} — ${pinnedMapItem.address}`
-                        : `Active Radar Center: ${radarAddressInput}`}
+                        : `Target: ${radarAddressInput}`}
                     </span>
+                  </div>
+                  <div className="px-2.5 py-1 rounded-xl bg-emerald-600/95 text-white text-[10px] font-black pointer-events-auto shadow-lg">
+                    Closest: {rankedCleanersByDistance[0]?.tech.name} ({rankedCleanersByDistance[0]?.distKm} km)
                   </div>
                 </div>
               </div>
 
-              {/* Quick Clickable Lead & Cleaner Pins Bar Under Map */}
+              {/* 5. INTERACTIVE DIRECTORY UNDER QUICK MAP: CLEANER HUBS & CLEANERS vs DAY'S SCHEDULE vs LEADS */}
               <div className="space-y-2">
-                <div className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                  <span>Click Any Lead / Quote to Pin on Quick Map:</span>
-                  <span className="text-[10px] text-sky-700 font-mono">
-                    Closest Cleaner: {rankedCleanersByDistance[0]?.tech.name} ({rankedCleanersByDistance[0]?.distKm} km)
+                <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-200 pb-1.5">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setQuickMapInspectorTab('CLEANERS_AND_HUBS')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer ${
+                        quickMapInspectorTab === 'CLEANERS_AND_HUBS'
+                          ? 'bg-sky-600 text-white'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      🏠 Cleaner Hubs &amp; Cleaners ({technicians.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickMapInspectorTab('DAY_SCHEDULE')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer ${
+                        quickMapInspectorTab === 'DAY_SCHEDULE'
+                          ? 'bg-amber-500 text-slate-950'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      📅 Day&apos;s Schedule Events ({quickMapDateJobs.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickMapInspectorTab('LEADS_QUOTES')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer ${
+                        quickMapInspectorTab === 'LEADS_QUOTES'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      📌 Leads &amp; Quotes
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Click any item to pin &amp; check distances
                   </span>
                 </div>
-                <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                  {leads.slice(0, 6).map((l, idx) => (
-                    <button
-                      key={`map-lead-${l.id || idx}`}
-                      type="button"
-                      onClick={() =>
-                        handlePinItemOnQuickMap({
-                          title: l.customerName,
-                          subtitle: l.serviceRequested,
-                          address: `${l.address || 'Edmonton'}, ${l.city || 'Edmonton'}, AB`,
-                          phone: l.phone,
-                          amount: l.quotedAmount,
-                          type: 'LEAD',
-                        })
-                      }
-                      className={`px-3 py-1.5 rounded-xl border text-left shrink-0 cursor-pointer transition-all ${
-                        pinnedMapItem?.title === l.customerName
-                          ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
-                          : 'bg-slate-50 hover:bg-sky-50 text-slate-800 border-slate-200'
-                      }`}
-                    >
-                      <div className="text-xs font-black truncate max-w-[140px]">{l.customerName}</div>
-                      <div className="text-[10px] opacity-80 truncate max-w-[140px]">{l.address}</div>
-                    </button>
-                  ))}
-                  {categorizedMasterData.jobberQuotes.slice(0, 5).map((q, idx) => (
-                    <button
-                      key={`map-quote-${q.id || q.quoteNumber || idx}`}
-                      type="button"
-                      onClick={() =>
-                        handlePinItemOnQuickMap({
-                          title: `${q.clientName} (${q.quoteNumber})`,
-                          subtitle: q.service,
-                          address: q.serviceAddress || 'Edmonton, AB',
-                          phone: q.clientPhone,
-                          amount: q.total,
-                          type: 'QUOTE',
-                        })
-                      }
-                      className={`px-3 py-1.5 rounded-xl border text-left shrink-0 cursor-pointer transition-all ${
-                        pinnedMapItem?.title.includes(q.quoteNumber)
-                          ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
-                          : 'bg-sky-50/60 hover:bg-sky-100 text-slate-800 border-sky-200'
-                      }`}
-                    >
-                      <div className="text-xs font-black truncate max-w-[140px]">
-                        {q.quoteNumber} • {q.clientName}
+
+                {quickMapInspectorTab === 'CLEANERS_AND_HUBS' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[230px] overflow-y-auto pr-1">
+                    {rankedCleanersByDistance.map((rc, idx) => (
+                      <div
+                        key={`qm-cleaner-card-${rc.tech.id}`}
+                        onClick={() =>
+                          handlePinItemOnQuickMap({
+                            title: `${rc.tech.name} (${rc.tech.vanNumber})`,
+                            subtitle: rc.activeJobOnDay
+                              ? `Scheduled on ${selectedDateFilter}: ${rc.activeJobOnDay.clientName}`
+                              : 'Home Hub Address',
+                            address: rc.activeJobOnDay ? rc.activeJobOnDay.serviceAddress : rc.hubAddr,
+                            phone: rc.tech.phone,
+                            lat: rc.activeJobOnDay ? rc.activeJobOnDay.lat : rc.hubLat,
+                            lng: rc.activeJobOnDay ? rc.activeJobOnDay.lng : rc.hubLng,
+                            type: 'HUB',
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all flex items-center justify-between gap-2 ${
+                          idx === 0
+                            ? 'bg-emerald-50/90 border-emerald-300 shadow-2xs'
+                            : 'bg-slate-50/80 hover:bg-sky-50/60 border-slate-200'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="w-5 h-5 rounded-md text-white text-[9px] font-black flex items-center justify-center shrink-0"
+                              style={{ backgroundColor: rc.tech.color || '#0284C7' }}
+                            >
+                              #{idx + 1}
+                            </span>
+                            <span className="text-xs font-black text-slate-900 truncate">{rc.tech.name}</span>
+                            {rc.jobsOnSelectedDay.length > 0 && (
+                              <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 text-[9px] font-black">
+                                {rc.jobsOnSelectedDay.length} job{rc.jobsOnSelectedDay.length > 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-600 truncate mt-0.5" title={rc.hubAddr}>
+                            🏠 <strong>Hub:</strong> {rc.hubAddr}
+                          </div>
+                          {rc.activeJobOnDay && (
+                            <div className="text-[10px] text-purple-700 font-bold truncate">
+                              📅 <strong>{selectedDateFilter}:</strong> {rc.activeJobOnDay.clientName} ({rc.activeJobOnDay.serviceAddress})
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-mono text-[10px] font-black block">
+                            {rc.distKm} km
+                          </span>
+                          <span className="text-[9px] text-slate-500 font-mono">~{rc.estMinutes} min</span>
+                        </div>
                       </div>
-                      <div className="text-[10px] opacity-80 truncate max-w-[140px]">{q.serviceAddress}</div>
-                    </button>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
+
+                {quickMapInspectorTab === 'DAY_SCHEDULE' && (
+                  <div className="space-y-1.5 max-h-[230px] overflow-y-auto pr-1">
+                    {quickMapDateJobs.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                        No scheduled visits on <strong>{selectedDateFilter}</strong>. Pick another day of the week above!
+                      </div>
+                    ) : (
+                      quickMapDateJobs.map((job, jIdx) => {
+                        const tStr = job.startAt
+                          ? new Date(job.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                          : '';
+                        return (
+                          <div
+                            key={`qm-day-list-${job.id}`}
+                            onClick={() =>
+                              handlePinItemOnQuickMap({
+                                title: job.clientName,
+                                subtitle: `${tStr} • ${(job.assignedCleaners || []).join(', ')}`,
+                                address: job.serviceAddress,
+                                phone: job.clientPhone,
+                                lat: job.lat,
+                                lng: job.lng,
+                                type: 'VISIT',
+                              })
+                            }
+                            className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-amber-50/50 cursor-pointer flex items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-mono text-[10px] font-black">
+                                  #{jIdx + 1} • {tStr}
+                                </span>
+                                <span className="text-xs font-black text-slate-900 truncate">{job.clientName}</span>
+                              </div>
+                              <div className="text-[11px] text-slate-600 truncate">{job.serviceAddress}</div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {(job.assignedCleaners || ['Unassigned']).map((c, i) => (
+                                <span
+                                  key={i}
+                                  className="px-2 py-0.5 rounded text-[9px] font-black text-white"
+                                  style={{ backgroundColor: getCleanerColor(c) }}
+                                >
+                                  {c.split(' ')[0]}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+
+                {quickMapInspectorTab === 'LEADS_QUOTES' && (
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                    {leads.slice(0, 6).map((l, idx) => (
+                      <button
+                        key={`map-lead-${l.id || idx}`}
+                        type="button"
+                        onClick={() =>
+                          handlePinItemOnQuickMap({
+                            title: l.customerName,
+                            subtitle: l.serviceRequested,
+                            address: `${l.address || 'Edmonton'}, ${l.city || 'Edmonton'}, AB`,
+                            phone: l.phone,
+                            amount: l.quotedAmount,
+                            type: 'LEAD',
+                          })
+                        }
+                        className={`px-3 py-1.5 rounded-xl border text-left shrink-0 cursor-pointer transition-all ${
+                          pinnedMapItem?.title === l.customerName
+                            ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
+                            : 'bg-slate-50 hover:bg-sky-50 text-slate-800 border-slate-200'
+                        }`}
+                      >
+                        <div className="text-xs font-black truncate max-w-[140px]">{l.customerName}</div>
+                        <div className="text-[10px] opacity-80 truncate max-w-[140px]">{l.address}</div>
+                      </button>
+                    ))}
+                    {categorizedMasterData.jobberQuotes.slice(0, 5).map((q, idx) => (
+                      <button
+                        key={`map-quote-${q.id || q.quoteNumber || idx}`}
+                        type="button"
+                        onClick={() =>
+                          handlePinItemOnQuickMap({
+                            title: `${q.clientName} (${q.quoteNumber})`,
+                            subtitle: q.service,
+                            address: q.serviceAddress || 'Edmonton, AB',
+                            phone: q.clientPhone,
+                            amount: q.total,
+                            type: 'QUOTE',
+                          })
+                        }
+                        className={`px-3 py-1.5 rounded-xl border text-left shrink-0 cursor-pointer transition-all ${
+                          pinnedMapItem?.title.includes(q.quoteNumber)
+                            ? 'bg-sky-600 text-white border-sky-700 shadow-xs'
+                            : 'bg-sky-50/60 hover:bg-sky-100 text-slate-800 border-sky-200'
+                        }`}
+                      >
+                        <div className="text-xs font-black truncate max-w-[140px]">
+                          {q.quoteNumber} • {q.clientName}
+                        </div>
+                        <div className="text-[10px] opacity-80 truncate max-w-[140px]">{q.serviceAddress}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </section>

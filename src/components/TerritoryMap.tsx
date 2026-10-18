@@ -63,6 +63,7 @@ interface TerritoryMapProps {
   onMessageTech?: (tech: Technician) => void;
   isMapsAuthError?: boolean;
   refererErrorUrl?: string | null;
+  initialInspectDate?: string | null;
 }
 
 // Subcomponent that renders rich Vehicle details and live Reverse Geocoded address from Geocoding API (only on Google Map surfaces per ToS)
@@ -437,6 +438,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   onMessageTech,
   isMapsAuthError = false,
   refererErrorUrl = null,
+  initialInspectDate = null,
 }) => {
   const [activeInfoWindow, setActiveInfoWindow] = useState<{
     type: 'TICKET' | 'TECH' | 'DEPOT' | 'JOB';
@@ -470,14 +472,77 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Schedule Horizon Filter (Today / Week Forward / Last 2 Weeks / Full Month / Specific Week / All) & Schedule Drawer
+  // Schedule Horizon Filter & Specific Date / Day-of-Week Inspector
   const [scheduleHorizon, setScheduleHorizon] = useState<
-    'TODAY' | 'WEEK' | 'WEEKS_3_4' | 'MONTH' | 'WEEK_1' | 'WEEK_2' | 'WEEK_3' | 'WEEK_4' | 'ALL'
-  >('MONTH');
+    'TODAY' | 'TOMORROW' | 'SPECIFIC_DATE' | 'WEEK' | 'WEEKS_3_4' | 'MONTH' | 'WEEK_1' | 'WEEK_2' | 'WEEK_3' | 'WEEK_4' | 'ALL'
+  >(() => (initialInspectDate ? 'SPECIFIC_DATE' : 'MONTH'));
+  const [selectedInspectDate, setSelectedInspectDate] = useState<string>(
+    () => initialInspectDate || getEdmontonToday().dateString
+  );
+  const [showDayOfWeekBar, setShowDayOfWeekBar] = useState<boolean>(true);
   const [showScheduleDrawer, setShowScheduleDrawer] = useState<boolean>(false);
 
-  // 2-Address Route & Distance Comparison Tool on Map
+  // Sync if parent passes a new initialInspectDate
+  useEffect(() => {
+    if (initialInspectDate) {
+      setSelectedInspectDate(initialInspectDate);
+      setScheduleHorizon('SPECIFIC_DATE');
+      setShowScheduledJobs(true);
+      setShowScheduleDrawer(true);
+    }
+  }, [initialInspectDate]);
+
+  // Tomorrow ISO string helper
+  const tomorrowInfo = (() => {
+    const d = new Date(liveToday.year, liveToday.monthIndex, liveToday.day + 1);
+    const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return {
+      dateString: ds,
+      shortLabel: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+    };
+  })();
+
+  // Build 14-day Day-of-Week strip (This Week Mon–Sun + Next Week Mon–Sun) so user can pick any day of the week (e.g., Monday or Tuesday of next week)
+  const twoWeekDayPills = (() => {
+    const baseDate = new Date(liveToday.year, liveToday.monthIndex, liveToday.day);
+    const dayOfWeek = baseDate.getDay(); // 0=Sun, 1=Mon...
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const mondayThisWeek = new Date(baseDate);
+    mondayThisWeek.setDate(baseDate.getDate() + diffToMonday);
+
+    return Array.from({ length: 14 }, (_, idx) => {
+      const d = new Date(mondayThisWeek);
+      d.setDate(mondayThisWeek.getDate() + idx);
+      const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const jobsOnDay = (scheduledJobs || []).filter((j) => String(j.startAt || '').slice(0, 10) === ds);
+      return {
+        dateString: ds,
+        dayShort: d.toLocaleDateString('en-US', { weekday: 'short' }),
+        dayFull: d.toLocaleDateString('en-US', { weekday: 'long' }),
+        monthDay: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        isToday: ds === liveToday.dateString,
+        isTomorrow: ds === tomorrowInfo.dateString,
+        isNextWeek: idx >= 7,
+        jobsCount: jobsOnDay.length,
+      };
+    });
+  })();
+
+  const stepInspectDate = (deltaDays: number) => {
+    const parts = selectedInspectDate.split('-').map(Number);
+    const base = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(liveToday.year, liveToday.monthIndex, liveToday.day);
+    base.setDate(base.getDate() + deltaDays);
+    const nextIso = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
+    setSelectedInspectDate(nextIso);
+    setScheduleHorizon('SPECIFIC_DATE');
+    setShowScheduledJobs(true);
+    setShowScheduleDrawer(true);
+  };
+
+  // 2-Address Route & Distance Comparison Tool + Closest Cleaner Distance Finder on Map
   const [showTwoAddressPanel, setShowTwoAddressPanel] = useState<boolean>(false);
+  const [showClosestCleanersPanel, setShowClosestCleanersPanel] = useState<boolean>(false);
+  const [radarSearchAddress, setRadarSearchAddress] = useState<string>('10405 Jasper Ave NW, Edmonton, AB');
   const [addressAInput, setAddressAInput] = useState<string>('10420 103 Ave NW, Edmonton, AB');
   const [addressBInput, setAddressBInput] = useState<string>('5230 Windermere Blvd SW, Edmonton, AB');
 
@@ -523,31 +588,33 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
 
   const coordsA = resolveEdmontonAddressCoords(addressAInput, 53.5461, -113.4938);
   const coordsB = resolveEdmontonAddressCoords(addressBInput, 53.4312, -113.6054);
+  const radarTargetCoords = resolveEdmontonAddressCoords(radarSearchAddress, 53.5412, -113.4988);
 
-  const twoAddrDistanceKm = (() => {
+  const calcRoadDistKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
     const R = 6371;
-    const dLat = ((coordsB.lat - coordsA.lat) * Math.PI) / 180;
-    const dLng = ((coordsB.lng - coordsA.lng) * Math.PI) / 180;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((coordsA.lat * Math.PI) / 180) *
-        Math.cos((coordsB.lat * Math.PI) / 180) *
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
         Math.sin(dLng / 2) *
         Math.sin(dLng / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return Math.max(0.8, Math.round(R * c * 1.28 * 10) / 10);
-  })();
+  };
 
+  const twoAddrDistanceKm = calcRoadDistKm(coordsA.lat, coordsA.lng, coordsB.lat, coordsB.lng);
   const twoAddrDriveMins = Math.max(4, Math.round(twoAddrDistanceKm * 1.65 + 4));
 
-  // Filter scheduled jobs by Schedule Horizon using live Edmonton Today (e.g. Wednesday, October 14, 2026)
+  // Filter scheduled jobs by Schedule Horizon or Specific Selected Date
   const horizonFilteredScheduledJobs = (() => {
     if (!scheduledJobs || scheduledJobs.length === 0) return [];
     const sortedAll = [...scheduledJobs].sort((a, b) => String(a.startAt).localeCompare(String(b.startAt)));
     if (scheduleHorizon === 'ALL') return sortedAll;
 
-    const todayIso = liveToday.dateString; // e.g. '2026-10-14'
-    const currentMonthPrefix = `${liveToday.year}-${String(liveToday.month).padStart(2, '0')}`; // e.g. '2026-10'
+    const todayIso = liveToday.dateString;
+    const currentMonthPrefix = `${liveToday.year}-${String(liveToday.month).padStart(2, '0')}`;
     const anchorMs = new Date(liveToday.year, liveToday.monthIndex, liveToday.day).getTime();
 
     const filtered = sortedAll.filter((j) => {
@@ -560,11 +627,16 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
       if (scheduleHorizon === 'TODAY') {
         return jobDateStr === todayIso;
       }
+      if (scheduleHorizon === 'TOMORROW') {
+        return jobDateStr === tomorrowInfo.dateString;
+      }
+      if (scheduleHorizon === 'SPECIFIC_DATE') {
+        return jobDateStr === selectedInspectDate;
+      }
       if (scheduleHorizon === 'WEEK') {
         return diffDays >= 0 && diffDays <= 7;
       }
       if (scheduleHorizon === 'WEEKS_3_4') {
-        // Last 2 weeks of the current month (Days 15 to 31)
         return jobDateStr.startsWith(currentMonthPrefix) && jobDay >= 15;
       }
       if (scheduleHorizon === 'WEEK_1') {
@@ -580,7 +652,6 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
         return jobDateStr.startsWith(currentMonthPrefix) && jobDay >= 22 && jobDay <= 31;
       }
       if (scheduleHorizon === 'MONTH') {
-        // Full current month (all 4+ weeks, Oct 1 – Oct 31) + 30 days forward
         return jobDateStr.startsWith(currentMonthPrefix) || (diffDays >= 0 && diffDays <= 31);
       }
       return true;
@@ -589,11 +660,73 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     return filtered;
   })();
 
+  // Active inspected date string (used to check cleaner schedules on that specific day)
+  const activeDateForCleaners =
+    scheduleHorizon === 'TODAY'
+      ? liveToday.dateString
+      : scheduleHorizon === 'TOMORROW'
+      ? tomorrowInfo.dateString
+      : selectedInspectDate;
+
+  const formattedInspectDateLabel = (() => {
+    const parts = activeDateForCleaners.split('-').map(Number);
+    if (parts.length === 3) {
+      const d = new Date(parts[0], parts[1] - 1, parts[2]);
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    return activeDateForCleaners;
+  })();
+
+  // Ranked cleaners by distance to radarSearchAddress (accounting for both their Home Hub and any Scheduled Job on activeDateForCleaners)
+  const rankedCleanersToTarget = (() => {
+    return technicians
+      .map((tech) => {
+        const homeLat = tech.depotLocation?.lat || tech.currentLocation.lat;
+        const homeLng = tech.depotLocation?.lng || tech.currentLocation.lng;
+        const homeAddress = tech.depotLocation?.address || tech.homeAddress || tech.currentLocation.address;
+        const homeDistKm = calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, homeLat, homeLng);
+
+        const techFirstName = tech.name.split(' ')[0].toLowerCase();
+        const jobsForTechOnDay = (scheduledJobs || []).filter((j) => {
+          const jDate = String(j.startAt || '').slice(0, 10);
+          if (jDate !== activeDateForCleaners) return false;
+          return j.assignedCleaners?.some(
+            (c) => c.toLowerCase().includes(techFirstName) || c.toLowerCase().includes(tech.name.toLowerCase())
+          );
+        });
+
+        const firstJobOnDay = jobsForTechOnDay[0];
+        const jobDistKm = firstJobOnDay
+          ? calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, firstJobOnDay.lat, firstJobOnDay.lng)
+          : null;
+
+        const bestDistKm = jobDistKm !== null ? Math.min(homeDistKm, jobDistKm) : homeDistKm;
+        const bestMins = Math.max(4, Math.round(bestDistKm * 1.65 + 4));
+        const closestFrom = jobDistKm !== null && jobDistKm < homeDistKm ? `Job (${firstJobOnDay.clientName})` : 'Home Hub';
+
+        return {
+          tech,
+          homeAddress,
+          homeDistKm,
+          jobDistKm,
+          bestDistKm,
+          bestMins,
+          closestFrom,
+          jobsOnDay: jobsForTechOnDay,
+        };
+      })
+      .sort((a, b) => a.bestDistKm - b.bestDistKm);
+  })();
+
   // Auto-focus and open info window when selectedScheduledJobId is set
   useEffect(() => {
     if (selectedScheduledJobId && scheduledJobs && scheduledJobs.length > 0) {
       const job = scheduledJobs.find((j) => j.id === selectedScheduledJobId);
       if (job) {
+        const jobDate = String(job.startAt || '').slice(0, 10);
+        if (jobDate) {
+          setSelectedInspectDate(jobDate);
+        }
         setActiveInfoWindow({
           type: 'JOB',
           id: job.id,
@@ -1033,65 +1166,299 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           </div>
         )}
 
-        {/* Schedule Horizon & 2-Address Picker Interactive Bar */}
-        <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 px-2.5 py-1.5 shadow-md self-start max-w-full">
-          <div className="flex items-center gap-1 pr-1.5 border-r border-slate-200 flex-wrap">
-            <CalendarDays className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-600 hidden sm:inline">
-              Schedule ({liveToday.formattedShort}):
-            </span>
-            {([
-              { id: 'TODAY', label: `Today (${liveToday.formattedShort})` },
-              { id: 'WEEK', label: '7 Days Forward' },
-              { id: 'WEEKS_3_4', label: 'Last 2 Weeks (15th–31st)' },
-              { id: 'MONTH', label: 'Full Month (All 4 Weeks)' },
-              { id: 'ALL', label: 'All Dates' },
-            ] as const).map((h) => (
+        {/* Schedule Horizon, Any-Date Picker, Day-of-Week Selector & Closest Cleaner Radar Bar */}
+        <div className="pointer-events-auto flex flex-col gap-1.5 bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 px-2.5 py-2 shadow-md self-start max-w-full">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center gap-1 pr-1.5 border-r border-slate-200 flex-wrap">
+              <CalendarDays className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 hidden sm:inline">
+                Inspect Date:
+              </span>
+
+              {/* Prev Day / Calendar Date Picker / Next Day */}
+              <div className="flex items-center bg-purple-50 border border-purple-300 rounded-lg px-1 py-0.5 gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => stepInspectDate(-1)}
+                  className="px-1.5 py-0.5 rounded hover:bg-purple-200 text-purple-900 font-black text-[10px] cursor-pointer"
+                  title="Previous Day"
+                >
+                  ◀
+                </button>
+                <input
+                  type="date"
+                  value={selectedInspectDate}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setSelectedInspectDate(e.target.value);
+                      setScheduleHorizon('SPECIFIC_DATE');
+                      setShowScheduledJobs(true);
+                      setShowScheduleDrawer(true);
+                    }
+                  }}
+                  className="bg-transparent text-[10px] font-mono font-black text-purple-950 focus:outline-none cursor-pointer px-1"
+                  title="Pick any date to inspect jobs and closest cleaners on the map"
+                />
+                <button
+                  type="button"
+                  onClick={() => stepInspectDate(1)}
+                  className="px-1.5 py-0.5 rounded hover:bg-purple-200 text-purple-900 font-black text-[10px] cursor-pointer"
+                  title="Next Day"
+                >
+                  ▶
+                </button>
+              </div>
+
+              {/* Quick Horizon & Tomorrow Buttons */}
+              {(
+                [
+                  { id: 'TODAY', label: `Today (${liveToday.formattedShort})`, date: liveToday.dateString },
+                  { id: 'TOMORROW', label: `Tomorrow (${tomorrowInfo.shortLabel})`, date: tomorrowInfo.dateString },
+                  { id: 'WEEK', label: '7 Days' },
+                  { id: 'MONTH', label: 'Full Month' },
+                  { id: 'ALL', label: 'All Dates' },
+                ] as const
+              ).map((h) => (
+                <button
+                  key={h.id}
+                  type="button"
+                  onClick={() => {
+                    if ('date' in h && h.date) {
+                      setSelectedInspectDate(h.date);
+                    }
+                    setScheduleHorizon(h.id);
+                    setShowScheduledJobs(true);
+                    setShowScheduleDrawer(true);
+                  }}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                    scheduleHorizon === h.id
+                      ? 'bg-purple-600 text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  {h.label}
+                </button>
+              ))}
+
               <button
-                key={h.id}
                 type="button"
-                onClick={() => {
-                  setScheduleHorizon(h.id);
-                  setShowScheduledJobs(true);
-                  setShowScheduleDrawer(true);
-                }}
-                className={`px-2 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
-                  scheduleHorizon === h.id
-                    ? 'bg-purple-600 text-white shadow-2xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                onClick={() => setShowDayOfWeekBar(!showDayOfWeekBar)}
+                className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all cursor-pointer ${
+                  showDayOfWeekBar
+                    ? 'bg-fuchsia-600 text-white border-fuchsia-700'
+                    : 'bg-fuchsia-50 text-fuchsia-900 border-fuchsia-200 hover:bg-fuchsia-100'
+                }`}
+                title="Show/Hide Day of the Week Picker (This Week & Next Week)"
+              >
+                {showDayOfWeekBar ? 'Hide Days' : 'Pick Day of Week'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowScheduleDrawer(!showScheduleDrawer)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border transition-all cursor-pointer flex items-center gap-1 ${
+                  showScheduleDrawer
+                    ? 'bg-purple-700 text-white border-purple-800 shadow-xs'
+                    : 'bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100'
                 }`}
               >
-                {h.label}
+                <span>
+                  {showScheduleDrawer
+                    ? 'Hide Inspector'
+                    : `Inspect Stops (${horizonFilteredScheduledJobs.length} Jobs)`}
+                </span>
+                {showScheduleDrawer ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               </button>
-            ))}
+            </div>
+
+            {/* Closest Cleaners to Any Address Toggle */}
             <button
               type="button"
-              onClick={() => setShowScheduleDrawer(!showScheduleDrawer)}
-              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border transition-all cursor-pointer flex items-center gap-1 ${
-                showScheduleDrawer
-                  ? 'bg-purple-700 text-white border-purple-800 shadow-xs'
-                  : 'bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100'
+              onClick={() => setShowClosestCleanersPanel(!showClosestCleanersPanel)}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer border ${
+                showClosestCleanersPanel
+                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                  : 'bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100'
               }`}
             >
-              <span>{showScheduleDrawer ? 'Hide Schedule List' : `Scroll Schedule (${horizonFilteredScheduledJobs.length} Jobs)`}</span>
-              {showScheduleDrawer ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              <Compass className="w-3.5 h-3.5" />
+              <span>
+                Closest Cleaners to Address (#1: {rankedCleanersToTarget[0]?.tech.name.split(' ')[0]} •{' '}
+                {rankedCleanersToTarget[0]?.bestDistKm} km)
+              </span>
+            </button>
+
+            {/* 2-Address Picker Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowTwoAddressPanel(!showTwoAddressPanel)}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer border ${
+                showTwoAddressPanel
+                  ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                  : 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
+              }`}
+            >
+              <Route className="w-3.5 h-3.5" />
+              <span>Pick 2 Addresses ({twoAddrDistanceKm} km • ~{twoAddrDriveMins}m)</span>
             </button>
           </div>
 
-          {/* 2-Address Picker Toggle */}
-          <button
-            type="button"
-            onClick={() => setShowTwoAddressPanel(!showTwoAddressPanel)}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer border ${
-              showTwoAddressPanel
-                ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
-                : 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
-            }`}
-          >
-            <Route className="w-3.5 h-3.5" />
-            <span>Pick 2 Addresses ({twoAddrDistanceKm} km • ~{twoAddrDriveMins}m)</span>
-          </button>
+          {/* Day-of-Week Selector Strip: This Week (Mon–Sun) + Next Week (Mon–Sun) */}
+          {showDayOfWeekBar && (
+            <div className="flex items-center gap-1 overflow-x-auto pt-1 border-t border-slate-100 pb-0.5 max-w-full">
+              <span className="text-[9px] font-black uppercase text-purple-800 shrink-0 mr-1">
+                Pick Day (This Wk / Next Wk):
+              </span>
+              {twoWeekDayPills.map((dayPill) => {
+                const isSelectedDay =
+                  (scheduleHorizon === 'SPECIFIC_DATE' && selectedInspectDate === dayPill.dateString) ||
+                  (scheduleHorizon === 'TODAY' && dayPill.isToday) ||
+                  (scheduleHorizon === 'TOMORROW' && dayPill.isTomorrow);
+
+                return (
+                  <button
+                    key={dayPill.dateString}
+                    type="button"
+                    onClick={() => {
+                      setSelectedInspectDate(dayPill.dateString);
+                      setScheduleHorizon('SPECIFIC_DATE');
+                      setShowScheduledJobs(true);
+                      setShowScheduleDrawer(true);
+                    }}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-extrabold shrink-0 flex items-center gap-1 border transition-all cursor-pointer ${
+                      isSelectedDay
+                        ? 'bg-purple-700 text-white border-purple-900 shadow-xs ring-2 ring-purple-300'
+                        : dayPill.isToday
+                        ? 'bg-amber-50 text-amber-950 border-amber-300 hover:bg-amber-100'
+                        : dayPill.isNextWeek
+                        ? 'bg-indigo-50/70 text-indigo-950 border-indigo-200 hover:bg-indigo-100'
+                        : 'bg-slate-50 text-slate-800 border-slate-200 hover:bg-purple-50'
+                    }`}
+                    title={`${dayPill.dayFull}, ${dayPill.monthDay} (${dayPill.jobsCount} scheduled jobs)`}
+                  >
+                    <span>
+                      {dayPill.isNextWeek ? `Next ${dayPill.dayShort}` : dayPill.dayShort} {dayPill.monthDay}
+                    </span>
+                    <span
+                      className={`px-1 py-0.2 rounded-full text-[9px] font-mono font-black ${
+                        isSelectedDay
+                          ? 'bg-white text-purple-900'
+                          : dayPill.jobsCount > 0
+                          ? 'bg-purple-200 text-purple-900'
+                          : 'bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {dayPill.jobsCount}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
+
+        {/* Expandable Closest Cleaners to Any Address & Date Radar Panel */}
+        {showClosestCleanersPanel && (
+          <div className="pointer-events-auto bg-white/98 backdrop-blur-md border-2 border-emerald-300 rounded-2xl p-3.5 shadow-2xl max-w-3xl w-full animate-fadeIn space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-emerald-600 text-white">
+                  <Compass className="w-4 h-4" />
+                </span>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-black text-slate-900">
+                    Closest Cleaners &amp; Hubs Distance Finder • {formattedInspectDateLabel}
+                  </h4>
+                  <p className="text-[10px] text-slate-500">
+                    Type any address or pick a scheduled job on {formattedInspectDateLabel} to see which cleaners are closest (from Home Hub or Day&apos;s Job)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClosestCleanersPanel(false)}
+                className="text-slate-400 hover:text-slate-700 font-bold text-xs px-2 py-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+              <div className="sm:col-span-7">
+                <input
+                  type="text"
+                  value={radarSearchAddress}
+                  onChange={(e) => setRadarSearchAddress(e.target.value)}
+                  placeholder="Type street address, postal code, or neighborhood..."
+                  className="w-full px-3 py-1.5 text-xs bg-emerald-50/50 border border-emerald-400 rounded-xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div className="sm:col-span-5">
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) setRadarSearchAddress(e.target.value);
+                  }}
+                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-purple-300 rounded-xl font-bold text-purple-950"
+                >
+                  <option value="">Or pick a job on {formattedInspectDateLabel} ({horizonFilteredScheduledJobs.length})...</option>
+                  {(horizonFilteredScheduledJobs.length > 0 ? horizonFilteredScheduledJobs : scheduledJobs).map((j) => (
+                    <option key={`radar-j-${j.id}`} value={j.serviceAddress}>
+                      {j.startAt.slice(0, 10)} • {j.clientName} ({j.serviceAddress.split(',')[0]})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 max-h-[230px] overflow-y-auto pr-1">
+              {rankedCleanersToTarget.map((item, idx) => (
+                <div
+                  key={item.tech.id}
+                  onClick={() => {
+                    onSelectTech(item.tech.id);
+                    setActiveInfoWindow({
+                      type: 'TECH',
+                      id: item.tech.id,
+                      position: { lat: item.tech.currentLocation.lat, lng: item.tech.currentLocation.lng },
+                    });
+                  }}
+                  className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-2 ${
+                    idx === 0
+                      ? 'bg-emerald-50 border-emerald-400 ring-1 ring-emerald-300 shadow-xs'
+                      : 'bg-slate-50 hover:bg-emerald-50/40 border-slate-200'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className="w-5 h-5 rounded-full text-white text-[10px] font-black flex items-center justify-center shrink-0"
+                        style={{ backgroundColor: item.tech.color || '#7C3AED' }}
+                      >
+                        #{idx + 1}
+                      </span>
+                      <span className="text-xs font-black text-slate-900 truncate">{item.tech.name}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-600 truncate mt-0.5">
+                      🏠 Hub: {item.homeAddress}
+                    </div>
+                    <div className="text-[9.5px] font-bold text-purple-800 truncate">
+                      {item.jobsOnDay.length > 0
+                        ? `📅 ${item.jobsOnDay.length} job(s) on ${activeDateForCleaners.slice(5)} (${item.closestFrom})`
+                        : `✓ Free on ${activeDateForCleaners.slice(5)} (From Home Hub)`}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-mono text-[10px] font-black block">
+                      {item.bestDistKm} km
+                    </span>
+                    <span className="text-[9.5px] font-mono text-slate-600 font-bold">~{item.bestMins} min</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Expandable 2-Address Route & Distance Comparison Panel */}
         {showTwoAddressPanel && (
@@ -1213,7 +1580,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           </div>
         )}
 
-        {/* Expandable & Fully Scrollable 4-Week / Full-Month Schedule Drawer on Map View */}
+        {/* Expandable & Fully Scrollable Schedule & Chosen Date Stop Inspector Drawer on Map View */}
         {showScheduleDrawer && (
           <div
             onWheel={(e) => e.stopPropagation()}
@@ -1221,26 +1588,41 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             onMouseDown={(e) => e.stopPropagation()}
             className="pointer-events-auto bg-white/98 backdrop-blur-md border-2 border-purple-300 rounded-2xl p-3.5 shadow-2xl max-w-3xl w-full flex flex-col max-h-[68vh] animate-fadeIn space-y-2.5"
           >
-            {/* Header + Week-by-Week Switcher so all 4 weeks are 1 click away */}
+            {/* Header + Any Date Picker + Week-by-Week Switcher */}
             <div className="flex flex-col gap-2 border-b border-slate-200 pb-2.5 shrink-0">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
                   <CalendarDays className="w-4 h-4 text-purple-600 shrink-0" />
                   <span className="text-xs sm:text-sm font-black text-purple-950">
-                    Live Map Schedule • Today is {liveToday.formattedFull}
+                    {scheduleHorizon === 'SPECIFIC_DATE'
+                      ? `Inspecting Date: ${formattedInspectDateLabel}`
+                      : scheduleHorizon === 'TOMORROW'
+                      ? `Inspecting Tomorrow: ${tomorrowInfo.shortLabel}`
+                      : `Live Map Schedule • Today is ${liveToday.formattedFull}`}
                   </span>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold bg-purple-100 text-purple-800 border border-purple-300">
-                    Showing {horizonFilteredScheduledJobs.length} Visits (Scroll Down for All Weeks)
+                    Showing {horizonFilteredScheduledJobs.length} Visits
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={selectedInspectDate}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setSelectedInspectDate(e.target.value);
+                        setScheduleHorizon('SPECIFIC_DATE');
+                      }
+                    }}
+                    className="px-2 py-1 rounded-lg border border-purple-300 text-[10px] font-mono font-bold text-purple-950 bg-purple-50"
+                  />
                   {onNavigateToCalendar && (
                     <button
                       type="button"
-                      onClick={() => onNavigateToCalendar(liveToday.dateString)}
+                      onClick={() => onNavigateToCalendar(selectedInspectDate || liveToday.dateString)}
                       className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-extrabold cursor-pointer"
                     >
-                      Full Screen Calendar →
+                      Open in Schedule →
                     </button>
                   )}
                   <button
@@ -1255,16 +1637,17 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
 
               {/* Direct Week 1 / Week 2 / Week 3 / Week 4 / Last 2 Weeks Filter Bar */}
               <div className="flex items-center gap-1 flex-wrap">
-                <span className="text-[10px] font-extrabold text-slate-500 uppercase mr-1">Jump to Week:</span>
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase mr-1">Filter Window:</span>
                 {([
                   { id: 'TODAY', label: `Today (${liveToday.formattedShort})` },
+                  { id: 'TOMORROW', label: `Tomorrow (${tomorrowInfo.shortLabel})` },
+                  { id: 'SPECIFIC_DATE', label: `Picked Date (${selectedInspectDate.slice(5)})` },
                   { id: 'WEEK_1', label: 'Week 1 (1st–7th)' },
                   { id: 'WEEK_2', label: 'Week 2 (8th–14th)' },
                   { id: 'WEEK_3', label: 'Week 3 (15th–21st)' },
                   { id: 'WEEK_4', label: 'Week 4 (22nd–31st)' },
-                  { id: 'WEEKS_3_4', label: 'Last 2 Weeks (15th–31st)' },
-                  { id: 'MONTH', label: 'All 4 Weeks (Full Month)' },
-                  { id: 'ALL', label: 'All Months (120d)' },
+                  { id: 'MONTH', label: 'Full Month' },
+                  { id: 'ALL', label: 'All Dates' },
                 ] as const).map((w) => (
                   <button
                     key={w.id}
@@ -1282,11 +1665,16 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               </div>
             </div>
 
-            {/* Scrollable Schedule List across all weeks */}
+            {/* Scrollable Schedule List across selected date or weeks */}
             <div className="flex-1 overflow-y-auto pr-1.5 space-y-1.5 min-h-[220px] max-h-[52vh]">
               {horizonFilteredScheduledJobs.length === 0 ? (
-                <div className="p-6 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-300">
-                  No visits scheduled in this filter window. Click <strong>"All 4 Weeks (Full Month)"</strong> or <strong>"Last 2 Weeks (15th–31st)"</strong> above to view more dates.
+                <div className="p-6 text-center text-xs text-slate-600 bg-slate-50 rounded-xl border border-dashed border-slate-300 space-y-2">
+                  <div className="font-black text-slate-800">
+                    0 Scheduled Jobs on {scheduleHorizon === 'SPECIFIC_DATE' ? formattedInspectDateLabel : 'this filter window'}.
+                  </div>
+                  <div>
+                    All 15 cleaners are free on this date! Click <strong>&ldquo;Closest Cleaners to Address&rdquo;</strong> above to check cleaner distances from their Home Hubs, or click <strong>&ldquo;Full Month&rdquo;</strong> to view all scheduled dates.
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1296,6 +1684,18 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                     const cleaner = job.assignedCleaners.join(' & ') || 'Unassigned';
                     const primaryCleaner = job.assignedCleaners[0] || 'Unassigned';
                     const color = getCleanerColor(primaryCleaner);
+                    const closestToThisJob = technicians
+                      .map((t) => ({
+                        name: t.name.split(' ')[0],
+                        km: calcRoadDistKm(
+                          job.lat,
+                          job.lng,
+                          t.depotLocation?.lat || t.currentLocation.lat,
+                          t.depotLocation?.lng || t.currentLocation.lng
+                        ),
+                      }))
+                      .sort((a, b) => a.km - b.km)[0];
+
                     return (
                       <div
                         key={`sched-drawer-${job.id}`}
@@ -1341,6 +1741,21 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                         <div className="text-[10px] text-slate-600 truncate">
                           📍 {job.serviceAddress} • <span className="font-semibold text-slate-700">{job.serviceType}</span>
                         </div>
+                        {closestToThisJob && (
+                          <div className="text-[9.5px] font-mono font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 flex items-center justify-between">
+                            <span>Closest Hub: {closestToThisJob.name} ({closestToThisJob.km} km)</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRadarSearchAddress(job.serviceAddress);
+                                setShowClosestCleanersPanel(true);
+                              }}
+                              className="underline text-emerald-900 font-black cursor-pointer"
+                            >
+                              All 15 Cleaners →
+                            </button>
+                          </div>
+                        )}
                         <div className="flex items-center justify-between pt-1 border-t border-slate-200/80">
                           <span className="font-mono text-[10px] font-bold text-purple-700">
                             ⏰ {dt.timeStr} ({job.visitNumber})
@@ -1357,9 +1772,20 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                                 });
                               }}
                               className="px-1.5 py-0.5 rounded bg-purple-100 hover:bg-purple-200 text-purple-900 font-black text-[9px] cursor-pointer"
-                              title="Focus pin on map"
+                              title="Inspect stop pin on map"
                             >
-                              View Pin
+                              Inspect Stop
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRadarSearchAddress(job.serviceAddress);
+                                setShowClosestCleanersPanel(true);
+                              }}
+                              className="px-1.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[9px] cursor-pointer"
+                              title="See how far all cleaners are from this stop"
+                            >
+                              Closest Cleaners
                             </button>
                             <button
                               type="button"

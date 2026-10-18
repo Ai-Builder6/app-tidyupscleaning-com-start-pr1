@@ -429,6 +429,7 @@ export function App() {
     return base.filter((inv: any) => !isFakeSimulationItem(inv));
   });
   const [selectedScheduledJobId, setSelectedScheduledJobId] = useState<string | null>(null);
+  const [mapInspectDate, setMapInspectDate] = useState<string>(() => getEdmontonToday());
   const [quoCallsList, setQuoCallsList] = useState<any[]>(() => {
     return storedData?.quoCallLogs || [];
   });
@@ -2092,7 +2093,7 @@ export function App() {
                     <span>Spam Shield</span>
                   </button>
 
-                  {/* Address Distance Radar Tab */}
+                  {/* Quick Map & Address Distance Radar Tab */}
                   <button
                     id="nav-tab-address-radar"
                     onClick={() => setActiveTopView('ADDRESS_SEARCH')}
@@ -2101,10 +2102,10 @@ export function App() {
                         ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
                         : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                     }`}
-                    title="Caller Address Search & Cleaner Distance Radar (/radar, /search)"
+                    title="Dedicated Quick Map, Schedule Day Radar, Cleaner Hubs & Distance Calculator (/radar, /search)"
                   >
                     <Compass className={`w-3.5 h-3.5 ${activeTopView === 'ADDRESS_SEARCH' ? 'text-white' : 'text-purple-600'}`} />
-                    <span>Address Radar</span>
+                    <span>Quick Map &amp; Radar</span>
                   </button>
 
                   {/* Dedicated Clients Database Tab */}
@@ -2506,6 +2507,10 @@ export function App() {
                 });
             }}
             onSelectJobOnMap={handleSelectJobOnMap}
+            onInspectDateOnMap={(dateIso) => {
+              setMapInspectDate(dateIso);
+              setActiveTopView('MAP');
+            }}
             onUpdateJobDetails={handleUpdateJobDetails}
             onUpdateJobStatus={(jobId, status) => {
               handleToggleScheduledJobStatus(jobId, status === 'COMPLETED' ? 'COMPLETED' : 'SCHEDULED');
@@ -2798,6 +2803,7 @@ export function App() {
               selectedScheduledJobId={selectedScheduledJobId}
               onSelectScheduledJob={setSelectedScheduledJobId}
               onToggleJobStatus={handleToggleScheduledJobStatus}
+              initialInspectDate={mapInspectDate}
               onNavigateToCalendar={() => {
                 setActiveTopView('SCHEDULED_JOBS');
                 setScheduledJobsSubTab('CALENDAR');

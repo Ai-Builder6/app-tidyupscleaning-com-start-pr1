@@ -45,7 +45,7 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import { Technician, ServiceTicket } from '../types/dispatch';
-import { ScheduledJobItem } from '../data/jobberCalendarData';
+import { ScheduledJobItem, getEdmontonToday, getCleanerColor } from '../data/jobberCalendarData';
 import { AddressAutocompleteInput, AddressPrediction } from './AddressAutocompleteInput';
 import { forwardGeocode, reverseGeocode, calculateDistanceKm, calculateDriveEstimates } from '../services/geocodingService';
 import { MapErrorBoundary } from './MapErrorBoundary';
@@ -97,6 +97,7 @@ export interface RankedCleanerProximity {
   totalRouteDistanceMiles: number;
   totalRouteDriveMinutes: number;
   rank: number;
+  jobsOnSelectedDate: ScheduledJobItem[];
 }
 
 interface AddressSearchRadarViewProps {
@@ -127,34 +128,27 @@ const EDMONTON_QUICK_PRESETS = [
 ];
 
 /**
- * Resolves each cleaner's live scheduled job location or active field van position
+ * Resolves each cleaner's scheduled job location on the selected date or active field van position
  */
 function resolveCleanerLiveLocation(
   tech: Technician,
   scheduledJobs: ScheduledJobItem[] = [],
-  tickets: ServiceTicket[] = []
-): { lat: number; lng: number; address: string; name: string; subLabel: string } {
-  const activeTicket = tickets.find(
-    (t) => t.assignedTechId === tech.id && (t.status === 'IN_PROGRESS' || t.status === 'ASSIGNED')
-  );
-  if (activeTicket) {
-    return {
-      lat: activeTicket.location.lat,
-      lng: activeTicket.location.lng,
-      address: activeTicket.location.address,
-      name: `${activeTicket.equipmentType || 'Job'} (${activeTicket.customerName})`,
-      subLabel: `${activeTicket.status === 'IN_PROGRESS' ? 'Currently Cleaning' : 'Assigned Stop'} • Job #${activeTicket.ticketNumber || activeTicket.id.slice(0, 6)}`,
-    };
-  }
-
+  tickets: ServiceTicket[] = [],
+  targetDateIso?: string
+): { lat: number; lng: number; address: string; name: string; subLabel: string; jobsOnDate: ScheduledJobItem[] } {
   const techFirstName = tech.name.split(' ')[0].toLowerCase();
-  const activeJob = scheduledJobs.find(
-    (j) =>
-      j.assignedCleaners?.some(
-        (c) => c.toLowerCase().includes(techFirstName) || c.toLowerCase().includes(tech.name.toLowerCase())
-      )
+  const dateFilteredJobs = targetDateIso
+    ? scheduledJobs.filter((j) => String(j.startAt || '').slice(0, 10) === targetDateIso)
+    : scheduledJobs;
+
+  const matchingJobsOnDate = dateFilteredJobs.filter((j) =>
+    j.assignedCleaners?.some(
+      (c) => c.toLowerCase().includes(techFirstName) || c.toLowerCase().includes(tech.name.toLowerCase())
+    )
   );
-  if (activeJob) {
+
+  if (matchingJobsOnDate.length > 0) {
+    const activeJob = matchingJobsOnDate[0];
     const timeStr = activeJob.startAt
       ? new Date(activeJob.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : '';
@@ -162,17 +156,33 @@ function resolveCleanerLiveLocation(
       lat: activeJob.lat,
       lng: activeJob.lng,
       address: activeJob.serviceAddress,
-      name: `${activeJob.title} (${activeJob.clientName})`,
-      subLabel: `${activeJob.status} ${timeStr ? `at ${timeStr}` : ''} • Jobber Visit`,
+      name: `${activeJob.clientName} (${activeJob.serviceType || activeJob.title})`,
+      subLabel: `${matchingJobsOnDate.length} Job${matchingJobsOnDate.length > 1 ? 's' : ''} on ${targetDateIso || 'Schedule'} • ${timeStr ? `Starts ${timeStr}` : activeJob.status}`,
+      jobsOnDate: matchingJobsOnDate,
+    };
+  }
+
+  const activeTicket = tickets.find(
+    (t) => t.assignedTechId === tech.id && (t.status === 'IN_PROGRESS' || t.status === 'ASSIGNED')
+  );
+  if (activeTicket && (!targetDateIso || targetDateIso === getEdmontonToday())) {
+    return {
+      lat: activeTicket.location.lat,
+      lng: activeTicket.location.lng,
+      address: activeTicket.location.address,
+      name: `${activeTicket.equipmentType || 'Job'} (${activeTicket.customerName})`,
+      subLabel: `${activeTicket.status === 'IN_PROGRESS' ? 'Currently Cleaning' : 'Assigned Stop'} • Job #${activeTicket.ticketNumber || activeTicket.id.slice(0, 6)}`,
+      jobsOnDate: [],
     };
   }
 
   return {
     lat: tech.currentLocation.lat,
     lng: tech.currentLocation.lng,
-    address: tech.currentLocation.address,
+    address: tech.currentLocation.address || tech.depotLocation?.address || tech.homeAddress,
     name: `${tech.vanNumber} Field Van Unit`,
-    subLabel: 'Active Field Unit (GPS Telematics)',
+    subLabel: targetDateIso ? `No scheduled stop on ${targetDateIso} (At Hub / Standby)` : 'Active Field Unit (GPS Telematics)',
+    jobsOnDate: [],
   };
 }
 
@@ -509,7 +519,66 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
   const [isGeocoding, setIsGeocoding] = useState<boolean>(false);
 
   // Core Toggle: HOME vs LIVE vs BOTH
-  const [locationMode, setLocationMode] = useState<LocationToggleMode>('HOME');
+  const [locationMode, setLocationMode] = useState<LocationToggleMode>('BOTH');
+
+  // Schedule Date & Day-of-Week Selector for Quick Map / Radar
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState<string>(() => getEdmontonToday());
+  const [showScheduleEventsOnMap, setShowScheduleEventsOnMap] = useState<boolean>(true);
+  const [rightSidebarTab, setRightSidebarTab] = useState<'CLEANERS' | 'SCHEDULE_EVENTS'>('CLEANERS');
+
+  // Helper to shift ISO date string by N days
+  const shiftDateStr = useCallback((isoDate: string, deltaDays: number): string => {
+    const [y, m, d] = isoDate.split('-').map(Number);
+    const dt = new Date(Date.UTC(y || 2026, (m || 1) - 1, (d || 1) + deltaDays));
+    return dt.toISOString().slice(0, 10);
+  }, []);
+
+  // Build 14-day strip (This Week Mon-Sun + Next Week Mon-Sun) anchored around Edmonton Today
+  const twoWeekScheduleDays = useMemo(() => {
+    const todayStr = getEdmontonToday();
+    const [ty, tm, td] = todayStr.split('-').map(Number);
+    const todayUtc = new Date(Date.UTC(ty, tm - 1, td));
+    const dayOfWeek = todayUtc.getUTCDay(); // 0=Sun..6=Sat
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const mondayUtc = new Date(Date.UTC(ty, tm - 1, td + diffToMonday));
+
+    const days: {
+      iso: string;
+      dayShort: string;
+      dateLabel: string;
+      isToday: boolean;
+      isTomorrow: boolean;
+      weekLabel: 'THIS_WEEK' | 'NEXT_WEEK';
+      jobCount: number;
+    }[] = [];
+
+    const tomorrowStr = shiftDateStr(todayStr, 1);
+
+    for (let i = 0; i < 14; i++) {
+      const dUtc = new Date(Date.UTC(mondayUtc.getUTCFullYear(), mondayUtc.getUTCMonth(), mondayUtc.getUTCDate() + i));
+      const iso = dUtc.toISOString().slice(0, 10);
+      const dayShort = dUtc.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+      const dateLabel = dUtc.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      const count = scheduledJobs.filter((j) => String(j.startAt || '').slice(0, 10) === iso).length;
+      days.push({
+        iso,
+        dayShort,
+        dateLabel,
+        isToday: iso === todayStr,
+        isTomorrow: iso === tomorrowStr,
+        weekLabel: i < 7 ? 'THIS_WEEK' : 'NEXT_WEEK',
+        jobCount: count,
+      });
+    }
+    return days;
+  }, [scheduledJobs, shiftDateStr]);
+
+  // Scheduled jobs for the currently selected date
+  const jobsOnSelectedDate = useMemo(() => {
+    return scheduledJobs
+      .filter((j) => String(j.startAt || '').slice(0, 10) === selectedScheduleDate)
+      .sort((a, b) => String(a.startAt || '').localeCompare(String(b.startAt || '')));
+  }, [scheduledJobs, selectedScheduleDate]);
 
   // Map Controls & Camera Navigation
   const [mapType, setMapType] = useState<MapTypeMode>('roadmap');
@@ -526,10 +595,11 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
   const tileContainerRef = useRef<HTMLDivElement>(null);
   const [activeInfoWindow, setActiveInfoWindow] = useState<{
     id: string;
-    type: 'CLIENT' | 'HOME' | 'LIVE';
+    type: 'CLIENT' | 'HOME' | 'LIVE' | 'SCHEDULE_JOB';
     position: { lat: number; lng: number };
     title?: string;
     address?: string;
+    job?: ScheduledJobItem;
   } | null>(null);
 
   // Filters
@@ -544,7 +614,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
   const [isSavingHub, setIsSavingHub] = useState<boolean>(false);
 
   // Focus map camera on a specific coordinate with zoom
-  const handleFocusLocation = useCallback((lat: number, lng: number, zoom = 15, title?: string, address?: string, id?: string, type?: 'CLIENT' | 'HOME' | 'LIVE') => {
+  const handleFocusLocation = useCallback((lat: number, lng: number, zoom = 15, title?: string, address?: string, id?: string, type?: 'CLIENT' | 'HOME' | 'LIVE' | 'SCHEDULE_JOB', job?: ScheduledJobItem) => {
     setCameraTarget({ lat, lng, zoom, timestamp: Date.now() });
     if (id && type) {
       setActiveInfoWindow({
@@ -553,6 +623,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
         position: { lat, lng },
         title,
         address,
+        job,
       });
     }
   }, []);
@@ -584,8 +655,8 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
         driveMinutes: homeDrive.driveMinutes,
       };
 
-      // 2. Live Location (Active Job or Current Field GPS)
-      const liveResolved = resolveCleanerLiveLocation(tech, scheduledJobs, tickets);
+      // 2. Live Location (Scheduled Job on Selected Date or Current Field GPS)
+      const liveResolved = resolveCleanerLiveLocation(tech, scheduledJobs, tickets, selectedScheduleDate);
       const liveDistKm = calculateDistanceKm(primaryStop.lat, primaryStop.lng, liveResolved.lat, liveResolved.lng);
       const liveDrive = calculateDriveEstimates(liveDistKm);
 
@@ -661,6 +732,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
         totalRouteDistanceMiles: Math.round(cumDistanceMiles * 10) / 10,
         totalRouteDriveMinutes: Math.round(cumDriveMinutes),
         rank: 0,
+        jobsOnSelectedDate: liveResolved.jobsOnDate,
       };
     });
 
@@ -669,7 +741,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
 
     // Assign ranks
     return list.map((c, idx) => ({ ...c, rank: idx + 1 }));
-  }, [technicians, scheduledJobs, tickets, clientStops, locationMode]);
+  }, [technicians, scheduledJobs, tickets, clientStops, locationMode, selectedScheduleDate]);
 
   // Filtered cleaners
   const filteredCleaners = useMemo(() => {
@@ -938,6 +1010,158 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* SCHEDULE DAY-OF-WEEK & ANY-DATE PICKER BAR */}
+        <div className="mt-3 p-2.5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-purple-950 text-white border border-purple-700/50 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-white/10">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-600/30 border border-purple-400/40 text-xs font-black">
+                <Calendar className="w-3.5 h-3.5 text-purple-300" />
+                <span>Inspect Schedule Date:</span>
+              </div>
+
+              <div className="flex items-center gap-1 bg-slate-800/90 p-1 rounded-xl border border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setSelectedScheduleDate((prev) => shiftDateStr(prev, -1))}
+                  className="p-1 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white cursor-pointer"
+                  title="Previous Day"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <input
+                  type="date"
+                  value={selectedScheduleDate}
+                  onChange={(e) => {
+                    if (e.target.value) setSelectedScheduleDate(e.target.value);
+                  }}
+                  className="bg-transparent text-white text-xs font-black font-mono px-1.5 py-0.5 focus:outline-none cursor-pointer"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSelectedScheduleDate((prev) => shiftDateStr(prev, 1))}
+                  className="p-1 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white cursor-pointer"
+                  title="Next Day"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedScheduleDate(getEdmontonToday())}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-black cursor-pointer transition-all ${
+                  selectedScheduleDate === getEdmontonToday()
+                    ? 'bg-emerald-500 text-slate-950 shadow-xs'
+                    : 'bg-white/10 hover:bg-white/20 text-white'
+                }`}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedScheduleDate(shiftDateStr(getEdmontonToday(), 1))}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-black cursor-pointer transition-all ${
+                  selectedScheduleDate === shiftDateStr(getEdmontonToday(), 1)
+                    ? 'bg-amber-400 text-slate-950 shadow-xs'
+                    : 'bg-white/10 hover:bg-white/20 text-white'
+                }`}
+              >
+                Tomorrow
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setShowScheduleEventsOnMap((prev) => !prev)}
+                className={`px-3 py-1 rounded-xl text-[11px] font-black flex items-center gap-1.5 cursor-pointer transition-all border ${
+                  showScheduleEventsOnMap
+                    ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-xs'
+                    : 'bg-white/10 text-slate-300 border-white/15 hover:bg-white/20'
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>
+                  {showScheduleEventsOnMap ? 'Showing' : 'Show'} {jobsOnSelectedDate.length} Scheduled Event{jobsOnSelectedDate.length === 1 ? '' : 's'} on Map
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRightSidebarTab(rightSidebarTab === 'SCHEDULE_EVENTS' ? 'CLEANERS' : 'SCHEDULE_EVENTS');
+                  setIsCleanersBoxMinimized(false);
+                }}
+                className={`px-3 py-1 rounded-xl text-[11px] font-black flex items-center gap-1.5 cursor-pointer transition-all border ${
+                  rightSidebarTab === 'SCHEDULE_EVENTS'
+                    ? 'bg-pink-500 text-white border-pink-400 shadow-xs'
+                    : 'bg-white/10 text-white border-white/15 hover:bg-white/20'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Inspect Day&apos;s Jobs ({jobsOnSelectedDate.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 14-Day (This Week + Next Week) Quick Day-of-Week Selector Strip */}
+          <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-1">
+            {twoWeekScheduleDays.map((d, idx) => {
+              const isSelected = d.iso === selectedScheduleDate;
+              return (
+                <React.Fragment key={d.iso}>
+                  {idx === 0 && (
+                    <span className="text-[9px] font-black uppercase tracking-wider text-purple-300 px-1 shrink-0">
+                      This Wk:
+                    </span>
+                  )}
+                  {idx === 7 && (
+                    <span className="text-[9px] font-black uppercase tracking-wider text-pink-300 pl-2 pr-1 border-l border-white/15 shrink-0">
+                      Next Wk:
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedScheduleDate(d.iso)}
+                    className={`px-2.5 py-1 rounded-xl text-left shrink-0 cursor-pointer transition-all border flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-white text-slate-950 border-white font-black shadow-md scale-[1.02]'
+                        : d.jobCount > 0
+                        ? 'bg-white/10 hover:bg-white/20 text-white border-white/15'
+                        : 'bg-white/5 hover:bg-white/15 text-slate-400 border-transparent'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-[10px] font-black leading-tight flex items-center gap-1">
+                        <span>{d.dayShort}</span>
+                        {d.isToday && (
+                          <span className="px-1 py-0.2 rounded bg-emerald-500 text-slate-950 text-[8px] font-black">
+                            TODAY
+                          </span>
+                        )}
+                      </div>
+                      <div className={`text-[9px] font-mono ${isSelected ? 'text-slate-700 font-bold' : 'opacity-75'}`}>
+                        {d.dateLabel}
+                      </div>
+                    </div>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[9px] font-mono font-black ${
+                        isSelected
+                          ? 'bg-purple-600 text-white'
+                          : d.jobCount > 0
+                          ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
+                          : 'bg-white/10 text-slate-400'
+                      }`}
+                    >
+                      {d.jobCount}
+                    </span>
+                  </button>
+                </React.Fragment>
+              );
+            })}
           </div>
         </div>
 
@@ -1289,13 +1513,58 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                     );
                   })}
 
+                {/* Plot Scheduled Events for Selected Date on the Map */}
+                {showScheduleEventsOnMap &&
+                  jobsOnSelectedDate.map((job, jIdx) => {
+                    const primaryCleaner = job.assignedCleaners?.[0] || 'Unassigned';
+                    const badgeColor = getCleanerColor(primaryCleaner);
+                    const timeStr = job.startAt
+                      ? new Date(job.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      : '';
+                    return (
+                      <AdvancedMarker
+                        key={`sched-job-${job.id}`}
+                        position={{ lat: job.lat, lng: job.lng }}
+                        onClick={() => {
+                          handleFocusLocation(
+                            job.lat,
+                            job.lng,
+                            15,
+                            `${job.clientName} (${timeStr})`,
+                            job.serviceAddress,
+                            job.id,
+                            'SCHEDULE_JOB',
+                            job
+                          );
+                        }}
+                      >
+                        <div className="flex flex-col items-center group cursor-pointer">
+                          <div className="px-2 py-0.5 rounded-lg bg-slate-900/95 text-white border border-amber-400 text-[10px] font-extrabold shadow-xl whitespace-nowrap mb-1 flex items-center gap-1">
+                            <Calendar className="w-2.5 h-2.5 text-amber-400" />
+                            <span className="text-amber-300 font-mono">{timeStr}</span>
+                            <span>{job.clientName}</span>
+                            <span className="px-1 rounded text-[9px]" style={{ backgroundColor: badgeColor }}>
+                              {primaryCleaner.split(' ')[0]}
+                            </span>
+                          </div>
+                          <div
+                            className="w-7 h-7 rounded-lg border-2 border-amber-300 shadow-xl flex items-center justify-center text-white font-black text-[10px] transition-transform group-hover:scale-125"
+                            style={{ backgroundColor: badgeColor }}
+                          >
+                            #{jIdx + 1}
+                          </div>
+                        </div>
+                      </AdvancedMarker>
+                    );
+                  })}
+
                 {/* Info Window for Selected Marker */}
                 {activeInfoWindow && (
                   <InfoWindow
                     position={activeInfoWindow.position}
                     onCloseClick={() => setActiveInfoWindow(null)}
                   >
-                    <div className="p-2 max-w-[280px] font-sans text-slate-900">
+                    <div className="p-2 max-w-[290px] font-sans text-slate-900">
                       {activeInfoWindow.type === 'CLIENT' ? (
                         <div>
                           <div className="flex items-center gap-1 text-pink-700 font-extrabold text-xs mb-1">
@@ -1310,6 +1579,56 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                               className="text-purple-600 font-bold hover:underline cursor-pointer"
                             >
                               Fit Entire Route
+                            </button>
+                          </div>
+                        </div>
+                      ) : activeInfoWindow.type === 'SCHEDULE_JOB' && activeInfoWindow.job ? (
+                        <div>
+                          <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-1 mb-1.5">
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                              Scheduled Visit • {selectedScheduleDate}
+                            </span>
+                            <span className="text-[10px] font-mono font-bold text-slate-600">
+                              {new Date(activeInfoWindow.job.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-xs font-black text-slate-900">{activeInfoWindow.job.clientName}</p>
+                          <p className="text-[11px] text-slate-600 mt-0.5">{activeInfoWindow.job.serviceAddress}</p>
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {(activeInfoWindow.job.assignedCleaners || ['Unassigned']).map((c, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded text-[10px] font-bold text-white"
+                                style={{ backgroundColor: getCleanerColor(c) }}
+                              >
+                                {c}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="mt-2.5 pt-2 border-t border-slate-200 flex items-center justify-between gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const j = activeInfoWindow.job!;
+                                setClientStops((prev) => {
+                                  const next = [...prev];
+                                  next[0] = {
+                                    ...next[0],
+                                    address: j.serviceAddress,
+                                    lat: j.lat,
+                                    lng: j.lng,
+                                    clientName: j.clientName,
+                                    clientPhone: j.clientPhone || '',
+                                  };
+                                  return next;
+                                });
+                                setActiveStopIndex(0);
+                                setRightSidebarTab('CLEANERS');
+                              }}
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-black cursor-pointer flex items-center justify-center gap-1"
+                            >
+                              <Crosshair className="w-3 h-3" />
+                              <span>Check Closest Cleaners to This Job</span>
                             </button>
                           </div>
                         </div>
@@ -1330,7 +1649,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                                 <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded uppercase ${
                                   isHome ? 'bg-purple-100 text-purple-800' : 'bg-pink-100 text-pink-800'
                                 }`}>
-                                  {isHome ? 'Home Hub' : 'Live Job Location'}
+                                  {isHome ? 'Home Hub' : `Job on ${selectedScheduleDate}`}
                                 </span>
                               </div>
 
@@ -1650,6 +1969,55 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                             </div>
                           );
                         })}
+
+                      {/* Scheduled Event Pins on Fallback Tile Map */}
+                      {showScheduleEventsOnMap &&
+                        jobsOnSelectedDate.map((job, jIdx) => {
+                          const primaryCleaner = job.assignedCleaners?.[0] || 'Unassigned';
+                          const badgeColor = getCleanerColor(primaryCleaner);
+                          const pos = projectRadarCoord(job.lat, job.lng);
+                          const timeStr = job.startAt
+                            ? new Date(job.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            : '';
+                          return (
+                            <div
+                              key={`tile-sched-${job.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setClientStops((prev) => {
+                                  const next = [...prev];
+                                  next[0] = {
+                                    ...next[0],
+                                    address: job.serviceAddress,
+                                    lat: job.lat,
+                                    lng: job.lng,
+                                    clientName: job.clientName,
+                                    clientPhone: job.clientPhone || '',
+                                  };
+                                  return next;
+                                });
+                                setActiveStopIndex(0);
+                              }}
+                              style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                              className="absolute -translate-x-1/2 -translate-y-1/2 z-25 flex flex-col items-center cursor-pointer group"
+                              title={`Click to set ${job.clientName} (${job.serviceAddress}) as Target Stop 1`}
+                            >
+                              <div className="px-2 py-0.5 rounded-lg bg-slate-900/95 text-white border border-amber-400 text-[9px] font-extrabold shadow-xl whitespace-nowrap mb-0.5 flex items-center gap-1">
+                                <span className="text-amber-300 font-mono">{timeStr}</span>
+                                <span>{job.clientName}</span>
+                                <span className="px-1 rounded text-[8px]" style={{ backgroundColor: badgeColor }}>
+                                  {primaryCleaner.split(' ')[0]}
+                                </span>
+                              </div>
+                              <div
+                                className="w-6 h-6 rounded-lg border-2 border-amber-300 shadow-xl flex items-center justify-center text-white font-black text-[9px]"
+                                style={{ backgroundColor: badgeColor }}
+                              >
+                                #{jIdx + 1}
+                              </div>
+                            </div>
+                          );
+                        })}
                     </div>
                   </div>
                 );
@@ -1709,21 +2077,37 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
         {/* RIGHT / SIDEBAR: Ranked Cleaner Multi-Stop Distance List */}
         {!isCleanersBoxMinimized ? (
           <div className="w-full lg:w-[490px] xl:w-[540px] flex flex-col bg-white overflow-hidden shadow-xl shrink-0 border-l border-slate-200 animate-fadeIn">
-            {/* Header & Filter Controls */}
+            {/* Header & Switcher Tabs (Closest Cleaners vs Day's Scheduled Events) */}
             <div className="p-4 border-b border-slate-200 bg-slate-50/70">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-lg bg-purple-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
-                    {filteredCleaners.length}
-                  </span>
-                  <h3 className="font-extrabold text-sm text-slate-900">
-                    Cleaners Ranked by Route Distance
-                  </h3>
+              <div className="flex items-center justify-between gap-2 mb-2.5">
+                <div className="flex items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setRightSidebarTab('CLEANERS')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                      rightSidebarTab === 'CLEANERS'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'text-slate-700 hover:bg-white/60'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Closest Cleaners ({filteredCleaners.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRightSidebarTab('SCHEDULE_EVENTS')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                      rightSidebarTab === 'SCHEDULE_EVENTS'
+                        ? 'bg-amber-500 text-slate-950 shadow-xs'
+                        : 'text-slate-700 hover:bg-white/60'
+                    }`}
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Day&apos;s Schedule ({jobsOnSelectedDate.length})</span>
+                  </button>
                 </div>
+
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full uppercase bg-purple-100 text-purple-900 border border-purple-200">
-                    {clientStops.length} Stop{clientStops.length > 1 ? 's' : ''} Route
-                  </span>
                   <button
                     type="button"
                     onClick={() => setIsCleanersBoxMinimized(true)}
@@ -1737,64 +2121,195 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                 </div>
               </div>
 
-            {/* Filter Pills */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                onClick={() => setFilterMode('ALL')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  filterMode === 'ALL'
-                    ? 'bg-slate-900 text-white shadow-2xs'
-                    : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
-                }`}
-              >
-                All (15)
-              </button>
-              <button
-                onClick={() => setFilterMode('TOP_5')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  filterMode === 'TOP_5'
-                    ? 'bg-purple-600 text-white shadow-2xs'
-                    : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
-                }`}
-              >
-                Top 5 Closest
-              </button>
-              <button
-                onClick={() => setFilterMode('AVAILABLE')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  filterMode === 'AVAILABLE'
-                    ? 'bg-emerald-600 text-white shadow-2xs'
-                    : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
-                }`}
-              >
-                Available Only
-              </button>
-              <button
-                onClick={() => setFilterMode('SOLO')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  filterMode === 'SOLO'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
-                }`}
-              >
-                Solo Cleaners
-              </button>
-              <button
-                onClick={() => setFilterMode('TEAM')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  filterMode === 'TEAM'
-                    ? 'bg-pink-600 text-white shadow-2xs'
-                    : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
-                }`}
-              >
-                Dual Teams
-              </button>
-            </div>
+              {rightSidebarTab === 'CLEANERS' ? (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    onClick={() => setFilterMode('ALL')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      filterMode === 'ALL'
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
+                    }`}
+                  >
+                    All (15)
+                  </button>
+                  <button
+                    onClick={() => setFilterMode('TOP_5')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      filterMode === 'TOP_5'
+                        ? 'bg-purple-600 text-white shadow-2xs'
+                        : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
+                    }`}
+                  >
+                    Top 5 Closest
+                  </button>
+                  <button
+                    onClick={() => setFilterMode('AVAILABLE')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      filterMode === 'AVAILABLE'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
+                    }`}
+                  >
+                    Available Only
+                  </button>
+                  <button
+                    onClick={() => setFilterMode('SOLO')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      filterMode === 'SOLO'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
+                    }`}
+                  >
+                    Solo Cleaners
+                  </button>
+                  <button
+                    onClick={() => setFilterMode('TEAM')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      filterMode === 'TEAM'
+                        ? 'bg-pink-600 text-white shadow-2xs'
+                        : 'bg-white hover:bg-slate-200 text-slate-600 border border-slate-200'
+                    }`}
+                  >
+                    Dual Teams
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between text-xs text-slate-600 font-bold">
+                  <span>
+                    Showing schedule events for <strong className="text-slate-900 font-mono">{selectedScheduleDate}</strong>
+                  </span>
+                  <span className="text-[11px] text-purple-700">
+                    Click any job to find closest cleaners
+                  </span>
+                </div>
+              )}
           </div>
 
-          {/* Cleaner Cards Scrollable List */}
+          {/* Cleaner Cards OR Day's Scheduled Events Scrollable List */}
           <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 bg-slate-50/40">
-            {filteredCleaners.length === 0 ? (
+            {rightSidebarTab === 'SCHEDULE_EVENTS' ? (
+              jobsOnSelectedDate.length === 0 ? (
+                <div className="h-56 flex flex-col items-center justify-center text-center p-4 bg-white rounded-2xl border border-dashed border-slate-300">
+                  <Calendar className="w-8 h-8 text-slate-300 mb-2" />
+                  <p className="font-bold text-slate-800 text-xs">
+                    No scheduled jobs on {selectedScheduleDate}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Pick another day of the week in the top bar to see that day&apos;s scheduled events &amp; closest cleaners.
+                  </p>
+                </div>
+              ) : (
+                jobsOnSelectedDate.map((job, jIdx) => {
+                  const timeStr = job.startAt
+                    ? new Date(job.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : '';
+                  // Rank top 3 closest cleaners to this scheduled job
+                  const cleanersToJob = technicians
+                    .map((t) => {
+                      const hLat = t.depotLocation?.lat || t.currentLocation.lat;
+                      const hLng = t.depotLocation?.lng || t.currentLocation.lng;
+                      const dKm = calculateDistanceKm(job.lat, job.lng, hLat, hLng);
+                      const drv = calculateDriveEstimates(dKm);
+                      return { tech: t, drivingKm: drv.drivingDistanceKm, driveMin: drv.driveMinutes };
+                    })
+                    .sort((a, b) => a.drivingKm - b.drivingKm)
+                    .slice(0, 3);
+
+                  return (
+                    <div
+                      key={job.id}
+                      className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs hover:border-purple-300 transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-mono text-[10px] font-black">
+                              Stop #{jIdx + 1} • {timeStr}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold">
+                              {job.status}
+                            </span>
+                          </div>
+                          <h4 className="font-black text-sm text-slate-900 mt-1">{job.clientName}</h4>
+                          <p className="text-xs text-slate-600 font-medium">{job.serviceAddress}</p>
+                          <p className="text-[11px] text-purple-700 font-bold mt-0.5">{job.serviceType || job.title}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setClientStops((prev) => {
+                              const next = [...prev];
+                              next[0] = {
+                                ...next[0],
+                                address: job.serviceAddress,
+                                lat: job.lat,
+                                lng: job.lng,
+                                clientName: job.clientName,
+                                clientPhone: job.clientPhone || '',
+                              };
+                              return next;
+                            });
+                            setActiveStopIndex(0);
+                            handleFocusLocation(job.lat, job.lng, 15, job.clientName, job.serviceAddress, job.id, 'SCHEDULE_JOB', job);
+                            setRightSidebarTab('CLEANERS');
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-black cursor-pointer shrink-0 shadow-2xs"
+                        >
+                          Check Distance
+                        </button>
+                      </div>
+
+                      <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Assigned:</span>
+                          {(job.assignedCleaners || ['Unassigned']).map((c, idx) => (
+                            <span
+                              key={idx}
+                              className="px-2 py-0.5 rounded text-[10px] font-black text-white"
+                              style={{ backgroundColor: getCleanerColor(c) }}
+                            >
+                              {c}
+                            </span>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleFocusLocation(job.lat, job.lng, 16, job.clientName, job.serviceAddress, job.id, 'SCHEDULE_JOB', job)
+                          }
+                          className="text-[11px] font-bold text-purple-600 hover:underline cursor-pointer flex items-center gap-1"
+                        >
+                          <MapPin className="w-3 h-3" />
+                          <span>Zoom on Map</span>
+                        </button>
+                      </div>
+
+                      <div className="mt-2 p-2 rounded-xl bg-emerald-50/70 border border-emerald-200">
+                        <div className="text-[9px] font-black uppercase text-emerald-800 mb-1">
+                          Closest Cleaner Hubs to This Scheduled Job:
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {cleanersToJob.map((c, rankIdx) => (
+                            <div
+                              key={c.tech.id}
+                              className="p-1.5 rounded-lg bg-white border border-emerald-200 text-[10px]"
+                            >
+                              <div className="font-black text-slate-900 truncate">
+                                #{rankIdx + 1} {c.tech.name.split(' ')[0]}
+                              </div>
+                              <div className="font-mono font-bold text-emerald-700">
+                                {c.drivingKm} km (~{c.driveMin}m)
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )
+            ) : filteredCleaners.length === 0 ? (
               <div className="h-48 flex flex-col items-center justify-center text-center p-4 bg-white rounded-2xl border border-dashed border-slate-300">
                 <Filter className="w-8 h-8 text-slate-300 mb-2" />
                 <p className="font-bold text-slate-700 text-xs">No cleaners match this filter</p>
