@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      // 1. Immediately unregister any stale Service Workers & clear old Workbox precaches to prevent blank white pages after deploys
+      (function() {
+        try {
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+              for (var i = 0; i < registrations.length; i++) {
+                registrations[i].unregister();
+              }
+            }).catch(function() {});
+          }
+          if ('caches' in window && window.caches) {
+            caches.keys().then(function(keys) {
+              for (var j = 0; j < keys.length; j++) {
+                if (keys[j].indexOf('workbox') !== -1 || keys[j].indexOf('precache') !== -1) {
+                  caches.delete(keys[j]);
+                }
+              }
+            }).catch(function() {});
+          }
+        } catch (_) {}
+
+        // Auto-recover if a hashed JS chunk fails to load after a new deployment
+        window.addEventListener('vite:preloadError', function(event) {
+          event.preventDefault();
+          if (!sessionStorage.getItem('chunk_reload_attempted')) {
+            sessionStorage.setItem('chunk_reload_attempted', '1');
+            window.location.reload();
+          }
+        });
+      })();
+
+      // 2. Suppress Vite HMR WebSocket notices and safely stub HMR transport in proxied cloud preview
+      (function() {
+        try {
+          var RealWS = window.WebSocket;
+          if (RealWS) {
+            function createMockViteSocket(url, protocols) {
+              var target = new EventTarget();
+              var mock = {
+                url: String(url || ""),
+                protocol: typeof protocols === "string" ? protocols : "vite-hmr",
+                readyState: 1,
+                bufferedAmount: 0,
+                extensions: "",
+                binaryType: "blob",
+                onopen: null,
+                onmessage: null,
+                onerror: null,
+                onclose: null,
+                send: function() {},
+                close: function() { mock.readyState = 3; },
+                addEventListener: target.addEventListener.bind(target),
+                removeEventListener: target.removeEventListener.bind(target),
+                dispatchEvent: target.dispatchEvent.bind(target)
+              };
+              setTimeout(function() {
+                try {
+                  var evt = new Event("open");
+                  target.dispatchEvent(evt);
+                  if (typeof mock.onopen === "function") mock.onopen(evt);
+                } catch (_) {}
+              }, 0);
+              return mock;
+            }
+
+            function PatchedWebSocket(url, protocols) {
+              var urlStr = String(url || "");
+              var isViteHmr =
+                protocols === "vite-hmr" ||
+                (Array.isArray(protocols) && protocols.indexOf("vite-hmr") !== -1) ||
+                urlStr.indexOf(":24678") !== -1 ||
+                (urlStr.indexOf("token=") !== -1 && urlStr.indexOf("/ws/chat") === -1);
+
+              if (isViteHmr) {
+                return createMockViteSocket(url, protocols);
+              }
+              if (protocols !== undefined) {
+                return new RealWS(url, protocols);
+              }
+              return new RealWS(url);
+            }
+
+            PatchedWebSocket.prototype = RealWS.prototype;
+            PatchedWebSocket.CONNECTING = 0;
+            PatchedWebSocket.OPEN = 1;
+            PatchedWebSocket.CLOSING = 2;
+            PatchedWebSocket.CLOSED = 3;
+            window.WebSocket = PatchedWebSocket;
+          }
+
+          var origError = console.error;
+          console.error = function() {
+            var msg = Array.prototype.slice.call(arguments).map(function(a) {
+              return String(a && a.message ? a.message : a || "");
+            }).join(" ");
+            if (msg.indexOf("WebSocket closed without opened") !== -1 || msg.indexOf("[vite] failed to connect to websocket") !== -1) {
+              return;
+            }
+            return origError.apply(console, arguments);
+          };
+
+          window.addEventListener("unhandledrejection", function(event) {
+            if (event && event.reason && String(event.reason.message || event.reason).indexOf("WebSocket closed without opened") !== -1) {
+              event.preventDefault();
+            }
+          });
+
+          window.addEventListener("error", function(event) {
+            if (event && (event.message || "").indexOf("WebSocket closed without opened") !== -1) {
+              event.preventDefault();
+            }
+          });
+        } catch (_) {}
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ec4899" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Tidyups Dispatch" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <title>Cleaning Service Dispatch Board – Tidyups Cleaning Service Inc</title>
+    <meta name="description" content="Interactive regional territory dispatch board for 2 mobile cleaning vans and 3 core cleaning services with voice dictation booking intake, Edmonton route optimization, and Jobber backend sync for app.tidyupscleaning.com." />
+    <link rel="canonical" href="https://app.tidyupscleaning.com" />
+    <meta property="og:site_name" content="Tidyups Cleaning Service" />
+    <meta property="og:title" content="Cleaning Service Dispatch Board – Tidyups Cleaning Service Inc" />
+    <meta property="og:description" content="Interactive regional territory dispatch board for 2 mobile cleaning vans and 3 core cleaning services with voice dictation booking intake, Edmonton route optimization, and Jobber backend sync for app.tidyupscleaning.com." />
+    <meta property="og:url" content="https://app.tidyupscleaning.com" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cleaning Service Dispatch Board – Tidyups Cleaning Service Inc" />
+    <meta name="twitter:description" content="Interactive regional territory dispatch board for 2 mobile cleaning vans and 3 core cleaning services with voice dictation booking intake, Edmonton route optimization, and Jobber backend sync for app.tidyupscleaning.com." />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Tidyups Cleaning Service Dispatch Board",
+      "url": "https://app.tidyupscleaning.com",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "All",
+      "description": "Interactive regional territory dispatch board for 2 mobile cleaning vans and 3 core cleaning services with voice dictation booking intake, Edmonton route optimization, and Jobber backend sync for app.tidyupscleaning.com.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "CAD"
+      }
+    }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script>
+      // 3. Route Firebase Auth identitytoolkit / securetoken requests through backend Referer proxy so restricted API keys never return 403 API_KEY_HTTP_REFERRER_BLOCKED on preview domains
+      (function() {
+        try {
+          var origFetch = window.fetch;
+          if (origFetch) {
+            window.fetch = function(input, init) {
+              try {
+                var urlStr = typeof input === "string" ? input : (input && input.url ? input.url : String(input || ""));
+                if (
+                  urlStr.indexOf("https://identitytoolkit.googleapis.com/") === 0 ||
+                  urlStr.indexOf("https://securetoken.googleapis.com/") === 0
+                ) {
+                  var proxyUrl = "/api/firebase-auth-proxy?target=" + encodeURIComponent(urlStr);
+                  return origFetch.call(window, proxyUrl, init);
+                }
+              } catch (_) {}
+              return origFetch.apply(window, arguments);
+            };
+          }
+        } catch (_) {}
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-50 text-slate-900 font-sans antialiased overflow-hidden select-none">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

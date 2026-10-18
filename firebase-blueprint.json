@@ -1,0 +1,617 @@
+{
+  "entities": {
+    "Client": {
+      "title": "Client",
+      "description": "Represents a residential or commercial customer in the cleaning dispatch database, synced with Jobber CRM.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique client identifier (e.g. cli-12345).",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the client.",
+          "maxLength": 150
+        },
+        "company": {
+          "type": "string",
+          "description": "Company name if commercial client.",
+          "maxLength": 150
+        },
+        "email": {
+          "type": "string",
+          "description": "Primary email address for billing and notifications.",
+          "maxLength": 200
+        },
+        "phone": {
+          "type": "string",
+          "description": "Primary contact phone number for dispatch and SMS alerts.",
+          "maxLength": 30
+        },
+        "secondaryPhone": {
+          "type": "string",
+          "description": "Secondary contact phone number or direct cell line.",
+          "maxLength": 30
+        },
+        "address": {
+          "type": "string",
+          "description": "Full service location street address.",
+          "maxLength": 300
+        },
+        "status": {
+          "type": "string",
+          "description": "Lifecycle status or lead qualification verdict.",
+          "enum": ["Client", "Good lead", "Bad lead", "Spam", "Lead", "Archived"]
+        },
+        "tags": {
+          "type": "array",
+          "description": "Jobber-synchronized customer classification tags."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Special instructions, pet notes, or access gate codes.",
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of client record creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update."
+        }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "ScheduledVisit": {
+      "title": "ScheduledVisit",
+      "description": "A scheduled cleaning appointment assigned to a specific van and cleaner.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique visit identifier.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "jobId": {
+          "type": "string",
+          "description": "Associated parent job reference ID.",
+          "maxLength": 128
+        },
+        "clientName": {
+          "type": "string",
+          "description": "Name of the client receiving service.",
+          "maxLength": 150
+        },
+        "phone": {
+          "type": "string",
+          "description": "Primary phone number for dispatch.",
+          "maxLength": 30
+        },
+        "secondaryPhone": {
+          "type": "string",
+          "description": "Alternative contact phone number.",
+          "maxLength": 30
+        },
+        "address": {
+          "type": "string",
+          "description": "Service location address.",
+          "maxLength": 300
+        },
+        "scheduledTime": {
+          "type": "string",
+          "description": "Scheduled date and start time window."
+        },
+        "durationMinutes": {
+          "type": "number",
+          "description": "Estimated job duration in minutes."
+        },
+        "cleanerName": {
+          "type": "string",
+          "description": "Assigned technician or cleaner team lead.",
+          "maxLength": 100
+        },
+        "vanId": {
+          "type": "string",
+          "description": "Assigned fleet van identifier (e.g. van-1).",
+          "maxLength": 50
+        },
+        "hubId": {
+          "type": "string",
+          "description": "Originating HVAC/cleaning hub or depot ID.",
+          "maxLength": 50
+        },
+        "status": {
+          "type": "string",
+          "description": "Operational visit status.",
+          "enum": ["Scheduled", "In Progress", "Completed", "Cancelled", "Late", "En Route"]
+        },
+        "serviceType": {
+          "type": "string",
+          "description": "Type of cleaning service requested.",
+          "maxLength": 100
+        },
+        "notes": {
+          "type": "string",
+          "description": "Visit notes or entry directions.",
+          "maxLength": 1000
+        }
+      },
+      "required": ["id", "clientName", "phone", "address", "vanId"]
+    },
+    "UnscheduledJob": {
+      "title": "UnscheduledJob",
+      "description": "Pending cleaning work order awaiting dispatch assignment to a van.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique unscheduled job ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientName": {
+          "type": "string",
+          "description": "Name of client.",
+          "maxLength": 150
+        },
+        "phone": {
+          "type": "string",
+          "description": "Client contact phone.",
+          "maxLength": 30
+        },
+        "address": {
+          "type": "string",
+          "description": "Service address.",
+          "maxLength": 300
+        },
+        "serviceType": {
+          "type": "string",
+          "description": "Service category requested.",
+          "maxLength": 100
+        },
+        "priority": {
+          "type": "string",
+          "description": "Urgency level.",
+          "enum": ["Low", "Normal", "High", "Urgent"]
+        },
+        "estimatedHours": {
+          "type": "number",
+          "description": "Estimated hours needed to complete."
+        }
+      },
+      "required": ["id", "clientName", "phone", "address"]
+    },
+    "StaffMember": {
+      "title": "StaffMember",
+      "description": "Cleaner or technician in the dispatch fleet roster.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Staff ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full staff member name.",
+          "maxLength": 100
+        },
+        "role": {
+          "type": "string",
+          "description": "Staff role.",
+          "maxLength": 50
+        },
+        "phone": {
+          "type": "string",
+          "description": "Technician contact phone.",
+          "maxLength": 30
+        },
+        "email": {
+          "type": "string",
+          "description": "Technician email address.",
+          "maxLength": 150
+        },
+        "assignedVan": {
+          "type": "string",
+          "description": "Assigned fleet van ID or name.",
+          "maxLength": 50
+        },
+        "hubId": {
+          "type": "string",
+          "description": "Home depot hub ID.",
+          "maxLength": 50
+        },
+        "color": {
+          "type": "string",
+          "description": "Hex color code for map pin representation.",
+          "maxLength": 10
+        }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "VanHubOverride": {
+      "title": "VanHubOverride",
+      "description": "Customizable van naming, cleaner assignment, and depot hub overrides.",
+      "type": "object",
+      "properties": {
+        "vanId": {
+          "type": "string",
+          "description": "Unique vehicle ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "customVanName": {
+          "type": "string",
+          "description": "Custom display label for this vehicle unit.",
+          "maxLength": 100
+        },
+        "cleanerName": {
+          "type": "string",
+          "description": "Primary technician name operating this unit.",
+          "maxLength": 100
+        },
+        "phone": {
+          "type": "string",
+          "description": "Direct phone line for this unit.",
+          "maxLength": 30
+        },
+        "hubId": {
+          "type": "string",
+          "description": "Depot hub this vehicle originates from.",
+          "maxLength": 50
+        },
+        "customHubName": {
+          "type": "string",
+          "description": "Custom label for the depot hub.",
+          "maxLength": 100
+        },
+        "color": {
+          "type": "string",
+          "description": "Map route accent color.",
+          "maxLength": 20
+        }
+      },
+      "required": ["vanId"]
+    },
+    "Quote": {
+      "title": "Quote",
+      "description": "Commercial or residential service quote.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Quote ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "quoteNumber": {
+          "type": "string",
+          "description": "Quote reference number.",
+          "maxLength": 50
+        },
+        "clientName": {
+          "type": "string",
+          "description": "Client name.",
+          "maxLength": 150
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Total quoted amount in CAD."
+        },
+        "status": {
+          "type": "string",
+          "description": "Quote status.",
+          "enum": ["Draft", "Sent", "Approved", "Converted", "Declined"]
+        },
+        "issueDate": {
+          "type": "string",
+          "description": "Date quote was issued."
+        }
+      },
+      "required": ["id", "quoteNumber", "clientName", "totalAmount", "status"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Billing invoice for completed cleaning service.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Invoice ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "invoiceNumber": {
+          "type": "string",
+          "description": "Invoice invoice number.",
+          "maxLength": 50
+        },
+        "clientName": {
+          "type": "string",
+          "description": "Client billed.",
+          "maxLength": 150
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Total invoice balance in CAD."
+        },
+        "status": {
+          "type": "string",
+          "description": "Payment status.",
+          "enum": ["Draft", "Awaiting Payment", "Paid", "Overdue", "Bad Debt"]
+        },
+        "issueDate": {
+          "type": "string",
+          "description": "Invoice issue date."
+        },
+        "dueDate": {
+          "type": "string",
+          "description": "Invoice payment due date."
+        }
+      },
+      "required": ["id", "invoiceNumber", "clientName", "totalAmount", "status"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "System administrator account mapping.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Admin email address.",
+          "maxLength": 150
+        },
+        "role": {
+          "type": "string",
+          "description": "Admin authorization role.",
+          "enum": ["admin", "superadmin"]
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "ServiceCatalogItem": {
+      "title": "ServiceCatalogItem",
+      "description": "Service catalog & price list line item synchronized with Jobber using Formula: Number of Cleaners ( QTY x Unit Price ) = Total.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique catalog item ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Service Name / Jobber Line Item.",
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "description": "Category code.",
+          "maxLength": 50
+        },
+        "categoryLabel": {
+          "type": "string",
+          "description": "Display category label.",
+          "maxLength": 100
+        },
+        "bedrooms": {
+          "type": "string",
+          "description": "Bedroom count label.",
+          "maxLength": 50
+        },
+        "bathrooms": {
+          "type": "string",
+          "description": "Bathroom count label.",
+          "maxLength": 50
+        },
+        "cleanersCount": {
+          "type": "number",
+          "description": "Number of cleaners for the line item."
+        },
+        "quantity": {
+          "type": "number",
+          "description": "Quantity (hours or units) for the specified cleaners count."
+        },
+        "unitPrice": {
+          "type": "number",
+          "description": "Unit price in CAD."
+        },
+        "total": {
+          "type": "number",
+          "description": "Total price in CAD (QTY x Unit Price)."
+        },
+        "depositRequired": {
+          "type": "number",
+          "description": "Required booking deposit in CAD."
+        },
+        "status": {
+          "type": "string",
+          "description": "Catalog item status.",
+          "maxLength": 30
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether the item is active."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update."
+        }
+      },
+      "required": ["id", "name", "cleanersCount", "quantity", "unitPrice", "total"]
+    },
+    "BlockedNumberRule": {
+      "title": "BlockedNumberRule",
+      "description": "Persistent blocked phone number, prefix, or country code rule saved in the database for Twilio Spam Shield and Quo call screening.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique rule ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Phone number, prefix pattern (e.g. 1844*), or country code.",
+          "maxLength": 60
+        },
+        "ruleType": {
+          "type": "string",
+          "description": "Rule classification.",
+          "enum": ["number", "prefix", "areacode", "country"]
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason why this number or prefix was blocked.",
+          "maxLength": 300
+        },
+        "callerName": {
+          "type": "string",
+          "description": "Caller ID or spammer description.",
+          "maxLength": 150
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether the block rule is currently active."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when rule was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when rule was last updated."
+        }
+      },
+      "required": ["id", "pattern", "ruleType", "isActive", "updatedAt"]
+    },
+    "ScreenedCallRecord": {
+      "title": "ScreenedCallRecord",
+      "description": "Persistent screened call and voicemail transcript record with blocked/lead verdict synced across sessions.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique screened call ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "callerNumber": {
+          "type": "string",
+          "description": "Caller phone number.",
+          "maxLength": 40
+        },
+        "callerName": {
+          "type": "string",
+          "description": "Caller name or caller ID.",
+          "maxLength": 150
+        },
+        "status": {
+          "type": "string",
+          "description": "Screened call status.",
+          "enum": ["SCREENED_LEAD", "SOLICITOR_BLOCKED", "MISSED_VOICEMAIL", "BLOCKED"]
+        },
+        "isBlocked": {
+          "type": "boolean",
+          "description": "Whether this caller is blocked in Spam Shield."
+        },
+        "manuallyBlocked": {
+          "type": "boolean",
+          "description": "Whether staff manually blocked this caller."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Screening verdict or block reason.",
+          "maxLength": 500
+        },
+        "aiSummary": {
+          "type": "string",
+          "description": "Sona AI call summary.",
+          "maxLength": 1500
+        },
+        "transcript": {
+          "type": "string",
+          "description": "Call or voicemail transcript.",
+          "maxLength": 3000
+        },
+        "serviceType": {
+          "type": "string",
+          "description": "Requested cleaning service type.",
+          "maxLength": 150
+        },
+        "address": {
+          "type": "string",
+          "description": "Service address if provided.",
+          "maxLength": 300
+        },
+        "quotedAmount": {
+          "type": "number",
+          "description": "Estimated quote total in CAD."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when call occurred."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when call record was last updated."
+        }
+      },
+      "required": ["id", "callerNumber", "status", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Customer contacts, phone numbers, addresses, and Jobber-synchronized tags."
+    },
+    "/scheduledVisits/{visitId}": {
+      "schema": "ScheduledVisit",
+      "description": "Real-time dispatch scheduled appointments and calendar visits."
+    },
+    "/unscheduledJobs/{jobId}": {
+      "schema": "UnscheduledJob",
+      "description": "Unscheduled jobs queue awaiting assignment."
+    },
+    "/staff/{staffId}": {
+      "schema": "StaffMember",
+      "description": "Staff and cleaning roster technicians."
+    },
+    "/vanOverrides/{vanId}": {
+      "schema": "VanHubOverride",
+      "description": "Fleet custom vehicle names, phone numbers, and depot hub overrides."
+    },
+    "/quotes/{quoteId}": {
+      "schema": "Quote",
+      "description": "Client price estimates and service quotes."
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Client billing records and payment states."
+    },
+    "/serviceCatalog/{itemId}": {
+      "schema": "ServiceCatalogItem",
+      "description": "Live Service Catalog & Price List items (Number of Cleaners x QTY x Unit Price = Total)."
+    },
+    "/blockedNumbers/{blockId}": {
+      "schema": "BlockedNumberRule",
+      "description": "Persistent blocked numbers, area codes, and spam shield rules."
+    },
+    "/screenedCalls/{callId}": {
+      "schema": "ScreenedCallRecord",
+      "description": "Persistent screened calls, voicemails, and blocked call history."
+    },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Restricted administrator user registry."
+    }
+  }
+}

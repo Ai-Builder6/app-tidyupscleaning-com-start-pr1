@@ -1,0 +1,40 @@
+name: TidyUps Cleaning — Build, Verify & Cloud Run Deploy Workflow
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-verify:
+    name: TypeScript Lint, Vite Frontend Build & Server Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Complete Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: TypeScript Verification (tsc --noEmit)
+        run: npm run lint
+
+      - name: Production Build (Frontend + Express Server Bundle)
+        run: npm run build
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidyups-cleaning-production-dist
+          path: |
+            dist/
+            package.json
+            AI_BUILD_WORKFLOW.md
+            workflows/
+            README.md

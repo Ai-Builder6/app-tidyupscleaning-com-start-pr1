@@ -1,0 +1,36 @@
+# Google Cloud Build configuration — Deploys Cloud Run Service for TidyUps Cleaning
+# Primary Domain: app.tidyups.cleaning / app.tidyupscleaning.com
+#
+# Usage (Zero GitHub required):
+#   gcloud builds submit --config cloudbuild.yaml --project=gtm-kvj5cp62-zty5m
+
+steps:
+  # 1. Build container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/tidyups-cleaning:latest'
+      - '.'
+
+  # 2. Push container image to Google Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/tidyups-cleaning:latest'
+
+  # 3. Deploy Cloud Run Service for TidyUps Cleaning (app.tidyups.cleaning / app.tidyupscleaning.com)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'tidyups-cleaning'
+      - '--image=gcr.io/$PROJECT_ID/tidyups-cleaning:latest'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--set-env-vars=NODE_ENV=production,ACTIVE_PROJECT_ID=tidyups'
+
+images:
+  - 'gcr.io/$PROJECT_ID/tidyups-cleaning:latest'
