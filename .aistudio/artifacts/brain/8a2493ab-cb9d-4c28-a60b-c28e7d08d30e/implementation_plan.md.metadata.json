@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan to fix broken Google Sheet placeholder URLs (\"file does not exist\"), eliminate the \"Action required to load your app (blocking a required security cookie)\" error across Leads Hub and Jobber Sync Management, and add 1-click creation and live syncing of a multi-tab Google Sheet in Google Drive ready for Facebook Ads and Google Ads lead connections.",
+  "updatedAt": "2026-10-16T22:18:20.510496269Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
