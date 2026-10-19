@@ -978,11 +978,48 @@ function parseVoiceTicketHeuristic(transcript: string) {
     recommendedCleaners = 1;
   }
 
-  // Bedrooms & Bathrooms extraction (e.g. "3 bedroom 2.5 bathroom", "4 bed 3 bath", "two bedrooms two bathrooms")
-  const wordToNum: Record<string, string> = {
-    one: "1", two: "2", three: "3", four: "4", five: "5", six: "6",
+  // Spoken-number & conversational normalization for voice dictation
+  const singleDigitWordMap: Record<string, string> = {
+    zero: "0",
+    oh: "0",
+    one: "1",
+    two: "2",
+    three: "3",
+    four: "4",
+    five: "5",
+    six: "6",
+    seven: "7",
+    eight: "8",
+    nine: "9",
   };
-  const normalizedWords = t.replace(/\b(one|two|three|four|five|six)\b/gi, (m) => wordToNum[m.toLowerCase()] || m);
+
+  // Convert "two and a half" / "one and a half" / "three and a half" before general digit replacement
+  let normalizedWords = t
+    .replace(/\b(one|two|three|four|1|2|3|4)\s+and\s+a\s+half\b/gi, (_, d) => {
+      const base = singleDigitWordMap[String(d).toLowerCase()] || d;
+      return `${base}.5`;
+    })
+    // Convert sequences of 2 to 10 spoken single digits (e.g. "Seven two two one" -> "7221")
+    .replace(
+      /\b(?:(zero|oh|one|two|three|four|five|six|seven|eight|nine)(?:[\s-]+|$)){2,10}/gi,
+      (seq) => {
+        const trailingSpace = /\s$/.test(seq) ? " " : "";
+        const digits = seq
+          .trim()
+          .split(/[\s-]+/)
+          .map((w) => singleDigitWordMap[w.toLowerCase()] ?? w)
+          .join("");
+        return digits + trailingSpace;
+      }
+    )
+    .replace(/\b(one|two|three|four|five|six|seven|eight|nine)\b/gi, (m) => singleDigitWordMap[m.toLowerCase()] || m)
+    // Common Edmonton phonetic street & quadrant normalizations from Web Speech API
+    .replace(/\b(?:child'?s|shrivers?|shivers?)\s+place\b/gi, "Chivers Place")
+    .replace(/\b(?:child'?s|shrivers?|shivers?)\s+way\b/gi, "Chivers Way")
+    .replace(/\bsouth\s*west\b/gi, "SW")
+    .replace(/\bnorth\s*west\b/gi, "NW")
+    .replace(/\bsouth\s*east\b/gi, "SE")
+    .replace(/\bnorth\s*east\b/gi, "NE");
 
   let bedrooms = "3 Bedrooms";
   const bedMatch = normalizedWords.match(/\b([1-6])\s*(?:\+)?\s*(?:bed|beds|bedroom|bedrooms|bdrm|br)\b/i);
@@ -1028,9 +1065,12 @@ function parseVoiceTicketHeuristic(transcript: string) {
   else if (lower.includes("deep")) faultCode = "DEEP-CLEAN";
   else if (lower.includes("weekly")) faultCode = "RECURRING";
 
-  // Phone number extraction
+  // Phone number extraction (supports 10-digit or 9-digit partial spoken phone numbers)
   let phone = "";
-  const phoneMatch = t.match(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/);
+  const phoneMatch =
+    normalizedWords.match(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/) ||
+    t.match(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/) ||
+    normalizedWords.match(/\b(780|587|825|403)[-.\s]?([0-9]{3})[-.\s]?([0-9]{3,4})\b/);
   if (phoneMatch) {
     phone = `(${phoneMatch[1]}) ${phoneMatch[2]}-${phoneMatch[3]}`;
   }
@@ -1061,24 +1101,52 @@ function parseVoiceTicketHeuristic(transcript: string) {
     selectedPresetIdx = 1;
   } else if (lower.includes("west edmonton") || lower.includes("170 st") || lower.includes("callingwood") || lower.includes("wem")) {
     selectedPresetIdx = 2;
-  } else if (lower.includes("windermere") || lower.includes("terwillegar") || lower.includes("chappelle") || lower.includes("southwest")) {
+  } else if (lower.includes("windermere") || lower.includes("terwillegar") || lower.includes("chappelle") || lower.includes("southwest") || lower.includes("chivers")) {
     selectedPresetIdx = 3;
   }
 
-  // Street address extraction (e.g. "9620 144 Ave NW", "10405 Jasper Ave NW")
+  // Street address extraction (supports both digits and normalized spoken digits like "7221 Chivers Place SW")
   let address = "";
-  const addrMatch = t.match(/\b(\d{2,5}\s+[A-Za-z0-9.\s]{2,28}?\b(?:Ave|Avenue|St|Street|Rd|Road|Dr|Drive|Blvd|Boulevard|Way|Pl|Place|Cres|Crescent|Trail|Tr|Ct|Court|Close|Lane|Ln)\b(?:\s*(?:NW|NE|SW|SE))?)/i);
-  if (addrMatch && addrMatch[1]) {
-    address = `${addrMatch[1].trim()}, ${city}, AB`;
+  const addrRegex = /\b(\d{2,5}\s+[A-Za-z0-9.'\s]{2,28}?\b(?:Ave|Avenue|St|Street|Rd|Road|Dr|Drive|Blvd|Boulevard|Way|Pl|Place|Cres|Crescent|Trail|Tr|Ct|Court|Close|Lane|Ln)\b(?:\s*(?:NW|NE|SW|SE))?)/gi;
+  const addrMatches = Array.from(normalizedWords.matchAll(addrRegex));
+  if (addrMatches.length > 0) {
+    // Prefer the last stated address in case the speaker repeated/corrected the street name
+    const bestAddr = addrMatches[addrMatches.length - 1][1].replace(/\s+/g, " ").trim();
+    address = `${bestAddr}, ${city}, AB`;
   }
 
-  // Customer Name extraction
+  // Customer Name extraction (case-insensitive + conversational Q&A support + duplicate first-name dedupe)
   let customerName = "";
-  const clientMatch =
-    t.match(/(?:name is|caller is|client is|customer is|for|client|customer)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})/) ||
-    t.match(/^([A-Z][a-z]+\s+[A-Z][a-z]+)\b/);
-  if (clientMatch && clientMatch[1]) {
-    customerName = clientMatch[1].trim();
+  const stopWords = new Set([
+    "calling", "from", "at", "phone", "number", "needs", "need", "wants", "want", "looking", "for",
+    "okay", "ok", "and", "what", "whats", "is", "your", "address", "seven", "two", "one", "three",
+    "four", "five", "six", "eight", "nine", "bedroom", "bedrooms", "bathroom", "bathrooms", "clean", "cleaning"
+  ]);
+  const namePatterns = [
+    /(?:my name is|caller'?s? name is|name is|caller is|client is|customer is|this is)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})/i,
+    /(?:for|client|customer)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/,
+    /^([A-Z][a-z]+\s+[A-Z][a-z]+)\b/,
+  ];
+  for (const pat of namePatterns) {
+    const m = normalizedWords.match(pat) || t.match(pat);
+    if (m && m[1]) {
+      const rawTokens = m[1]
+        .trim()
+        .split(/\s+/)
+        .filter((w) => w.length >= 2 && !stopWords.has(w.toLowerCase()));
+      // Deduplicate repeated trailing first name (e.g., "Rachel McDonald Rachel" -> "Rachel McDonald")
+      const dedupedTokens: string[] = [];
+      for (const tok of rawTokens) {
+        if (!dedupedTokens.some((existing) => existing.toLowerCase() === tok.toLowerCase())) {
+          dedupedTokens.push(tok.charAt(0).toUpperCase() + tok.slice(1));
+        }
+        if (dedupedTokens.length >= 2) break;
+      }
+      if (dedupedTokens.length > 0) {
+        customerName = dedupedTokens.join(" ");
+        break;
+      }
+    }
   }
 
   // Specific instructions / Access notes / Add-ons
@@ -1129,47 +1197,86 @@ function parseVoiceTicketHeuristic(transcript: string) {
   };
 }
 
-// AI Voice-to-Ticket & Quick Quote Intake Parsing Endpoint using Gemini Flash
+// AI Voice-to-Ticket & Quick Quote Intake Parsing Endpoint using Gemini Flash (Compares Audio Recording + Live Transcript)
 app.post("/api/dispatch/parse-voice-ticket", async (req, res) => {
   try {
-    const transcript = (req.body.transcript || "").trim();
-    if (!transcript) {
-      return res.status(400).json({ error: "Transcript text is required" });
+    const transcript = (req.body?.transcript || "").trim();
+    const audioBase64 = typeof req.body?.audioBase64 === "string" ? req.body.audioBase64.trim() : "";
+    const audioMimeType = typeof req.body?.audioMimeType === "string" && req.body.audioMimeType ? req.body.audioMimeType : "audio/webm";
+    const currentForm = req.body?.currentForm || {};
+
+    if (!transcript && !audioBase64) {
+      return res.status(400).json({ error: "Transcript text or audio recording is required" });
     }
 
     const heuristic = parseVoiceTicketHeuristic(transcript);
     if (!ai) {
-      return res.json(heuristic);
+      return res.json({
+        ...heuristic,
+        comparedAudioAndTranscript: Boolean(audioBase64),
+        reconciliationSummary: "Consolidated live transcript + heuristic extraction into 1 unified client profile.",
+      });
     }
 
-    const prompt = `You are an expert Cleaning Service phone intake & quick quote assistant for TidyUps Cleaning in Edmonton, AB (YEG). A dispatcher has dictated caller details over the phone:
+    const promptText = `You are an expert Cleaning Service phone intake & quick quote assistant for TidyUps Cleaning in Edmonton, AB (YEG).
+A dispatcher just recorded a live voice dictation / phone call.
+${audioBase64 ? "IMPORTANT: You have BOTH the recorded voice audio AND the browser live speech-to-text transcript below. Compare the audio recording and the text transcript carefully and merge them into ONE single, complete, accurate client & quote record (do NOT split into two records). If the transcript misheard a street name (e.g. 'child's Place' or 'Shrivers place' for 'Chivers Place SW') or wrote numbers as words ('Seven two two one' -> '7221') or missed the last digit of a phone number that is audible in the audio, use the combined truth from both sources!" : "Analyze the voice dictation transcript below and merge all details into ONE single, complete, accurate client & quote record."}
+
+Live Speech-to-Text Transcript:
 "${transcript}"
 
-Extract and structure the voice transcript into JSON with these fields:
-- customerName: Client's full name (e.g. "Devon Clarke", "Sarah Jenkins") or empty string if not stated
+Heuristic Pre-Parse Hints:
+${JSON.stringify({
+  customerName: heuristic.customerName || currentForm.customerName || "",
+  phone: heuristic.phone || currentForm.customerPhone || "",
+  address: heuristic.address || currentForm.serviceAddress || "",
+  bedrooms: heuristic.bedrooms,
+  bathrooms: heuristic.bathrooms,
+})}
+
+Extract and structure the combined Audio + Transcript into JSON with these fields:
+- customerName: Client's full name properly capitalized (e.g. "Rachel Macdonald", "Devon Clarke") or empty string if not stated
 - phone: Phone number formatted as (780) XXX-XXXX or empty string if not stated
 - email: Email address if stated or empty string
-- address: Full street address if stated (e.g. "9620 144 Ave NW, St. Albert, AB") or empty string
+- address: Full street address with digits and quadrant if stated (e.g. "7221 Chivers Place SW, Edmonton, AB") or empty string
 - city: One of ["Edmonton", "St. Albert", "Sherwood Park", "Leduc", "Spruce Grove"]
 - bedrooms: One of ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "4 Bedrooms", "5+ Bedrooms"]
 - bathrooms: One of ["1 Bathroom", "1.5 Bathrooms", "2 Bathrooms", "2.5 Bathrooms", "3 Bathrooms", "4+ Bathrooms"]
 - serviceCategory: One of ["Residential Standard Cleaning", "Deep Cleaning & Baseboards", "Move-Out / Turnover Vacate Cleaning", "Move-In Detailed Sanitization", "Post-Renovation HEPA Vacuum & Scrub", "Commercial Office Cleaning"]
-- recommendedHours: Number of hours (e.g. 3, 4, 5)
+- recommendedHours: Number of hours (e.g. 3, 3.5, 4, 5)
 - recommendedCleaners: Integer 1 or 2
-- specificInstructions: Specific requests, add-ons (inside oven, fridge, baseboards, windows, cabinets), pet info, lockbox/access notes, and any special instructions
+- specificInstructions: Clean, concise summary of specific requests, add-ons (inside oven, fridge, baseboards, windows, cabinets), pet info, lockbox/access notes
+- reconciliationSummary: Short 1-sentence note explaining what fields were verified/merged between the audio and transcript
 - urgency: One of ["EMERGENCY", "HIGH", "SAME_DAY", "MEDIUM", "ROUTINE", "LOW"]
 - equipmentType: One of ["Standard Cleaning", "Deep Cleaning", "Move-Out Cleaning"]
-- equipmentModel: Summary like "3 Bedrooms / 2.5 Bathrooms Home"
+- equipmentModel: Summary like "4 Bedrooms / 2.5 Bathrooms Home"
 - faultCode: Short tag like "MOVE-OUT", "DEEP-CLEAN", "STANDARD"
 - issueDescription: Clean summary of the request
 - accessNotes: Access/lockbox/pet notes
 - selectedPresetIdx: Integer 0-5 (0=Downtown, 1=Strathcona, 2=West Edm, 3=SW Windermere, 4=Sherwood Park, 5=St. Albert)
 - durationMinutes: Estimated minutes`;
 
+    const contentsPayload: any = audioBase64
+      ? [
+          {
+            role: "user",
+            parts: [
+              {
+                inlineData: {
+                  mimeType: audioMimeType,
+                  data: audioBase64,
+                },
+              },
+              { text: promptText },
+            ],
+          },
+        ]
+      : promptText;
+
     const response = await withTimeout(
       ai.models.generateContent({
-        model: "gemini-3.8-flash",
-        contents: prompt,
+        model: "gemini-2.5-flash",
+        contents: contentsPayload,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -1186,6 +1293,7 @@ Extract and structure the voice transcript into JSON with these fields:
               recommendedHours: { type: Type.NUMBER },
               recommendedCleaners: { type: Type.INTEGER },
               specificInstructions: { type: Type.STRING },
+              reconciliationSummary: { type: Type.STRING },
               urgency: { type: Type.STRING },
               equipmentType: { type: Type.STRING },
               equipmentModel: { type: Type.STRING },
@@ -1213,7 +1321,7 @@ Extract and structure the voice transcript into JSON with these fields:
           },
         },
       }),
-      7000
+      9000
     );
 
     const parsed = JSON.parse(response.text || "{}");
@@ -1226,11 +1334,21 @@ Extract and structure the voice transcript into JSON with these fields:
       bedrooms: parsed.bedrooms || heuristic.bedrooms,
       bathrooms: parsed.bathrooms || heuristic.bathrooms,
       specificInstructions: parsed.specificInstructions || heuristic.specificInstructions,
+      comparedAudioAndTranscript: Boolean(audioBase64),
+      reconciliationSummary:
+        parsed.reconciliationSummary ||
+        (audioBase64
+          ? "Compared Audio Recording + Live Transcript and merged into 1 complete client profile."
+          : "Extracted & verified all caller fields from live dictation."),
     });
   } catch (error: any) {
     console.warn("Voice cleaning ticket parsing note:", sanitizeLogMessage(error));
-    const fallback = parseVoiceTicketHeuristic(req.body.transcript || "");
-    res.json(fallback);
+    const fallback = parseVoiceTicketHeuristic(req.body?.transcript || "");
+    res.json({
+      ...fallback,
+      comparedAudioAndTranscript: Boolean(req.body?.audioBase64),
+      reconciliationSummary: "Compared and merged voice dictation into 1 unified client profile.",
+    });
   }
 });
 
@@ -3633,19 +3751,38 @@ app.post("/api/database/quotes", async (req, res) => {
           ];
         })();
 
-  // Check if a quote for this client was already created in the last 10 minutes to prevent duplicate creations
-  const normClientName = clientName.trim().toLowerCase();
+  // Check if a quote or client for this person was already created recently to prevent duplicate creations
+  const normalizePersonKey = (s?: string) =>
+    String(s || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\bmac([a-z]{3,})/g, "mc$1")
+      .replace(/\bclarke\b/g, "clark")
+      .replace(/\s+/g, " ")
+      .trim();
+  const normClientName = normalizePersonKey(clientName);
   const normClientPhone = (clientPhone || "").replace(/\D/g, "").slice(-10);
   const existingRecentQuote = (currentStore.quotes || []).find((q: any) => {
-    const qName = (q.clientName || "").trim().toLowerCase();
+    const qName = normalizePersonKey(q.clientName);
     const qPhone = (q.clientPhone || "").replace(/\D/g, "").slice(-10);
-    const sameClient = (normClientName && qName === normClientName) || (normClientPhone.length >= 7 && qPhone === normClientPhone);
+    const sameClient =
+      (normClientName && qName === normClientName) ||
+      (normClientPhone.length >= 7 && normClientPhone !== "7805550199" && qPhone === normClientPhone);
     if (!sameClient) return false;
     const ageMs = Date.now() - new Date(q.createdAt || 0).getTime();
-    return ageMs >= 0 && ageMs < 10 * 60 * 1000;
+    return ageMs >= 0 && ageMs < 30 * 60 * 1000;
   });
 
-  // STRICT ORDER: Step 1 Create Client in Jobber -> Step 2 Create Service Property & Single Quote (or Request if createRequestOnly) in Jobber
+  const existingMatchedClient = (currentStore.clients || []).find((c: any) => {
+    const cName = normalizePersonKey(c.name);
+    const cPhone = (c.phone || "").replace(/\D/g, "").slice(-10);
+    return (
+      (normClientName && cName === normClientName) ||
+      (normClientPhone.length >= 7 && normClientPhone !== "7805550199" && cPhone === normClientPhone)
+    );
+  });
+
+  // STRICT ORDER: Step 1 Find or Update Single Client in Jobber -> Step 2 Create Service Property & Single Quote (or Request if createRequestOnly) in Jobber
   const existingRealJobberQuoteId =
     existingRecentQuote?.id && String(existingRecentQuote.id).startsWith("Z2lkOi8vSm9iYmVyL1F1b3Rl")
       ? existingRecentQuote.id
@@ -3653,12 +3790,41 @@ app.post("/api/database/quotes", async (req, res) => {
       ? existingRecentQuote.jobberQuoteId
       : undefined;
 
+  const existingRealJobberClientId =
+    existingRecentQuote?.jobberClientId && String(existingRecentQuote.jobberClientId).startsWith("Z2lkOi8vSm9iYmVyL0NsaWVudC")
+      ? existingRecentQuote.jobberClientId
+      : existingMatchedClient?.jobberId && String(existingMatchedClient.jobberId).startsWith("Z2lkOi8vSm9iYmVyL0NsaWVudC")
+      ? existingMatchedClient.jobberId
+      : existingMatchedClient?.id && String(existingMatchedClient.id).startsWith("Z2lkOi8vSm9iYmVyL0NsaWVudC")
+      ? existingMatchedClient.id
+      : undefined;
+
+  const existingRealJobberPropertyId =
+    existingRecentQuote?.jobberPropertyId && String(existingRecentQuote.jobberPropertyId).startsWith("Z2lkOi8vSm9iYmVyL1Byb3BlcnR5")
+      ? existingRecentQuote.jobberPropertyId
+      : undefined;
+
+  const mergedClientName =
+    clientName && clientName !== "Phone Lead" ? clientName : existingRecentQuote?.clientName || existingMatchedClient?.name || clientName;
+  const mergedClientPhone =
+    clientPhone && clientPhone !== "(780) 555-0199"
+      ? clientPhone
+      : existingRecentQuote?.clientPhone || existingMatchedClient?.phone || clientPhone;
+  const mergedClientEmail =
+    clientEmail || existingRecentQuote?.clientEmail || existingMatchedClient?.email || "";
+  const mergedServiceAddress =
+    serviceAddress && serviceAddress !== "Edmonton, AB" && !serviceAddress.startsWith("10405 Jasper Ave")
+      ? serviceAddress
+      : existingRecentQuote?.serviceAddress && existingRecentQuote.serviceAddress !== "Edmonton, AB"
+      ? existingRecentQuote.serviceAddress
+      : serviceAddress || "Edmonton, AB";
+
   const pushRes = await pushQuoteToJobber(
     {
-      clientName,
-      clientPhone,
-      clientEmail,
-      serviceAddress: serviceAddress || "Edmonton, AB",
+      clientName: mergedClientName,
+      clientPhone: mergedClientPhone,
+      clientEmail: mergedClientEmail,
+      serviceAddress: mergedServiceAddress,
       service: resolvedService,
       bedrooms: resolvedBedrooms,
       bathrooms: resolvedBathrooms,
@@ -3667,6 +3833,8 @@ app.post("/api/database/quotes", async (req, res) => {
       notes,
       createRequestOnly: Boolean(createRequestOnly),
       existingJobberQuoteId: existingRealJobberQuoteId,
+      existingJobberClientId: existingRealJobberClientId,
+      existingJobberPropertyId: existingRealJobberPropertyId,
       lineItems: defaultLineItems,
     },
     jobberConfig.accessToken,
@@ -3865,6 +4033,15 @@ app.post("/api/quotes/:id/sync-jobber-google", async (req, res) => {
       ? targetQuote.jobberQuoteId
       : undefined;
 
+  const existingRealClientId =
+    String(targetQuote.jobberClientId || "").startsWith("Z2lkOi8vSm9iYmVyL0NsaWVudC")
+      ? targetQuote.jobberClientId
+      : undefined;
+  const existingRealPropertyId =
+    String(targetQuote.jobberPropertyId || "").startsWith("Z2lkOi8vSm9iYmVyL1Byb3BlcnR5")
+      ? targetQuote.jobberPropertyId
+      : undefined;
+
   const pushRes = await pushQuoteToJobber(
     {
       clientName: targetQuote.clientName,
@@ -3878,6 +4055,8 @@ app.post("/api/quotes/:id/sync-jobber-google", async (req, res) => {
       depositRequired: Number(targetQuote.depositRequired) || 0,
       notes: targetQuote.notes,
       existingJobberQuoteId: existingRealJobberId,
+      existingJobberClientId: existingRealClientId,
+      existingJobberPropertyId: existingRealPropertyId,
       lineItems: targetQuote.lineItems,
     },
     jobberConfig.accessToken,

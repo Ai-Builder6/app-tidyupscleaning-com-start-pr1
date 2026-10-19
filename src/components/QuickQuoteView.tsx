@@ -196,13 +196,58 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     }
   }, [serviceCatalog]);
 
-  // 1. Live Voice Dictation state
+  // 1. Live Voice Dictation + Parallel Audio Recording + Live Green Block Highlighting state
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [voiceTranscript, setVoiceTranscript] = useState<string>('');
   const [interimTranscript, setInterimTranscript] = useState<string>('');
   const [isParsingVoice, setIsParsingVoice] = useState<boolean>(false);
   const [voiceStatusMsg, setVoiceStatusMsg] = useState<string | null>(null);
+  const [reconciliationNote, setReconciliationNote] = useState<string | null>(null);
+  const [hasParallelAudio, setHasParallelAudio] = useState<boolean>(false);
+  const [flashingFields, setFlashingFields] = useState<Record<string, boolean>>({});
+  const [voiceCapturedFields, setVoiceCapturedFields] = useState<Record<string, string>>({});
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const flashTimersRef = useRef<Record<string, any>>({});
+  const liveValuesRef = useRef<{
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+    city: string;
+    bedrooms: string;
+    bathrooms: string;
+    serviceType: string;
+    hours: number;
+    crew: string;
+    notes: string;
+  }>({
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+    city: 'Edmonton',
+    bedrooms: '3 Bedrooms',
+    bathrooms: '2 Bathrooms',
+    serviceType: 'Residential Standard Cleaning',
+    hours: 3,
+    crew: '1_CLEANER',
+    notes: '',
+  });
+
+  const triggerFieldHighlight = useCallback((fieldKey: string, capturedLabel?: string) => {
+    setFlashingFields((prev) => ({ ...prev, [fieldKey]: true }));
+    if (capturedLabel) {
+      setVoiceCapturedFields((prev) => ({ ...prev, [fieldKey]: capturedLabel }));
+    }
+    if (flashTimersRef.current[fieldKey]) {
+      clearTimeout(flashTimersRef.current[fieldKey]);
+    }
+    flashTimersRef.current[fieldKey] = setTimeout(() => {
+      setFlashingFields((prev) => ({ ...prev, [fieldKey]: false }));
+    }, 4500);
+  }, []);
 
   // 2. Hours & Crew Calculator + Custom Discount + Deposit Link
   const [hours, setHours] = useState<number>(3);
@@ -357,103 +402,500 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     }
   }, []);
 
-  // Parse voice transcript (instant client-side extraction + backend Gemini AI extraction)
-  const handleExtractFromTranscript = useCallback(async (rawText?: string) => {
-    const textToParse = (rawText ?? voiceTranscript).trim();
-    if (!textToParse) {
-      setVoiceStatusMsg('Please speak or type caller details first.');
-      return;
-    }
+  // Fast live client-side extraction that runs IN REAL TIME as the user speaks into the microphone
+  const applyLiveSpeechExtraction = useCallback(
+    (rawSpeech: string, isFinalMerge = false) => {
+      const t = (rawSpeech || '').trim();
+      if (!t) return;
 
-    setIsParsingVoice(true);
-    setVoiceStatusMsg('Extracting caller name, phone, address, bedrooms, bathrooms & cleaning details...');
+      const singleDigitWordMap: Record<string, string> = {
+        zero: '0',
+        oh: '0',
+        one: '1',
+        two: '2',
+        three: '3',
+        four: '4',
+        five: '5',
+        six: '6',
+        seven: '7',
+        eight: '8',
+        nine: '9',
+      };
 
-    try {
-      const res = await fetch('/api/dispatch/parse-voice-ticket', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: textToParse }),
-      });
-      const data = await res.json();
+      const normalized = t
+        .replace(/\b(one|two|three|four|1|2|3|4)\s+and\s+a\s+half\b/gi, (_, d) => {
+          const base = singleDigitWordMap[String(d).toLowerCase()] || d;
+          return `${base}.5`;
+        })
+        .replace(
+          /\b(?:(zero|oh|one|two|three|four|five|six|seven|eight|nine)(?:[\s-]+|$)){2,10}/gi,
+          (seq) => {
+            const trailingSpace = /\s$/.test(seq) ? ' ' : '';
+            const digits = seq
+              .trim()
+              .split(/[\s-]+/)
+              .map((w) => singleDigitWordMap[w.toLowerCase()] ?? w)
+              .join('');
+            return digits + trailingSpace;
+          }
+        )
+        .replace(/\b(one|two|three|four|five|six|seven|eight|nine)\b/gi, (m) => singleDigitWordMap[m.toLowerCase()] || m)
+        .replace(/\b(?:child'?s|shrivers?|shivers?)\s+place\b/gi, 'Chivers Place')
+        .replace(/\b(?:child'?s|shrivers?|shivers?)\s+way\b/gi, 'Chivers Way')
+        .replace(/\bsouth\s*west\b/gi, 'SW')
+        .replace(/\bnorth\s*west\b/gi, 'NW')
+        .replace(/\bsouth\s*east\b/gi, 'SE')
+        .replace(/\bnorth\s*east\b/gi, 'NE');
 
-      if (data) {
-        if (data.customerName && data.customerName !== 'Residential Client') {
-          setCustomerName(data.customerName);
-        }
-        if (data.phone) {
-          setCustomerPhone(data.phone);
-        }
-        if (data.email) {
-          setCustomerEmail(data.email);
-        }
-        if (data.city) {
-          setCity(data.city);
-        }
-        if (data.address) {
-          setServiceAddress(data.address);
-          geocodeAddressOnQuickMap(data.address);
-        }
-        if (data.bedrooms) {
-          setBedrooms(data.bedrooms);
-        }
-        if (data.bathrooms) {
-          setBathrooms(data.bathrooms);
-        }
-        if (data.serviceCategory) {
-          setServiceType(data.serviceCategory);
-        }
-        if (typeof data.recommendedHours === 'number' && data.recommendedHours > 0) {
-          setHours(data.recommendedHours);
-        }
-        if (data.recommendedCleaners === 2) {
-          setCrewSelection('2_CLEANERS');
-        } else if (data.recommendedCleaners === 1) {
-          setCrewSelection('1_CLEANER');
-        }
-        if (data.specificInstructions) {
-          setQuoteNotes(data.specificInstructions);
-        } else {
-          setQuoteNotes(textToParse);
-        }
+      const lower = normalized.toLowerCase();
+      const newlyHighlighted: string[] = [];
 
-        // Auto-select any detected add-on tags
-        const lower = textToParse.toLowerCase();
-        const matchedTags: string[] = [];
-        if (lower.includes('oven')) matchedTags.push('Inside Oven');
-        if (lower.includes('fridge') || lower.includes('refrigerator')) matchedTags.push('Inside Fridge');
-        if (lower.includes('baseboard')) matchedTags.push('Baseboards Scrub');
-        if (lower.includes('cabinet') || lower.includes('cupboard')) matchedTags.push('Inside Cabinets');
-        if (lower.includes('window')) matchedTags.push('Interior Windows');
-        if (lower.includes('basement')) matchedTags.push('Basement Included');
-        if (lower.includes('pet') || lower.includes('dog') || lower.includes('cat')) matchedTags.push('Pets in Home');
-        if (lower.includes('lockbox') || lower.includes('code') || lower.includes('keypad')) matchedTags.push('Lockbox Entry');
-        if (matchedTags.length > 0) {
-          setSelectedAddons(matchedTags);
+      // 1. Live Customer Name detection
+      const stopWords = new Set([
+        'calling', 'from', 'at', 'phone', 'number', 'needs', 'need', 'wants', 'want', 'looking', 'for',
+        'okay', 'ok', 'and', 'what', 'whats', 'is', 'your', 'address', 'seven', 'two', 'one', 'three',
+        'four', 'five', 'six', 'eight', 'nine', 'bedroom', 'bedrooms', 'bathroom', 'bathrooms', 'clean', 'cleaning',
+      ]);
+      const namePatterns = [
+        /(?:my name is|caller'?s? name is|name is|caller is|client is|customer is|this is)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})/i,
+        /(?:for|client|customer)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/,
+        /^([A-Z][a-z]+\s+[A-Z][a-z]+)\b/,
+      ];
+      for (const pat of namePatterns) {
+        const m = normalized.match(pat) || t.match(pat);
+        if (m && m[1]) {
+          const rawTokens = m[1]
+            .trim()
+            .split(/\s+/)
+            .filter((w) => w.length >= 2 && !stopWords.has(w.toLowerCase()));
+          const deduped: string[] = [];
+          for (const tok of rawTokens) {
+            if (!deduped.some((ex) => ex.toLowerCase() === tok.toLowerCase())) {
+              deduped.push(tok.charAt(0).toUpperCase() + tok.slice(1));
+            }
+            if (deduped.length >= 2) break;
+          }
+          const candidateName = deduped.join(' ');
+          if (candidateName && candidateName !== liveValuesRef.current.name) {
+            liveValuesRef.current.name = candidateName;
+            setCustomerName(candidateName);
+            triggerFieldHighlight('name', candidateName);
+            newlyHighlighted.push(`Name: ${candidateName}`);
+          }
+          break;
         }
-
-        // Detect deposit ($50 or $100) and custom discount ($40 etc.) from voice dictation
-        const depMatch = lower.match(/\$?\s*(\d+)\s*(?:dollar\s*)?deposit/i) || lower.match(/deposit\s*(?:of\s*)?\$?\s*(\d+)/i);
-        if (depMatch) {
-          setDepositAmount(Number(depMatch[1]) || 50);
-          setShowDepositPanel(true);
-        }
-        const discMatch = lower.match(/\$?\s*(\d+)\s*(?:dollar\s*)?(?:discount|off)/i) || lower.match(/discount\s*(?:of\s*)?\$?\s*(\d+)/i);
-        if (discMatch) {
-          setDiscountAmount(Number(discMatch[1]) || 0);
-        }
-
-        setVoiceStatusMsg(
-          `✓ Auto-filled: ${data.customerName || 'Caller'} • ${data.bedrooms || bedrooms} / ${data.bathrooms || bathrooms} • ${data.serviceCategory || serviceType}`
-        );
       }
-    } catch (err: any) {
-      setVoiceStatusMsg('Extracted caller details into form fields.');
-    } finally {
-      setIsParsingVoice(false);
-    }
-  }, [voiceTranscript, bedrooms, bathrooms, serviceType, geocodeAddressOnQuickMap]);
 
-  // Toggle Web Speech API live microphone dictation
+      // 2. Live Phone Number detection
+      const phoneMatch =
+        normalized.match(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/) ||
+        t.match(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/) ||
+        normalized.match(/\b(780|587|825|403)[-.\s]?([0-9]{3})[-.\s]?([0-9]{3,4})\b/);
+      if (phoneMatch) {
+        const formattedPhone = `(${phoneMatch[1]}) ${phoneMatch[2]}-${phoneMatch[3]}`;
+        if (formattedPhone !== liveValuesRef.current.phone) {
+          liveValuesRef.current.phone = formattedPhone;
+          setCustomerPhone(formattedPhone);
+          triggerFieldHighlight('phone', formattedPhone);
+          newlyHighlighted.push(`Phone: ${formattedPhone}`);
+        }
+      }
+
+      // 3. Live Email detection
+      const emailMatch = t.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/);
+      if (emailMatch && emailMatch[0] !== liveValuesRef.current.email) {
+        liveValuesRef.current.email = emailMatch[0];
+        setCustomerEmail(emailMatch[0]);
+        triggerFieldHighlight('email', emailMatch[0]);
+        newlyHighlighted.push(`Email: ${emailMatch[0]}`);
+      }
+
+      // 4. Live City detection
+      let detectedCity = liveValuesRef.current.city || 'Edmonton';
+      if (lower.includes('st albert') || lower.includes('st. albert') || lower.includes('boudreau')) {
+        detectedCity = 'St. Albert';
+      } else if (lower.includes('sherwood park') || lower.includes('premier way')) {
+        detectedCity = 'Sherwood Park';
+      } else if (lower.includes('spruce grove')) {
+        detectedCity = 'Spruce Grove';
+      } else if (lower.includes('leduc')) {
+        detectedCity = 'Leduc';
+      }
+      if (detectedCity !== liveValuesRef.current.city) {
+        liveValuesRef.current.city = detectedCity;
+        setCity(detectedCity);
+        triggerFieldHighlight('city', detectedCity);
+      }
+
+      // 5. Live Street Address detection
+      const addrRegex =
+        /\b(\d{2,5}\s+[A-Za-z0-9.'\s]{2,28}?\b(?:Ave|Avenue|St|Street|Rd|Road|Dr|Drive|Blvd|Boulevard|Way|Pl|Place|Cres|Crescent|Trail|Tr|Ct|Court|Close|Lane|Ln)\b(?:\s*(?:NW|NE|SW|SE))?)/gi;
+      const addrMatches = Array.from(normalized.matchAll(addrRegex));
+      if (addrMatches.length > 0) {
+        const bestStreet = addrMatches[addrMatches.length - 1][1].replace(/\s+/g, ' ').trim();
+        const fullAddr = `${bestStreet}, ${detectedCity}, AB`;
+        if (fullAddr !== liveValuesRef.current.address) {
+          liveValuesRef.current.address = fullAddr;
+          setServiceAddress(fullAddr);
+          geocodeAddressOnQuickMap(fullAddr);
+          triggerFieldHighlight('address', bestStreet);
+          newlyHighlighted.push(`Address: ${bestStreet}`);
+        }
+      }
+
+      // 6. Live Bedrooms & Bathrooms detection
+      let nextBedrooms = liveValuesRef.current.bedrooms;
+      const bedMatch = normalized.match(/\b([1-6])\s*(?:\+)?\s*(?:bed|beds|bedroom|bedrooms|bdrm|br)\b/i);
+      if (bedMatch) {
+        const n = parseInt(bedMatch[1], 10);
+        const mappedBed = n === 1 ? '1 Bedroom' : n >= 5 ? '5+ Bedrooms' : `${n} Bedrooms`;
+        if (mappedBed !== liveValuesRef.current.bedrooms) {
+          nextBedrooms = mappedBed;
+          liveValuesRef.current.bedrooms = mappedBed;
+          setBedrooms(mappedBed);
+          triggerFieldHighlight('bedrooms', mappedBed);
+          newlyHighlighted.push(mappedBed);
+        }
+      }
+
+      let nextBathrooms = liveValuesRef.current.bathrooms;
+      const bathMatch = normalized.match(/\b([1-5](?:\.5)?)\s*(?:\+)?\s*(?:bath|baths|bathroom|bathrooms|ba)\b/i);
+      if (bathMatch) {
+        const b = parseFloat(bathMatch[1]);
+        const mappedBath =
+          b === 1
+            ? '1 Bathroom'
+            : b === 1.5
+            ? '1.5 Bathrooms'
+            : b === 2
+            ? '2 Bathrooms'
+            : b === 2.5
+            ? '2.5 Bathrooms'
+            : b === 3
+            ? '3 Bathrooms'
+            : '4+ Bathrooms';
+        if (mappedBath !== liveValuesRef.current.bathrooms) {
+          nextBathrooms = mappedBath;
+          liveValuesRef.current.bathrooms = mappedBath;
+          setBathrooms(mappedBath);
+          triggerFieldHighlight('bathrooms', mappedBath);
+          newlyHighlighted.push(mappedBath);
+        }
+      }
+
+      // 7. Live Service Type detection
+      let nextServiceType = liveValuesRef.current.serviceType;
+      if (lower.includes('move out') || lower.includes('move-out') || lower.includes('vacate')) {
+        nextServiceType = 'Move-Out / Turnover Vacate Cleaning';
+      } else if (lower.includes('move in') || lower.includes('move-in') || lower.includes('airbnb')) {
+        nextServiceType = 'Move-In Detailed Sanitization';
+      } else if (lower.includes('post-reno') || lower.includes('renovation')) {
+        nextServiceType = 'Post-Renovation HEPA Vacuum & Scrub';
+      } else if (lower.includes('commercial') || lower.includes('office')) {
+        nextServiceType = 'Commercial Office Cleaning';
+      } else if (lower.includes('deep clean') || lower.includes('deep scrub')) {
+        nextServiceType = 'Deep Cleaning & Baseboards';
+      } else if (lower.includes('standard') || lower.includes('basic clean') || lower.includes('regular clean')) {
+        nextServiceType = 'Residential Standard Cleaning';
+      }
+      if (nextServiceType !== liveValuesRef.current.serviceType) {
+        liveValuesRef.current.serviceType = nextServiceType;
+        setServiceType(nextServiceType);
+        triggerFieldHighlight('serviceType', nextServiceType);
+      }
+
+      // Auto-sync catalog hours/cleaners when bedrooms or bathrooms change live
+      const explicitHoursMatch = normalized.match(/\b([1-8](?:\.5)?)\s*(?:hour|hours|hr|hrs)\b/i);
+      const explicitCleanersMatch = normalized.match(/\b([1-3])\s*(?:cleaner|cleaners|person|people|techs|crew)\b/i);
+      if (explicitHoursMatch) {
+        const h = parseFloat(explicitHoursMatch[1]);
+        if (h !== liveValuesRef.current.hours) {
+          liveValuesRef.current.hours = h;
+          setHours(h);
+          triggerFieldHighlight('hours', `${h} hrs`);
+        }
+      }
+      if (explicitCleanersMatch) {
+        const c = parseInt(explicitCleanersMatch[1], 10) >= 2 ? '2_CLEANERS' : '1_CLEANER';
+        if (c !== liveValuesRef.current.crew) {
+          liveValuesRef.current.crew = c;
+          setCrewSelection(c);
+          triggerFieldHighlight('cleaners', c === '2_CLEANERS' ? '2 Cleaners' : '1 Cleaner');
+        }
+      } else if (bedMatch || bathMatch) {
+        const catMatch = matchCatalogItem(
+          nextServiceType,
+          nextBedrooms,
+          nextBathrooms,
+          localCatalog || CANONICAL_SERVICE_CATALOG
+        );
+        if (catMatch) {
+          const catHours = catMatch.quantity ?? catMatch.baseHours ?? 3;
+          const catCrew = (catMatch.cleanersCount || 2) >= 2 ? '2_CLEANERS' : '1_CLEANER';
+          if (catHours !== liveValuesRef.current.hours || catCrew !== liveValuesRef.current.crew) {
+            liveValuesRef.current.hours = catHours;
+            liveValuesRef.current.crew = catCrew;
+            setHours(catHours);
+            setCrewSelection(catCrew);
+            if (catMatch.depositRequired !== undefined) {
+              setDepositAmount(catMatch.depositRequired);
+              triggerFieldHighlight('deposit', `$${catMatch.depositRequired} Dep`);
+            }
+            triggerFieldHighlight('hours', `${catHours} hrs`);
+            triggerFieldHighlight('cleaners', catCrew === '2_CLEANERS' ? '2 Cleaners' : '1 Cleaner');
+          }
+        }
+      }
+
+      // 8. Live Add-ons & Notes
+      const matchedTags: string[] = [];
+      if (lower.includes('oven')) matchedTags.push('Inside Oven');
+      if (lower.includes('fridge') || lower.includes('refrigerator')) matchedTags.push('Inside Fridge');
+      if (lower.includes('baseboard')) matchedTags.push('Baseboards Scrub');
+      if (lower.includes('cabinet') || lower.includes('cupboard')) matchedTags.push('Inside Cabinets');
+      if (lower.includes('window')) matchedTags.push('Interior Windows');
+      if (lower.includes('basement')) matchedTags.push('Basement Included');
+      if (lower.includes('pet') || lower.includes('dog') || lower.includes('cat')) matchedTags.push('Pets in Home');
+      if (lower.includes('lockbox') || lower.includes('code') || lower.includes('keypad')) matchedTags.push('Lockbox Entry');
+      if (matchedTags.length > 0) {
+        setSelectedAddons((prev) => {
+          const merged = Array.from(new Set([...prev, ...matchedTags]));
+          if (merged.length !== prev.length) {
+            triggerFieldHighlight('notes', `${merged.length} Add-ons`);
+          }
+          return merged;
+        });
+      }
+
+      if (isFinalMerge && t.length > 5 && t !== liveValuesRef.current.notes) {
+        liveValuesRef.current.notes = t;
+        setQuoteNotes(t);
+        triggerFieldHighlight('notes', 'Notes Filled');
+      }
+
+      if (newlyHighlighted.length > 0) {
+        setVoiceStatusMsg(`⚡ Live Filled: ${newlyHighlighted.join(' • ')}`);
+      }
+    },
+    [geocodeAddressOnQuickMap, localCatalog, triggerFieldHighlight]
+  );
+
+  // Convert recorded audio Blob to base64 string for dual Audio + Transcript comparison
+  const blobToBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const res = String(reader.result || '');
+        const base64 = res.includes(',') ? res.split(',')[1] : res;
+        resolve(base64);
+      };
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(blob);
+    });
+
+  // Parse voice transcript + parallel recorded audio (Dual-Source Audio + Transcript Reconciliation)
+  const handleExtractFromTranscript = useCallback(
+    async (rawText?: string, recordedAudioBlob?: Blob | null) => {
+      const textToParse = (rawText ?? voiceTranscript).trim();
+      if (!textToParse && !recordedAudioBlob) {
+        setVoiceStatusMsg('Please speak or type caller details first.');
+        return;
+      }
+
+      // Immediately run client-side live extraction so blocks light up right away
+      if (textToParse) {
+        applyLiveSpeechExtraction(textToParse, true);
+      }
+
+      setIsParsingVoice(true);
+      setVoiceStatusMsg(
+        recordedAudioBlob
+          ? 'Comparing Recorded Audio + Live Transcript to merge into 1 complete client...'
+          : 'Extracting & verifying caller name, phone, address, bedrooms, bathrooms & cleaning details...'
+      );
+
+      try {
+        let audioBase64 = '';
+        let audioMimeType = 'audio/webm';
+        if (recordedAudioBlob && recordedAudioBlob.size > 0) {
+          audioMimeType = recordedAudioBlob.type || 'audio/webm';
+          audioBase64 = await blobToBase64(recordedAudioBlob);
+        }
+
+        const res = await fetch('/api/dispatch/parse-voice-ticket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transcript: textToParse,
+            audioBase64: audioBase64 || undefined,
+            audioMimeType,
+            currentForm: {
+              customerName: liveValuesRef.current.name || customerName,
+              customerPhone: liveValuesRef.current.phone || customerPhone,
+              serviceAddress: liveValuesRef.current.address || serviceAddress,
+              bedrooms: liveValuesRef.current.bedrooms || bedrooms,
+              bathrooms: liveValuesRef.current.bathrooms || bathrooms,
+            },
+          }),
+        });
+        const data = await res.json();
+
+        if (data) {
+          if (data.customerName && data.customerName !== 'Residential Client') {
+            liveValuesRef.current.name = data.customerName;
+            setCustomerName(data.customerName);
+            triggerFieldHighlight('name', data.customerName);
+          }
+          if (data.phone) {
+            liveValuesRef.current.phone = data.phone;
+            setCustomerPhone(data.phone);
+            triggerFieldHighlight('phone', data.phone);
+          }
+          if (data.email) {
+            liveValuesRef.current.email = data.email;
+            setCustomerEmail(data.email);
+            triggerFieldHighlight('email', data.email);
+          }
+          if (data.city) {
+            liveValuesRef.current.city = data.city;
+            setCity(data.city);
+            triggerFieldHighlight('city', data.city);
+          }
+          if (data.address) {
+            liveValuesRef.current.address = data.address;
+            setServiceAddress(data.address);
+            geocodeAddressOnQuickMap(data.address);
+            triggerFieldHighlight('address', data.address);
+          }
+          if (data.bedrooms) {
+            liveValuesRef.current.bedrooms = data.bedrooms;
+            setBedrooms(data.bedrooms);
+            triggerFieldHighlight('bedrooms', data.bedrooms);
+          }
+          if (data.bathrooms) {
+            liveValuesRef.current.bathrooms = data.bathrooms;
+            setBathrooms(data.bathrooms);
+            triggerFieldHighlight('bathrooms', data.bathrooms);
+          }
+          if (data.serviceCategory) {
+            liveValuesRef.current.serviceType = data.serviceCategory;
+            setServiceType(data.serviceCategory);
+            triggerFieldHighlight('serviceType', data.serviceCategory);
+          }
+
+          // Match canonical price catalog for the reconciled bedrooms/bathrooms/service
+          const catMatch = matchCatalogItem(
+            data.serviceCategory || liveValuesRef.current.serviceType || serviceType,
+            data.bedrooms || liveValuesRef.current.bedrooms || bedrooms,
+            data.bathrooms || liveValuesRef.current.bathrooms || bathrooms,
+            localCatalog || CANONICAL_SERVICE_CATALOG
+          );
+          if (catMatch) {
+            const catHours = catMatch.quantity ?? catMatch.baseHours ?? 3;
+            const catCrew = (catMatch.cleanersCount || 2) >= 2 ? '2_CLEANERS' : '1_CLEANER';
+            liveValuesRef.current.hours = catHours;
+            liveValuesRef.current.crew = catCrew;
+            setHours(catHours);
+            setCrewSelection(catCrew);
+            if (catMatch.depositRequired !== undefined) {
+              setDepositAmount(catMatch.depositRequired);
+              triggerFieldHighlight('deposit', `$${catMatch.depositRequired} Dep`);
+            }
+            triggerFieldHighlight('hours', `${catHours} hrs`);
+            triggerFieldHighlight('cleaners', catCrew === '2_CLEANERS' ? '2 Cleaners' : '1 Cleaner');
+          } else {
+            if (typeof data.recommendedHours === 'number' && data.recommendedHours > 0) {
+              liveValuesRef.current.hours = data.recommendedHours;
+              setHours(data.recommendedHours);
+              triggerFieldHighlight('hours', `${data.recommendedHours} hrs`);
+            }
+            if (data.recommendedCleaners === 2) {
+              liveValuesRef.current.crew = '2_CLEANERS';
+              setCrewSelection('2_CLEANERS');
+              triggerFieldHighlight('cleaners', '2 Cleaners');
+            } else if (data.recommendedCleaners === 1) {
+              liveValuesRef.current.crew = '1_CLEANER';
+              setCrewSelection('1_CLEANER');
+              triggerFieldHighlight('cleaners', '1 Cleaner');
+            }
+          }
+
+          if (data.specificInstructions) {
+            liveValuesRef.current.notes = data.specificInstructions;
+            setQuoteNotes(data.specificInstructions);
+            triggerFieldHighlight('notes', 'Notes Reconciled');
+          } else if (textToParse) {
+            liveValuesRef.current.notes = textToParse;
+            setQuoteNotes(textToParse);
+            triggerFieldHighlight('notes', 'Notes Filled');
+          }
+
+          // Auto-select any detected add-on tags
+          const lower = textToParse.toLowerCase();
+          const matchedTags: string[] = [];
+          if (lower.includes('oven')) matchedTags.push('Inside Oven');
+          if (lower.includes('fridge') || lower.includes('refrigerator')) matchedTags.push('Inside Fridge');
+          if (lower.includes('baseboard')) matchedTags.push('Baseboards Scrub');
+          if (lower.includes('cabinet') || lower.includes('cupboard')) matchedTags.push('Inside Cabinets');
+          if (lower.includes('window')) matchedTags.push('Interior Windows');
+          if (lower.includes('basement')) matchedTags.push('Basement Included');
+          if (lower.includes('pet') || lower.includes('dog') || lower.includes('cat')) matchedTags.push('Pets in Home');
+          if (lower.includes('lockbox') || lower.includes('code') || lower.includes('keypad')) matchedTags.push('Lockbox Entry');
+          if (matchedTags.length > 0) {
+            setSelectedAddons(matchedTags);
+          }
+
+          // Detect deposit ($50 or $100) and custom discount ($40 etc.) from voice dictation
+          const depMatch =
+            lower.match(/\$?\s*(\d+)\s*(?:dollar\s*)?deposit/i) ||
+            lower.match(/deposit\s*(?:of\s*)?\$?\s*(\d+)/i);
+          if (depMatch) {
+            const depVal = Number(depMatch[1]) || 50;
+            setDepositAmount(depVal);
+            setShowDepositPanel(true);
+            triggerFieldHighlight('deposit', `$${depVal} Dep`);
+          }
+          const discMatch =
+            lower.match(/\$?\s*(\d+)\s*(?:dollar\s*)?(?:discount|off)/i) ||
+            lower.match(/discount\s*(?:of\s*)?\$?\s*(\d+)/i);
+          if (discMatch) {
+            const discVal = Number(discMatch[1]) || 0;
+            setDiscountAmount(discVal);
+            triggerFieldHighlight('discount', `-$${discVal}`);
+          }
+
+          if (data.reconciliationSummary) {
+            setReconciliationNote(data.reconciliationSummary);
+          }
+          setVoiceStatusMsg(
+            `✓ Reconciled into 1 Complete Client: ${data.customerName || liveValuesRef.current.name || 'Caller'} • ${
+              data.bedrooms || bedrooms
+            } / ${data.bathrooms || bathrooms} • ${data.address || liveValuesRef.current.address || city}`
+          );
+        }
+      } catch (err: any) {
+        setVoiceStatusMsg('Extracted caller details into form fields.');
+      } finally {
+        setIsParsingVoice(false);
+      }
+    },
+    [
+      voiceTranscript,
+      customerName,
+      customerPhone,
+      serviceAddress,
+      bedrooms,
+      bathrooms,
+      serviceType,
+      city,
+      localCatalog,
+      geocodeAddressOnQuickMap,
+      applyLiveSpeechExtraction,
+      triggerFieldHighlight,
+    ]
+  );
+
+  // Toggle Web Speech API live microphone dictation + Parallel MediaRecorder Audio Capture
   const handleToggleVoiceDictation = () => {
     if (isRecording) {
       if (recognitionRef.current) {
@@ -463,8 +905,30 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
       }
       setIsRecording(false);
       playVoiceChime('stop');
-      if (voiceTranscript.trim()) {
-        handleExtractFromTranscript(voiceTranscript);
+
+      // Stop parallel MediaRecorder and compare recorded audio + live transcript together
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        const recorder = mediaRecorderRef.current;
+        recorder.onstop = () => {
+          const audioBlob =
+            audioChunksRef.current.length > 0
+              ? new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+              : null;
+          try {
+            recorder.stream.getTracks().forEach((track) => track.stop());
+          } catch {}
+          setHasParallelAudio(Boolean(audioBlob && audioBlob.size > 0));
+          handleExtractFromTranscript(voiceTranscript, audioBlob);
+        };
+        try {
+          recorder.stop();
+        } catch {
+          if (voiceTranscript.trim()) {
+            handleExtractFromTranscript(voiceTranscript, null);
+          }
+        }
+      } else if (voiceTranscript.trim()) {
+        handleExtractFromTranscript(voiceTranscript, null);
       }
       return;
     }
@@ -479,6 +943,30 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     }
 
     try {
+      // 1. Start parallel MediaRecorder audio stream so we can compare Audio + Transcript
+      audioChunksRef.current = [];
+      setHasParallelAudio(false);
+      setReconciliationNote(null);
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices
+          .getUserMedia({ audio: true })
+          .then((stream) => {
+            try {
+              const mr = new MediaRecorder(stream);
+              mr.ondataavailable = (ev) => {
+                if (ev.data && ev.data.size > 0) {
+                  audioChunksRef.current.push(ev.data);
+                }
+              };
+              mr.start(1000);
+              mediaRecorderRef.current = mr;
+              setHasParallelAudio(true);
+            } catch {}
+          })
+          .catch(() => {});
+      }
+
+      // 2. Start live Web Speech API recognition with real-time field extraction & green block highlighting
       const recognition = new SpeechRec();
       recognition.continuous = true;
       recognition.interimResults = true;
@@ -486,7 +974,9 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
 
       recognition.onstart = () => {
         setIsRecording(true);
-        setVoiceStatusMsg('Listening live... Speak caller name, address, phone, bedrooms, bathrooms & cleaning notes.');
+        setVoiceStatusMsg(
+          'Listening live (Audio + Transcript active)... Each field block will light up bright green as you speak!'
+        );
         playVoiceChime('start');
       };
 
@@ -501,12 +991,14 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
             interimChunk += t;
           }
         }
-        if (finalChunk) {
-          setVoiceTranscript((prev) => {
-            const updated = `${prev} ${finalChunk}`.trim();
-            return updated;
-          });
-        }
+        setVoiceTranscript((prev) => {
+          const updated = finalChunk ? `${prev} ${finalChunk}`.trim() : prev;
+          const combinedLiveStream = `${updated} ${interimChunk}`.trim();
+          if (combinedLiveStream) {
+            applyLiveSpeechExtraction(combinedLiveStream, Boolean(finalChunk));
+          }
+          return updated;
+        });
         setInterimTranscript(interimChunk);
       };
 
@@ -1053,6 +1545,22 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
     setDepositAmount(50);
     setFeedbackNotice(null);
     setVoiceStatusMsg(null);
+    setReconciliationNote(null);
+    setFlashingFields({});
+    setVoiceCapturedFields({});
+    liveValuesRef.current = {
+      name: '',
+      phone: '',
+      email: '',
+      address: '',
+      city: 'Edmonton',
+      bedrooms: '3 Bedrooms',
+      bathrooms: '2 Bathrooms',
+      serviceType: 'Residential Standard Cleaning',
+      hours: 3,
+      crew: '1_CLEANER',
+      notes: '',
+    };
   };
 
   // Map coordinate projection helper for Quick Map
@@ -1191,22 +1699,27 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
       <div className="bg-gradient-to-r from-[#171324] via-[#191528] to-[#141826] border border-pink-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-black uppercase tracking-wider text-pink-400">
-                Step 1 • Live Call Voice Dictation
+                Step 1 • Live Call Voice Dictation + Audio &amp; Transcript Reconciler
               </span>
               {isRecording && (
-                <span className="flex items-center gap-1.5 text-xs font-bold text-rose-400 animate-pulse">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-                  Recording Microphone...
+                <span className="flex items-center gap-1.5 text-xs font-extrabold text-emerald-300 bg-emerald-500/20 border border-emerald-400/60 px-2.5 py-0.5 rounded-lg animate-pulse">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  Live Streaming Fill + Audio Recording Active
+                </span>
+              )}
+              {Object.keys(voiceCapturedFields).length > 0 && (
+                <span className="px-2.5 py-0.5 rounded-lg bg-[#00ff66]/20 border border-[#00ff66] text-[#5cff9d] text-[11px] font-black shadow-[0_0_15px_rgba(0,255,102,0.35)]">
+                  ✨ {Object.keys(voiceCapturedFields).length} Field{Object.keys(voiceCapturedFields).length === 1 ? '' : 's'} Lit Up Green Live
                 </span>
               )}
             </div>
             <h2 className="text-lg font-extrabold text-white">
-              Dictate Caller Info to Auto-Fill the Request Form &amp; Quote Calculator
+              Dictate Caller Info to Live-Fill &amp; Light Up Each Block in Real Time
             </h2>
             <p className="text-xs text-slate-400">
-              Say the caller&apos;s name, phone, street address, how many bedrooms &amp; bathrooms, cleaning type, and any specific requests (e.g. inside oven, fridge, pets, lockbox).
+              As you speak, each block (Name, Phone, Address, Bedrooms, Bathrooms, Hours, Notes) lights up <strong className="text-[#4dff88]">bright green</strong> live — and when you stop, we compare the <strong className="text-emerald-300">Recorded Audio + Transcript</strong> so Jobber creates <strong className="text-white underline">1 complete client</strong> instead of duplicates.
             </p>
           </div>
 
@@ -1223,7 +1736,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
               {isRecording ? (
                 <>
                   <MicOff className="w-4 h-4" />
-                  <span>Stop Dictation &amp; Fill Form</span>
+                  <span>Stop &amp; Reconcile Audio + Transcript</span>
                 </>
               ) : (
                 <>
@@ -1240,7 +1753,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
               className="px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-lg transition-all cursor-pointer"
             >
               <Wand2 className="w-4 h-4" />
-              <span>{isParsingVoice ? 'Extracting Blanks...' : 'AI Fill Form Blanks'}</span>
+              <span>{isParsingVoice ? 'Comparing Audio & Transcript...' : 'Compare & Fill Blanks'}</span>
             </button>
           </div>
         </div>
@@ -1251,21 +1764,29 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
             <textarea
               rows={2}
               value={voiceTranscript + (interimTranscript ? ` ${interimTranscript}` : '')}
-              onChange={(e) => setVoiceTranscript(e.target.value)}
-              placeholder='Click "Start Live Voice Dictation" and speak, or type/paste call notes here (e.g. "Devon Clarke at 9620 144 Ave NW St. Albert, 780-802-4918, 3 bedrooms 2 bathrooms, Standard Cleaning, 3 hours with 1 cleaner, clean inside oven")...'
-              className="w-full px-4 py-3 bg-[#0e1018] border border-slate-700/90 focus:border-pink-500 rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none leading-relaxed"
+              onChange={(e) => {
+                setVoiceTranscript(e.target.value);
+                applyLiveSpeechExtraction(e.target.value);
+              }}
+              placeholder='Click "Start Live Voice Dictation" and speak — watch Name, Phone, Address, Bedrooms & Bathrooms light up bright green as you talk! Or type/paste call notes here...'
+              className={`w-full px-4 py-3 bg-[#0e1018] border rounded-2xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none leading-relaxed transition-all ${
+                isRecording
+                  ? 'border-[#00ff66] ring-2 ring-[#00ff66]/30 shadow-[0_0_20px_rgba(0,255,102,0.2)]'
+                  : 'border-slate-700/90 focus:border-pink-500'
+              }`}
             />
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] font-bold text-slate-400 mr-1">Test Voice Dictation:</span>
+              <span className="text-[11px] font-bold text-slate-400 mr-1">Test Live Green Auto-Fill:</span>
               {SAMPLE_VOICE_PROMPTS.map((sample, idx) => (
                 <button
                   key={idx}
                   type="button"
                   onClick={() => {
                     setVoiceTranscript(sample.text);
+                    applyLiveSpeechExtraction(sample.text);
                     handleExtractFromTranscript(sample.text);
                   }}
                   className="px-2.5 py-1 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-semibold transition-colors cursor-pointer"
@@ -1276,9 +1797,25 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
             </div>
 
             {voiceStatusMsg && (
-              <span className="text-xs font-bold text-emerald-400">{voiceStatusMsg}</span>
+              <span className="text-xs font-extrabold text-[#4dff88] bg-[#00ff66]/10 border border-[#00ff66]/40 px-3 py-1 rounded-xl">
+                {voiceStatusMsg}
+              </span>
             )}
           </div>
+
+          {reconciliationNote && (
+            <div className="px-3.5 py-2 rounded-xl bg-emerald-950/80 border border-[#00ff66]/60 text-[11px] text-emerald-200 flex items-center justify-between gap-2 shadow-[0_0_15px_rgba(0,255,102,0.15)]">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-[#00ff66] shrink-0" />
+                <span>
+                  <strong className="text-[#4dff88]">Audio + Transcript Verified (Single Jobber Client Guaranteed):</strong> {reconciliationNote}
+                </span>
+              </div>
+              <span className="text-[10px] font-mono uppercase font-black text-[#4dff88] shrink-0">
+                No Duplicate Clients
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1301,7 +1838,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
               </h2>
             </div>
             <span className="text-xs text-slate-400">
-              Synced with Jobber &amp; Customer Booking Portal
+              1 Unified Client + Quote Synced to Jobber
             </span>
           </div>
 
@@ -1317,10 +1854,25 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           )}
 
           {/* Service Type Package Selector Buttons */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-300">
-              What Kind of Cleaning? (Service Package) *
-            </label>
+          <div
+            className={`space-y-1.5 p-3 rounded-2xl border transition-all duration-300 ${
+              flashingFields.serviceType
+                ? 'bg-[#00ff66]/20 border-[#00ff66] ring-4 ring-[#00ff66]/40 shadow-[0_0_25px_rgba(0,255,102,0.45)] scale-[1.01]'
+                : voiceCapturedFields.serviceType
+                ? 'bg-emerald-950/35 border-[#00ff66]/60 shadow-[0_0_12px_rgba(0,255,102,0.18)]'
+                : 'bg-transparent border-transparent p-0'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-300">
+                What Kind of Cleaning? (Service Package) *
+              </label>
+              {voiceCapturedFields.serviceType && (
+                <span className="px-2 py-0.5 rounded-md bg-[#00ff66] text-slate-950 text-[10px] font-black uppercase tracking-wider shadow-sm">
+                  ✓ Voice Filled
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {[
                 { label: 'Standard Cleaning', value: 'Residential Standard Cleaning' },
@@ -1338,7 +1890,9 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                     onClick={() => setServiceType(pkg.value)}
                     className={`px-3 py-2 rounded-xl text-xs font-bold border text-left transition-all cursor-pointer flex items-center justify-between ${
                       isSelected
-                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white border-pink-400 shadow-md'
+                        ? voiceCapturedFields.serviceType
+                          ? 'bg-gradient-to-r from-[#00c853] to-emerald-600 text-slate-950 font-black border-[#00ff66] shadow-[0_0_15px_rgba(0,255,102,0.4)]'
+                          : 'bg-gradient-to-r from-pink-600 to-purple-600 text-white border-pink-400 shadow-md'
                         : 'bg-[#171b29] text-slate-300 border-slate-700/80 hover:border-slate-600'
                     }`}
                   >
@@ -1352,82 +1906,170 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
 
           {/* Customer Contact Row */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                Full Name <span className="text-pink-500">*</span>
-              </label>
-              <div className="relative">
-                <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="e.g. Devon Clarke"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 bg-[#171b29] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-pink-500"
-                />
-              </div>
-            </div>
-
-            <div>
+            {/* FULL NAME BLOCK */}
+            <div
+              className={`p-2.5 rounded-2xl border transition-all duration-300 ${
+                flashingFields.name
+                  ? 'bg-[#00ff66]/25 border-[#00ff66] ring-4 ring-[#00ff66]/50 shadow-[0_0_28px_rgba(0,255,102,0.6)] scale-[1.02]'
+                  : voiceCapturedFields.name
+                  ? 'bg-emerald-950/40 border-[#00ff66]/70 shadow-[0_0_14px_rgba(0,255,102,0.22)]'
+                  : 'bg-[#151926]/60 border-slate-800/80'
+              }`}
+            >
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-bold text-slate-300">
-                  Phone Number (SMS Quotes) <span className="text-pink-500">*</span>
+                <label className="block text-xs font-bold text-slate-200">
+                  Full Name <span className="text-pink-500">*</span>
                 </label>
-                {onOpenSpamShield && customerPhone.trim().length >= 3 && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenSpamShield(customerPhone)}
-                    className="text-[10px] text-rose-400 hover:text-rose-300 font-extrabold flex items-center gap-1 cursor-pointer"
-                    title="Block this caller in Twilio Spam Shield"
-                  >
-                    <ShieldAlert className="w-3 h-3 text-rose-400" />
-                    <span>Block Caller</span>
-                  </button>
+                {voiceCapturedFields.name && (
+                  <span className="px-1.5 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase tracking-wider shadow-xs">
+                    {flashingFields.name ? '⚡ LIVE FILLING' : '✓ VOICE FILLED'}
+                  </span>
                 )}
               </div>
               <div className="relative">
-                <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <User className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${voiceCapturedFields.name ? 'text-[#00ff66]' : 'text-slate-500'}`} />
                 <input
-                  type="tel"
-                  placeholder="(780) 802-4918"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 bg-[#171b29] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 font-mono focus:outline-none focus:border-pink-500"
+                  type="text"
+                  placeholder="e.g. Rachel Macdonald"
+                  value={customerName}
+                  onChange={(e) => {
+                    setCustomerName(e.target.value);
+                    liveValuesRef.current.name = e.target.value;
+                  }}
+                  className={`w-full pl-9 pr-3 py-2.5 rounded-xl text-xs font-bold placeholder-slate-500 focus:outline-none transition-all ${
+                    voiceCapturedFields.name
+                      ? 'bg-[#091f14] border-2 border-[#00ff66] text-[#6bffa3] focus:border-[#00ff66]'
+                      : 'bg-[#171b29] border border-slate-700/80 text-white focus:border-pink-500'
+                  }`}
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                Email (For Quote &amp; Invoice)
-              </label>
+            {/* PHONE NUMBER BLOCK */}
+            <div
+              className={`p-2.5 rounded-2xl border transition-all duration-300 ${
+                flashingFields.phone
+                  ? 'bg-[#00ff66]/25 border-[#00ff66] ring-4 ring-[#00ff66]/50 shadow-[0_0_28px_rgba(0,255,102,0.6)] scale-[1.02]'
+                  : voiceCapturedFields.phone
+                  ? 'bg-emerald-950/40 border-[#00ff66]/70 shadow-[0_0_14px_rgba(0,255,102,0.22)]'
+                  : 'bg-[#151926]/60 border-slate-800/80'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-200">
+                  Phone Number <span className="text-pink-500">*</span>
+                </label>
+                {voiceCapturedFields.phone ? (
+                  <span className="px-1.5 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase tracking-wider shadow-xs">
+                    {flashingFields.phone ? '⚡ LIVE FILLING' : '✓ VOICE FILLED'}
+                  </span>
+                ) : (
+                  onOpenSpamShield &&
+                  customerPhone.trim().length >= 3 && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenSpamShield(customerPhone)}
+                      className="text-[10px] text-rose-400 hover:text-rose-300 font-extrabold flex items-center gap-1 cursor-pointer"
+                      title="Block this caller in Twilio Spam Shield"
+                    >
+                      <ShieldAlert className="w-3 h-3 text-rose-400" />
+                      <span>Block</span>
+                    </button>
+                  )
+                )}
+              </div>
+              <div className="relative">
+                <Phone className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${voiceCapturedFields.phone ? 'text-[#00ff66]' : 'text-slate-500'}`} />
+                <input
+                  type="tel"
+                  placeholder="(780) 953-2409"
+                  value={customerPhone}
+                  onChange={(e) => {
+                    setCustomerPhone(e.target.value);
+                    liveValuesRef.current.phone = e.target.value;
+                  }}
+                  className={`w-full pl-9 pr-3 py-2.5 rounded-xl text-xs font-mono font-bold placeholder-slate-500 focus:outline-none transition-all ${
+                    voiceCapturedFields.phone
+                      ? 'bg-[#091f14] border-2 border-[#00ff66] text-[#6bffa3] focus:border-[#00ff66]'
+                      : 'bg-[#171b29] border border-slate-700/80 text-white focus:border-pink-500'
+                  }`}
+                />
+              </div>
+            </div>
+
+            {/* EMAIL BLOCK */}
+            <div
+              className={`p-2.5 rounded-2xl border transition-all duration-300 ${
+                flashingFields.email
+                  ? 'bg-[#00ff66]/25 border-[#00ff66] ring-4 ring-[#00ff66]/50 shadow-[0_0_28px_rgba(0,255,102,0.6)] scale-[1.02]'
+                  : voiceCapturedFields.email
+                  ? 'bg-emerald-950/40 border-[#00ff66]/70 shadow-[0_0_14px_rgba(0,255,102,0.22)]'
+                  : 'bg-[#151926]/60 border-slate-800/80'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-200">
+                  Email (For Quote)
+                </label>
+                {voiceCapturedFields.email && (
+                  <span className="px-1.5 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase tracking-wider shadow-xs">
+                    {flashingFields.email ? '⚡ LIVE FILLING' : '✓ VOICE FILLED'}
+                  </span>
+                )}
+              </div>
               <input
                 type="email"
                 placeholder="client@gmail.com"
                 value={customerEmail}
-                onChange={(e) => setCustomerEmail(e.target.value)}
-                className="w-full px-3 py-2.5 bg-[#171b29] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-pink-500"
+                onChange={(e) => {
+                  setCustomerEmail(e.target.value);
+                  liveValuesRef.current.email = e.target.value;
+                }}
+                className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold placeholder-slate-500 focus:outline-none transition-all ${
+                  voiceCapturedFields.email
+                    ? 'bg-[#091f14] border-2 border-[#00ff66] text-[#6bffa3] focus:border-[#00ff66]'
+                    : 'bg-[#171b29] border border-slate-700/80 text-white focus:border-pink-500'
+                }`}
               />
             </div>
           </div>
 
           {/* Street Address with Google Places Autocomplete + Pin on Map button */}
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-            <div className="sm:col-span-8">
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                Property Street Address <span className="text-pink-500">*</span>
-              </label>
+            <div
+              className={`sm:col-span-8 p-2.5 rounded-2xl border transition-all duration-300 ${
+                flashingFields.address
+                  ? 'bg-[#00ff66]/25 border-[#00ff66] ring-4 ring-[#00ff66]/50 shadow-[0_0_28px_rgba(0,255,102,0.6)] scale-[1.01]'
+                  : voiceCapturedFields.address
+                  ? 'bg-emerald-950/40 border-[#00ff66]/70 shadow-[0_0_14px_rgba(0,255,102,0.22)]'
+                  : 'bg-[#151926]/60 border-slate-800/80'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-200">
+                  Property Street Address <span className="text-pink-500">*</span>
+                </label>
+                {voiceCapturedFields.address && (
+                  <span className="px-2 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase tracking-wider shadow-xs">
+                    {flashingFields.address ? '⚡ LIVE FILLING ADDRESS' : '✓ VOICE FILLED'}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-2">
-                <div className="flex-1">
+                <div className={`flex-1 rounded-xl ${voiceCapturedFields.address ? 'ring-2 ring-[#00ff66]' : ''}`}>
                   <AddressAutocompleteInput
                     value={serviceAddress}
-                    onChange={setServiceAddress}
+                    onChange={(val) => {
+                      setServiceAddress(val);
+                      liveValuesRef.current.address = val;
+                    }}
                     onSelect={(pred) => {
                       const full = pred.description || pred.mainText;
                       setServiceAddress(full);
+                      liveValuesRef.current.address = full;
                       geocodeAddressOnQuickMap(full);
                     }}
-                    placeholder="Start typing street address (e.g. 9620 144 Ave NW, St. Albert)..."
+                    placeholder="Start typing street address (e.g. 7221 Chivers Place SW)..."
                     className="text-xs"
                   />
                 </div>
@@ -1443,14 +2085,36 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
               </div>
             </div>
 
-            <div className="sm:col-span-4">
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                City / Service Area
-              </label>
+            <div
+              className={`sm:col-span-4 p-2.5 rounded-2xl border transition-all duration-300 ${
+                flashingFields.city
+                  ? 'bg-[#00ff66]/25 border-[#00ff66] ring-4 ring-[#00ff66]/50 shadow-[0_0_28px_rgba(0,255,102,0.6)]'
+                  : voiceCapturedFields.city
+                  ? 'bg-emerald-950/40 border-[#00ff66]/70'
+                  : 'bg-[#151926]/60 border-slate-800/80'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-200">
+                  City / Service Area
+                </label>
+                {voiceCapturedFields.city && (
+                  <span className="px-1.5 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase">
+                    ✓ VOICE
+                  </span>
+                )}
+              </div>
               <select
                 value={city}
-                onChange={(e) => setCity(e.target.value)}
-                className="w-full px-3 py-2.5 bg-[#171b29] border border-slate-700/80 rounded-xl text-xs text-white focus:outline-none focus:border-pink-500 cursor-pointer"
+                onChange={(e) => {
+                  setCity(e.target.value);
+                  liveValuesRef.current.city = e.target.value;
+                }}
+                className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold focus:outline-none cursor-pointer ${
+                  voiceCapturedFields.city
+                    ? 'bg-[#091f14] border-2 border-[#00ff66] text-[#6bffa3]'
+                    : 'bg-[#171b29] border border-slate-700/80 text-white focus:border-pink-500'
+                }`}
               >
                 <option value="Edmonton">Edmonton</option>
                 <option value="St. Albert">St. Albert</option>
@@ -1462,11 +2126,24 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           </div>
 
           {/* HOW MANY BEDROOMS & HOW MANY BATHROOMS (Highlighted Property Size Row) */}
-          <div className="p-4 rounded-2xl bg-[#171b29] border border-pink-500/30 space-y-3">
-            <div className="flex items-center justify-between">
+          <div
+            className={`p-4 rounded-2xl border space-y-3 transition-all duration-300 ${
+              flashingFields.bedrooms || flashingFields.bathrooms
+                ? 'bg-[#00ff66]/20 border-[#00ff66] ring-4 ring-[#00ff66]/45 shadow-[0_0_28px_rgba(0,255,102,0.5)]'
+                : voiceCapturedFields.bedrooms || voiceCapturedFields.bathrooms
+                ? 'bg-emerald-950/30 border-[#00ff66]/60 shadow-[0_0_15px_rgba(0,255,102,0.18)]'
+                : 'bg-[#171b29] border-pink-500/30'
+            }`}
+          >
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-xs font-extrabold text-pink-300 flex items-center gap-1.5">
                 <BedDouble className="w-4 h-4 text-pink-400" />
                 <span>Property Size: How Many Bedrooms &amp; Bathrooms?</span>
+                {(voiceCapturedFields.bedrooms || voiceCapturedFields.bathrooms) && (
+                  <span className="px-2 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase tracking-wider">
+                    ✓ Voice Filled
+                  </span>
+                )}
               </span>
               <button
                 type="button"
@@ -1478,7 +2155,11 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
+              <div
+                className={`p-2 rounded-xl transition-all ${
+                  flashingFields.bedrooms ? 'bg-[#00ff66]/25 ring-2 ring-[#00ff66]' : ''
+                }`}
+              >
                 <label className="block text-[11px] font-bold text-slate-300 mb-1.5">
                   How Many Bedrooms? *
                 </label>
@@ -1490,10 +2171,15 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                       <button
                         key={b}
                         type="button"
-                        onClick={() => setBedrooms(b)}
+                        onClick={() => {
+                          setBedrooms(b);
+                          liveValuesRef.current.bedrooms = b;
+                        }}
                         className={`py-2 px-1.5 rounded-xl text-xs font-extrabold border transition-all cursor-pointer text-center ${
                           isSelected
-                            ? 'bg-pink-600 text-white border-pink-400 shadow-md'
+                            ? voiceCapturedFields.bedrooms
+                              ? 'bg-[#00ff66] text-slate-950 border-[#00ff66] font-black shadow-[0_0_14px_rgba(0,255,102,0.5)]'
+                              : 'bg-pink-600 text-white border-pink-400 shadow-md'
                             : 'bg-[#0f121c] text-slate-300 border-slate-700 hover:border-slate-500'
                         }`}
                       >
@@ -1504,7 +2190,11 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                 </div>
               </div>
 
-              <div>
+              <div
+                className={`p-2 rounded-xl transition-all ${
+                  flashingFields.bathrooms ? 'bg-[#00ff66]/25 ring-2 ring-[#00ff66]' : ''
+                }`}
+              >
                 <label className="block text-[11px] font-bold text-slate-300 mb-1.5">
                   How Many Bathrooms? *
                 </label>
@@ -1522,10 +2212,15 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                       <button
                         key={ba.val}
                         type="button"
-                        onClick={() => setBathrooms(ba.val)}
+                        onClick={() => {
+                          setBathrooms(ba.val);
+                          liveValuesRef.current.bathrooms = ba.val;
+                        }}
                         className={`py-2 px-1 rounded-xl text-[11px] font-extrabold border transition-all cursor-pointer text-center ${
                           isSelected
-                            ? 'bg-purple-600 text-white border-purple-400 shadow-md'
+                            ? voiceCapturedFields.bathrooms
+                              ? 'bg-[#00ff66] text-slate-950 border-[#00ff66] font-black shadow-[0_0_14px_rgba(0,255,102,0.5)]'
+                              : 'bg-purple-600 text-white border-purple-400 shadow-md'
                             : 'bg-[#0f121c] text-slate-300 border-slate-700 hover:border-slate-500'
                         }`}
                       >
@@ -1753,10 +2448,25 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           </div>
 
           {/* Specific Information, Add-Ons & Access Notes */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-300">
-              Any Specific Information, Add-ons, or Access Notes (Sent to Jobber &amp; Booking System)
-            </label>
+          <div
+            className={`space-y-2 p-3 rounded-2xl border transition-all duration-300 ${
+              flashingFields.notes || flashingFields.addons
+                ? 'bg-[#00ff66]/20 border-[#00ff66] ring-4 ring-[#00ff66]/45 shadow-[0_0_25px_rgba(0,255,102,0.45)]'
+                : voiceCapturedFields.notes || voiceCapturedFields.addons
+                ? 'bg-emerald-950/30 border-[#00ff66]/60'
+                : 'bg-[#151926]/40 border-slate-800/80'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-300">
+                Any Specific Information, Add-ons, or Access Notes (Sent to Jobber &amp; Booking System)
+              </label>
+              {(voiceCapturedFields.notes || voiceCapturedFields.addons) && (
+                <span className="px-2 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase tracking-wider">
+                  ✓ Voice Captured
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap gap-1.5">
               {QUICK_ADDON_TAGS.map((tag) => {
                 const active = selectedAddons.includes(tag);
@@ -1767,7 +2477,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                     onClick={() => toggleAddonTag(tag)}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
                       active
-                        ? 'bg-emerald-600 text-white border-emerald-400'
+                        ? 'bg-[#00ff66] text-slate-950 border-[#00ff66] font-black shadow-xs'
                         : 'bg-[#171b29] text-slate-300 border-slate-700 hover:border-slate-500'
                     }`}
                   >
@@ -1780,8 +2490,15 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
               rows={3}
               placeholder="e.g. Lockbox code 4482 on front porch. Please clean inside the oven and fridge, focus on master bath grout, 1 friendly golden retriever..."
               value={quoteNotes}
-              onChange={(e) => setQuoteNotes(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-[#171b29] border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-pink-500 leading-relaxed"
+              onChange={(e) => {
+                setQuoteNotes(e.target.value);
+                liveValuesRef.current.notes = e.target.value;
+              }}
+              className={`w-full px-3.5 py-2.5 rounded-xl text-xs placeholder-slate-500 focus:outline-none leading-relaxed ${
+                voiceCapturedFields.notes
+                  ? 'bg-[#091f14] border-2 border-[#00ff66] text-[#6bffa3]'
+                  : 'bg-[#171b29] border border-slate-700/80 text-white focus:border-pink-500'
+              }`}
             />
           </div>
         </div>
@@ -1802,10 +2519,25 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           </div>
 
           {/* 1. Hours Selection */}
-          <div className="space-y-2">
+          <div
+            className={`space-y-2 p-2.5 rounded-2xl border transition-all duration-300 ${
+              flashingFields.hours
+                ? 'bg-[#00ff66]/20 border-[#00ff66] ring-4 ring-[#00ff66]/45 shadow-[0_0_25px_rgba(0,255,102,0.45)]'
+                : voiceCapturedFields.hours
+                ? 'bg-emerald-950/30 border-[#00ff66]/60'
+                : 'border-transparent p-0'
+            }`}
+          >
             <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-slate-300">Hours needed:</span>
-              <span className="font-mono font-bold text-pink-400 text-base">
+              <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                <span>Hours needed:</span>
+                {voiceCapturedFields.hours && (
+                  <span className="px-1.5 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase">
+                    ✓ Voice
+                  </span>
+                )}
+              </span>
+              <span className={`font-mono font-bold text-base ${voiceCapturedFields.hours ? 'text-[#00ff66]' : 'text-pink-400'}`}>
                 {hours} {hours === 1 ? 'hour' : 'hours'}
               </span>
             </div>
@@ -1816,10 +2548,15 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                   <button
                     key={h}
                     type="button"
-                    onClick={() => setHours(h)}
+                    onClick={() => {
+                      setHours(h);
+                      liveValuesRef.current.hours = h;
+                    }}
                     className={`w-10 h-10 rounded-full font-extrabold text-sm transition-all cursor-pointer flex items-center justify-center border ${
                       isSelected
-                        ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white border-pink-500 shadow-lg scale-105'
+                        ? voiceCapturedFields.hours
+                          ? 'bg-[#00ff66] text-slate-950 border-[#00ff66] shadow-[0_0_15px_rgba(0,255,102,0.5)] scale-105 font-black'
+                          : 'bg-gradient-to-r from-pink-600 to-rose-600 text-white border-pink-500 shadow-lg scale-105'
                         : 'bg-[#221d2b] text-slate-300 border-[#322c3e] hover:bg-[#2b2537]'
                     }`}
                   >
@@ -1845,10 +2582,23 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           </div>
 
           {/* 2. Cleaner Crew Selection — Formula: Number of Cleaners ( QTY × Unit Price ) = Total */}
-          <div className="space-y-2">
+          <div
+            className={`space-y-2 p-2.5 rounded-2xl border transition-all duration-300 ${
+              flashingFields.crew
+                ? 'bg-[#00ff66]/20 border-[#00ff66] ring-4 ring-[#00ff66]/45 shadow-[0_0_25px_rgba(0,255,102,0.45)]'
+                : voiceCapturedFields.crew
+                ? 'bg-emerald-950/30 border-[#00ff66]/60'
+                : 'border-transparent p-0'
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <span className="block font-semibold text-slate-300 text-xs">
-                Cleaners &amp; Unit Price:
+              <span className="block font-semibold text-slate-300 text-xs flex items-center gap-1.5">
+                <span>Cleaners &amp; Unit Price:</span>
+                {voiceCapturedFields.crew && (
+                  <span className="px-1.5 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase">
+                    ✓ Voice
+                  </span>
+                )}
               </span>
               <span className="text-[10px] font-mono text-emerald-400 font-bold">
                 {crewSelection === '2_CLEANERS' ? '2 Cleaners' : '1 Cleaner'} ({hours} × ${hourlyRate.toFixed(2)}) = ${calculations.labor.toFixed(2)}

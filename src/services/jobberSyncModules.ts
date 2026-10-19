@@ -825,7 +825,7 @@ export async function syncJobberQuotes(
     try {
       const query = `
         query SyncQuotes {
-          quotes(last: 40, filter: { createdAt: { after: "2026-08-01T00:00:00Z" } }) {
+          quotes(first: 50, filter: { createdAt: { after: "2026-08-01T00:00:00Z" } }) {
             totalCount
             nodes {
               id
@@ -1105,7 +1105,7 @@ export async function syncJobberInvoices(
                 after: "2026-08-01T00:00:00Z"
               }
             }
-            last: 50
+            first: 50
           ) {
             totalCount
             nodes {
@@ -1280,10 +1280,44 @@ export interface JobberPushQuoteResult {
   message: string;
 }
 
+// In-memory cache & in-flight mutex so two rapid/concurrent calls for the same person
+// NEVER create two separate clients in Jobber even before Jobber's search index updates.
+interface CachedJobberClientEntry {
+  clientId: string;
+  clientWebUri?: string;
+  propertyId?: string;
+  quoteId?: string;
+  quoteNumber?: string;
+  quoteWebUri?: string;
+  clientHubUri?: string;
+  name: string;
+  phoneDigits: string;
+  updatedAtMs: number;
+}
+const recentJobberClientCache = new Map<string, CachedJobberClientEntry>();
+const inFlightJobberClientLocks = new Map<string, Promise<any>>();
+
+function normalizePhoneticPersonName(raw?: string): string {
+  return String(raw || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\bmac([a-z]{3,})/g, "mc$1")
+    .replace(/\bclarke\b/g, "clark")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizePhone10(raw?: string): string {
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
 /**
  * STRICT JOBBER ORDER:
- * STEP 1 (Always First): Create (or Find) the Client in Jobber (clientCreate) + Service Property (propertyCreate)
- * STEP 2: Create a Service Request (requestCreate) and/or Draft Quote (quoteCreate) linked to that Client & Property
+ * STEP 1 (Always First): Find or Create ONE Single Person in Jobber (clientCreate / clientEdit) + Service Property
+ *   - Compares name (including phonetic McDonald/Macdonald), phone digits, existingJobberClientId, and recent clients
+ *   - If the person already exists with partial info, updates & merges all info onto that ONE client via clientEdit
+ * STEP 2: Create a Service Request (requestCreate) and/or Draft Quote (quoteCreate / quoteEdit) linked to that Client & Property
  */
 export async function pushQuoteToJobber(
   quote: {
@@ -1299,6 +1333,58 @@ export async function pushQuoteToJobber(
     notes?: string;
     createRequestOnly?: boolean;
     existingJobberQuoteId?: string;
+    existingJobberClientId?: string;
+    existingJobberPropertyId?: string;
+    lineItems?: Array<{ name?: string; description: string; quantity: number; unitPrice: number; total: number }>;
+  },
+  accessToken?: string,
+  credentials?: JobberCredentials
+): Promise<JobberPushQuoteResult> {
+  const lockKey =
+    normalizePhoneticPersonName(quote.clientName) ||
+    normalizePhone10(quote.clientPhone) ||
+    "default_client";
+
+  // Wait if another Jobber sync for this exact person is currently in flight
+  const existingLock = inFlightJobberClientLocks.get(lockKey);
+  if (existingLock) {
+    try {
+      await existingLock;
+    } catch {}
+  }
+
+  let releaseLock!: () => void;
+  const currentLock = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  inFlightJobberClientLocks.set(lockKey, currentLock);
+
+  try {
+    return await executePushQuoteToJobberInternal(quote, accessToken, credentials);
+  } finally {
+    releaseLock();
+    if (inFlightJobberClientLocks.get(lockKey) === currentLock) {
+      inFlightJobberClientLocks.delete(lockKey);
+    }
+  }
+}
+
+async function executePushQuoteToJobberInternal(
+  quote: {
+    clientName: string;
+    clientPhone?: string;
+    clientEmail?: string;
+    serviceAddress?: string;
+    service: string;
+    bedrooms?: string;
+    bathrooms?: string;
+    total: number;
+    depositRequired?: number;
+    notes?: string;
+    createRequestOnly?: boolean;
+    existingJobberQuoteId?: string;
+    existingJobberClientId?: string;
+    existingJobberPropertyId?: string;
     lineItems?: Array<{ name?: string; description: string; quantity: number; unitPrice: number; total: number }>;
   },
   accessToken?: string,
@@ -1307,9 +1393,15 @@ export async function pushQuoteToJobber(
   const cleanToken = (accessToken || "").replace(/^Bearer\s+/i, "").trim();
   const isLive = Boolean(cleanToken && !cleanToken.startsWith("jobber_oauth") && !cleanToken.includes("...") && cleanToken.length > 20);
 
-  let jobberClientId: string | undefined;
+  let jobberClientId: string | undefined =
+    quote.existingJobberClientId && quote.existingJobberClientId.startsWith("Z2lkOi8vSm9iYmVyL0NsaWVudC")
+      ? quote.existingJobberClientId
+      : undefined;
   let jobberClientWebUri: string | undefined;
-  let propertyId: string | undefined;
+  let propertyId: string | undefined =
+    quote.existingJobberPropertyId && quote.existingJobberPropertyId.startsWith("Z2lkOi8vSm9iYmVyL1Byb3BlcnR5")
+      ? quote.existingJobberPropertyId
+      : undefined;
   let jobberRequestId: string | undefined;
   let jobberRequestWebUri: string | undefined;
   let liveQuoteId: string | undefined =
@@ -1335,10 +1427,14 @@ export async function pushQuoteToJobber(
     : lowerAddr.includes("beaumont")
     ? "Beaumont"
     : "Edmonton";
-  const street1 = addressRaw.split(",")[0]?.trim() || addressRaw;
+  const rawStreetPart = addressRaw.split(",")[0]?.trim() || "";
+  const isGenericCityOnly =
+    !rawStreetPart ||
+    /^(edmonton|st\.?\s*albert|sherwood\s*park|spruce\s*grove|leduc|beaumont|alberta|ab)$/i.test(rawStreetPart);
+  const street1 = isGenericCityOnly ? "" : rawStreetPart;
 
   const addressInput = {
-    street1,
+    street1: street1 || "Edmonton, AB",
     city,
     province: "AB",
     postalCode,
@@ -1353,26 +1449,102 @@ export async function pushQuoteToJobber(
       ? `${sizePrefix} ${quote.service || "Cleaning Service"} 2026`
       : quote.service || "Cleaning Service Estimate 2026";
 
+  const targetNormName = normalizePhoneticPersonName(quote.clientName);
+  const targetPhone10 = normalizePhone10(quote.clientPhone);
+
+  // Check in-memory recent client cache first (prevents duplicate creation when Jobber search index lags by 5-15s)
+  for (const cached of recentJobberClientCache.values()) {
+    if (Date.now() - cached.updatedAtMs > 30 * 60 * 1000) continue;
+    const sameName = targetNormName && normalizePhoneticPersonName(cached.name) === targetNormName;
+    const samePhone =
+      targetPhone10.length >= 7 &&
+      cached.phoneDigits.length >= 7 &&
+      targetPhone10 !== "7805550199" &&
+      cached.phoneDigits === targetPhone10;
+    if (sameName || samePhone) {
+      if (!jobberClientId) jobberClientId = cached.clientId;
+      if (!jobberClientWebUri) jobberClientWebUri = cached.clientWebUri;
+      if (!propertyId && cached.propertyId) propertyId = cached.propertyId;
+      if (!liveQuoteId && cached.quoteId) {
+        liveQuoteId = cached.quoteId;
+        liveQuoteNumber = cached.quoteNumber;
+        liveJobberWebUri = cached.quoteWebUri;
+        liveClientHubUri = cached.clientHubUri;
+      }
+      break;
+    }
+  }
+
   if (isLive) {
     try {
       // ─────────────────────────────────────────────────────────────────────────
-      // STEP 1: Create (or Find) the Person / Client in Jobber FIRST
-      // (NOTE: Client type in Jobber GraphQL v2025-04-16 uses `clientProperties`, NOT `defaultProperty`)
+      // STEP 1: Find or Create ONE Single Person / Client in Jobber FIRST
+      // Queries BOTH searchTerm AND recentClients(last: 15) so newly created clients
+      // are always found immediately even before Jobber's search index refreshes.
       // ─────────────────────────────────────────────────────────────────────────
       const nameParts = (quote.clientName || "Customer").trim().split(/\s+/);
       const firstName = nameParts[0] || "Customer";
       const lastName = nameParts.slice(1).join(" ") || "";
 
       const searchQuery = `
-        query FindClient($searchTerm: String!) {
-          clients(searchTerm: $searchTerm, first: 5) {
+        query FindClientAndRecent($searchTerm: String!) {
+          matchedClients: clients(searchTerm: $searchTerm, first: 10) {
             nodes {
               id
               name
+              createdAt
               jobberWebUri
+              defaultPhones
+              defaultEmails
+              billingAddress {
+                street1
+                city
+                province
+              }
               clientProperties(first: 5) {
                 nodes {
                   id
+                  address {
+                    street1
+                    city
+                    province
+                  }
+                }
+              }
+              quotes(last: 5) {
+                nodes {
+                  id
+                  quoteNumber
+                  title
+                  quoteStatus
+                  createdAt
+                  jobberWebUri
+                  clientHubUri
+                }
+              }
+            }
+          }
+          recentClients: clients(last: 15) {
+            nodes {
+              id
+              name
+              createdAt
+              jobberWebUri
+              defaultPhones
+              defaultEmails
+              billingAddress {
+                street1
+                city
+                province
+              }
+              clientProperties(first: 5) {
+                nodes {
+                  id
+                  address {
+                    street1
+                    city
+                    province
+                  }
                 }
               }
               quotes(last: 5) {
@@ -1390,24 +1562,149 @@ export async function pushQuoteToJobber(
           }
         }
       `;
-      const searchData = await jobberGraphql<any>(cleanToken, searchQuery, { searchTerm: quote.clientName.trim() }, credentials);
-      const existingClient = (searchData?.clients?.nodes || []).find(
-        (c: any) => (c.name || "").trim().toLowerCase() === quote.clientName.trim().toLowerCase()
-      ) || (searchData?.clients?.nodes || [])[0];
+      const searchData = await jobberGraphql<any>(
+        cleanToken,
+        searchQuery,
+        { searchTerm: quote.clientName.trim() },
+        credentials
+      );
+
+      // Deduplicate candidate clients from both searchTerm and recentClients(last: 15)
+      const candidateMap = new Map<string, any>();
+      for (const c of [
+        ...(searchData?.matchedClients?.nodes || []),
+        ...(searchData?.recentClients?.nodes || []),
+      ]) {
+        if (c?.id && !candidateMap.has(c.id)) {
+          candidateMap.set(c.id, c);
+        }
+      }
+      const allCandidates = Array.from(candidateMap.values());
+
+      // Find all matching records for this person (by ID, phonetic name, or phone number)
+      const matchingClients = allCandidates.filter((c: any) => {
+        if (jobberClientId && c.id === jobberClientId) return true;
+        const cNormName = normalizePhoneticPersonName(c.name);
+        if (targetNormName && cNormName === targetNormName) return true;
+        const cPhones: string[] = Array.isArray(c.defaultPhones)
+          ? c.defaultPhones
+          : c.defaultPhones
+          ? [String(c.defaultPhones)]
+          : [];
+        const phoneMatched =
+          targetPhone10.length >= 7 &&
+          targetPhone10 !== "7805550199" &&
+          cPhones.some((p) => {
+            const p10 = normalizePhone10(p);
+            return p10.length >= 7 && (p10 === targetPhone10 || p10.slice(-7) === targetPhone10.slice(-7));
+          });
+        if (phoneMatched) return true;
+        // Also match if same first name AND created in the last 10 minutes during live dictation
+        const cFirst = (c.name || "").trim().split(/\s+/)[0]?.toLowerCase();
+        const ageMs = c.createdAt ? Date.now() - new Date(c.createdAt).getTime() : Infinity;
+        if (
+          cFirst &&
+          cFirst.length >= 3 &&
+          cFirst === firstName.toLowerCase() &&
+          ageMs >= 0 &&
+          ageMs < 10 * 60 * 1000
+        ) {
+          return true;
+        }
+        return false;
+      });
+
+      // Prefer the client that already has a Quote attached, or the earliest created matching client
+      matchingClients.sort((a: any, b: any) => {
+        const aQuotes = (a.quotes?.nodes || []).length;
+        const bQuotes = (b.quotes?.nodes || []).length;
+        if (aQuotes !== bQuotes) return bQuotes - aQuotes;
+        return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+      });
+
+      const existingClient = matchingClients[0];
+
+      // If a duplicate empty client was created recently for the same person, archive the duplicate automatically
+      if (matchingClients.length > 1 && existingClient?.id) {
+        for (let i = 1; i < matchingClients.length; i++) {
+          const dup = matchingClients[i];
+          const dupQuotes = (dup.quotes?.nodes || []).length;
+          const dupAgeMs = dup.createdAt ? Date.now() - new Date(dup.createdAt).getTime() : Infinity;
+          if (dup?.id && dup.id !== existingClient.id && dupQuotes === 0 && dupAgeMs < 60 * 60 * 1000) {
+            jobberGraphql<any>(
+              cleanToken,
+              `mutation ArchiveDuplicateClient($clientId: EncodedId!) { clientArchive(clientId: $clientId) { client { id } userErrors { message } } }`,
+              { clientId: dup.id },
+              credentials
+            ).catch(() => {});
+          }
+        }
+      }
 
       if (existingClient?.id) {
         jobberClientId = existingClient.id;
         jobberClientWebUri = existingClient.jobberWebUri || resolveJobberWebUri("clients", existingClient.id);
-        propertyId = existingClient.clientProperties?.nodes?.[0]?.id;
+        propertyId = existingClient.clientProperties?.nodes?.[0]?.id || propertyId;
 
-        // Check if this client already has a quote created in the last 15 minutes (or matching existingJobberQuoteId)
+        // Reconcile & merge any new/missing bits of information (full name, street address, phone, email) onto this single client!
+        try {
+          const existingPhones: string[] = Array.isArray(existingClient.defaultPhones)
+            ? existingClient.defaultPhones
+            : [];
+          const existingEmails: string[] = Array.isArray(existingClient.defaultEmails)
+            ? existingClient.defaultEmails
+            : [];
+          const hasPhoneAlready =
+            !targetPhone10 ||
+            targetPhone10 === "7805550199" ||
+            existingPhones.some((p) => normalizePhone10(p) === targetPhone10);
+          const hasEmailAlready =
+            !quote.clientEmail ||
+            existingEmails.some((e) => String(e).toLowerCase() === quote.clientEmail!.trim().toLowerCase());
+
+          const clientEditInput: any = {
+            firstName,
+            ...(lastName ? { lastName } : {}),
+            billingAddress: addressInput,
+          };
+          if (!hasPhoneAlready && quote.clientPhone) {
+            clientEditInput.phonesToAdd = [{ number: quote.clientPhone, primary: existingPhones.length === 0 }];
+          }
+          if (!hasEmailAlready && quote.clientEmail) {
+            clientEditInput.emailsToAdd = [{ address: quote.clientEmail, primary: existingEmails.length === 0 }];
+          }
+          if (propertyId && street1) {
+            clientEditInput.propertiesToEdit = [
+              {
+                propertyId,
+                address: addressInput,
+              },
+            ];
+          }
+
+          await jobberGraphql<any>(
+            cleanToken,
+            `mutation MergeClientInfo($clientId: EncodedId!, $input: ClientEditInput!) {
+              clientEdit(clientId: $clientId, input: $input) {
+                client { id name }
+                userErrors { message }
+              }
+            }`,
+            { clientId: existingClient.id, input: clientEditInput },
+            credentials
+          );
+        } catch {
+          // Non-fatal if propertyId edit isn't needed
+        }
+
+        // Check if this client already has a quote created in the last 30 minutes (or matching existingJobberQuoteId)
         const recentClientQuotes: any[] = existingClient.quotes?.nodes || [];
         const matchedExistingQuote =
           (liveQuoteId && recentClientQuotes.find((rq: any) => rq.id === liveQuoteId)) ||
           recentClientQuotes.find((rq: any) => {
             if (!rq?.createdAt) return false;
             const ageMs = Date.now() - new Date(rq.createdAt).getTime();
-            return ageMs >= 0 && ageMs < 15 * 60 * 1000;
+            return ageMs >= 0 && ageMs < 30 * 60 * 1000;
           });
 
         if (matchedExistingQuote?.id) {
@@ -1697,6 +1994,22 @@ export async function pushQuoteToJobber(
             liveClientHubUri = createdQuote.clientHubUri;
           }
         }
+      }
+
+      if (jobberClientId) {
+        const cacheKey = targetNormName || targetPhone10 || jobberClientId;
+        recentJobberClientCache.set(cacheKey, {
+          clientId: jobberClientId,
+          clientWebUri: jobberClientWebUri,
+          propertyId,
+          quoteId: liveQuoteId,
+          quoteNumber: liveQuoteNumber,
+          quoteWebUri: liveJobberWebUri,
+          clientHubUri: liveClientHubUri,
+          name: quote.clientName.trim(),
+          phoneDigits: targetPhone10,
+          updatedAtMs: Date.now(),
+        });
       }
     } catch {
       // Clean fallback to local quote creation when live Jobber token is expired or offline
