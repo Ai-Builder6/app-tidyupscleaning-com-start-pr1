@@ -1,15 +1,14 @@
 {
   "name": "app-tidyups-cleaning-pr1",
-  "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
-    "preview": "vite preview",
+    "build": "vite build \u0026\u0026 esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "dev": "tsx server.ts",
+    "lint": "tsc --noEmit",
+    "preview": "vite preview",
+    "start": "node dist/server.cjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
