@@ -456,17 +456,17 @@ export function App() {
   const DEFAULT_HEADER_NAV_ORDER = [
     'MASTER_HUB',
     'QUICK_QUOTE',
+    'QUICK_LINKS',
+    'ADDRESS_SEARCH',
+    'MANAGEMENT',
     'MAP',
     'SCHEDULED_JOBS',
-    'MANAGEMENT',
     'INTAKES',
     'CLEAN_SHEET',
     'SPAM_SHIELD',
-    'ADDRESS_SEARCH',
     'CLIENTS',
     'LEADS',
     'CUSTOMER_PORTAL',
-    'QUICK_LINKS',
     'SMS_REPLIES',
     'PRICE_LIST',
     'BACKUP_ZIP',
@@ -476,17 +476,17 @@ export function App() {
     'PASTE_TABLE',
     'MASTER_TABLE',
     'QUICK_MAPS',
+    'MANAGEMENT',
     'DISPATCH_MAP',
     'SCHEDULE_SEARCH',
     'SYNC_ALL',
-    'MANAGEMENT',
     'BLOCK_SPAM',
   ];
 
   const [headerNavOrder, setHeaderNavOrder] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('tidyups_header_nav_order_v1');
+        const saved = localStorage.getItem('tidyups_header_nav_order_v2');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -505,7 +505,7 @@ export function App() {
   const [footerBtnOrder, setFooterBtnOrder] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('tidyups_footer_btn_order_v1');
+        const saved = localStorage.getItem('tidyups_footer_btn_order_v2');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -525,7 +525,7 @@ export function App() {
   const [footerButtonsSide, setFooterButtonsSide] = useState<'right' | 'left'>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('tidyups_footer_side_v1');
+        const saved = localStorage.getItem('tidyups_footer_side_v2');
         if (saved === 'left' || saved === 'right') return saved;
       } catch {}
     }
@@ -535,26 +535,49 @@ export function App() {
   const [isRearrangingBars, setIsRearrangingBars] = useState<boolean>(false);
   const [draggedBarItem, setDraggedBarItem] = useState<{ bar: 'header' | 'footer'; id: string } | null>(null);
 
-  const updateHeaderOrder = useCallback((nextOrder: string[]) => {
-    setHeaderNavOrder(nextOrder);
-    try {
-      localStorage.setItem('tidyups_header_nav_order_v1', JSON.stringify(nextOrder));
-    } catch {}
-  }, []);
+  const persistBarLayoutToServer = useCallback(
+    (payload: { headerNavOrder?: string[]; footerBtnOrder?: string[]; footerButtonsSide?: 'left' | 'right' }) => {
+      fetch('/api/store/save?project=tidyups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-project-id': 'tidyups' },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+    },
+    []
+  );
 
-  const updateFooterOrder = useCallback((nextOrder: string[]) => {
-    setFooterBtnOrder(nextOrder);
-    try {
-      localStorage.setItem('tidyups_footer_btn_order_v1', JSON.stringify(nextOrder));
-    } catch {}
-  }, []);
+  const updateHeaderOrder = useCallback(
+    (nextOrder: string[]) => {
+      setHeaderNavOrder(nextOrder);
+      try {
+        localStorage.setItem('tidyups_header_nav_order_v2', JSON.stringify(nextOrder));
+      } catch {}
+      persistBarLayoutToServer({ headerNavOrder: nextOrder });
+    },
+    [persistBarLayoutToServer]
+  );
 
-  const toggleFooterSide = useCallback((side: 'left' | 'right') => {
-    setFooterButtonsSide(side);
-    try {
-      localStorage.setItem('tidyups_footer_side_v1', side);
-    } catch {}
-  }, []);
+  const updateFooterOrder = useCallback(
+    (nextOrder: string[]) => {
+      setFooterBtnOrder(nextOrder);
+      try {
+        localStorage.setItem('tidyups_footer_btn_order_v2', JSON.stringify(nextOrder));
+      } catch {}
+      persistBarLayoutToServer({ footerBtnOrder: nextOrder });
+    },
+    [persistBarLayoutToServer]
+  );
+
+  const toggleFooterSide = useCallback(
+    (side: 'left' | 'right') => {
+      setFooterButtonsSide(side);
+      try {
+        localStorage.setItem('tidyups_footer_side_v2', side);
+      } catch {}
+      persistBarLayoutToServer({ footerButtonsSide: side });
+    },
+    [persistBarLayoutToServer]
+  );
 
   const moveBarButton = useCallback(
     (bar: 'header' | 'footer', id: string, direction: 'left' | 'right') => {
@@ -1366,6 +1389,32 @@ export function App() {
           if (data.blockedCallsHistory && data.blockedCallsHistory.length > 0) setBlockedCallsHistory(data.blockedCallsHistory);
           if (data.adLeads && data.adLeads.length > 0) setLeadsList(data.adLeads);
           if (data.serviceCatalog && data.serviceCatalog.length > 0) setServiceCatalog(data.serviceCatalog);
+          if (Array.isArray(data.headerNavOrder) && data.headerNavOrder.length > 0) {
+            const merged = [...data.headerNavOrder.filter((k: string) => DEFAULT_HEADER_NAV_ORDER.includes(k))];
+            DEFAULT_HEADER_NAV_ORDER.forEach((k) => {
+              if (!merged.includes(k)) merged.push(k);
+            });
+            setHeaderNavOrder(merged);
+            try {
+              localStorage.setItem('tidyups_header_nav_order_v2', JSON.stringify(merged));
+            } catch {}
+          }
+          if (Array.isArray(data.footerBtnOrder) && data.footerBtnOrder.length > 0) {
+            const merged = [...data.footerBtnOrder.filter((k: string) => DEFAULT_FOOTER_BTN_ORDER.includes(k))];
+            DEFAULT_FOOTER_BTN_ORDER.forEach((k) => {
+              if (!merged.includes(k)) merged.push(k);
+            });
+            setFooterBtnOrder(merged);
+            try {
+              localStorage.setItem('tidyups_footer_btn_order_v2', JSON.stringify(merged));
+            } catch {}
+          }
+          if (data.footerButtonsSide === 'left' || data.footerButtonsSide === 'right') {
+            setFooterButtonsSide(data.footerButtonsSide);
+            try {
+              localStorage.setItem('tidyups_footer_side_v2', data.footerButtonsSide);
+            } catch {}
+          }
         }
       })
       .catch((err) => console.warn('Could not load persistent store:', err));

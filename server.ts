@@ -4398,6 +4398,9 @@ const handleSaveStore = (req: any, res: any) => {
     quoCallLogs,
     spamShieldConfig,
     blockedCallsHistory,
+    headerNavOrder,
+    footerBtnOrder,
+    footerButtonsSide,
   } = req.body || {};
   const current = loadStore(projectId) || {
     version: 1,
@@ -4430,6 +4433,18 @@ const handleSaveStore = (req: any, res: any) => {
     quoCallLogs: quoCallLogs || current.quoCallLogs,
     spamShieldConfig: spamShieldConfig || current.spamShieldConfig,
     blockedCallsHistory: blockedCallsHistory || current.blockedCallsHistory,
+    headerNavOrder:
+      Array.isArray(headerNavOrder) && headerNavOrder.length > 0
+        ? headerNavOrder
+        : current.headerNavOrder,
+    footerBtnOrder:
+      Array.isArray(footerBtnOrder) && footerBtnOrder.length > 0
+        ? footerBtnOrder
+        : current.footerBtnOrder,
+    footerButtonsSide:
+      footerButtonsSide === 'left' || footerButtonsSide === 'right'
+        ? footerButtonsSide
+        : current.footerButtonsSide,
   };
 
   repairAndSyncStoreData(updated);

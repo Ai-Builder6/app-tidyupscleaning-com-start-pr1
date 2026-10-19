@@ -75,6 +75,9 @@ export interface AppPersistentStore {
     lastPushedPr?: string;
     lastPushedUrl?: string;
   };
+  headerNavOrder?: string[];
+  footerBtnOrder?: string[];
+  footerButtonsSide?: 'left' | 'right';
 }
 
 // Ensure data directory exists
@@ -257,6 +260,18 @@ export function saveStore(
         Array.isArray(store.serviceCatalog) && store.serviceCatalog.length > 0
           ? store.serviceCatalog
           : existing.serviceCatalog,
+      headerNavOrder:
+        Array.isArray(store.headerNavOrder) && store.headerNavOrder.length > 0
+          ? store.headerNavOrder
+          : existing.headerNavOrder,
+      footerBtnOrder:
+        Array.isArray(store.footerBtnOrder) && store.footerBtnOrder.length > 0
+          ? store.footerBtnOrder
+          : existing.footerBtnOrder,
+      footerButtonsSide:
+        store.footerButtonsSide === 'left' || store.footerButtonsSide === 'right'
+          ? store.footerButtonsSide
+          : existing.footerButtonsSide,
       lastSavedAt: new Date().toISOString(),
     };
 
