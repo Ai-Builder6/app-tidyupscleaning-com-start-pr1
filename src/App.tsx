@@ -451,6 +451,149 @@ export function App() {
   });
   const [isServiceCatalogModalOpen, setIsServiceCatalogModalOpen] = useState<boolean>(false);
 
+  // Customizable Header & Footer Button Order (Left-to-Right Rearranging + Footer Right-Side Alignment)
+  const DEFAULT_HEADER_NAV_ORDER = [
+    'MASTER_HUB',
+    'QUICK_QUOTE',
+    'MAP',
+    'SCHEDULED_JOBS',
+    'MANAGEMENT',
+    'INTAKES',
+    'CLEAN_SHEET',
+    'SPAM_SHIELD',
+    'ADDRESS_SEARCH',
+    'CLIENTS',
+    'LEADS',
+    'CUSTOMER_PORTAL',
+    'QUICK_LINKS',
+    'SMS_REPLIES',
+    'PRICE_LIST',
+    'BACKUP_ZIP',
+  ];
+
+  const DEFAULT_FOOTER_BTN_ORDER = [
+    'PASTE_TABLE',
+    'MASTER_TABLE',
+    'QUICK_MAPS',
+    'DISPATCH_MAP',
+    'SCHEDULE_SEARCH',
+    'SYNC_ALL',
+    'MANAGEMENT',
+    'BLOCK_SPAM',
+  ];
+
+  const [headerNavOrder, setHeaderNavOrder] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tidyups_header_nav_order_v1');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const merged = [...parsed.filter((k) => DEFAULT_HEADER_NAV_ORDER.includes(k))];
+            DEFAULT_HEADER_NAV_ORDER.forEach((k) => {
+              if (!merged.includes(k)) merged.push(k);
+            });
+            return merged;
+          }
+        }
+      } catch {}
+    }
+    return DEFAULT_HEADER_NAV_ORDER;
+  });
+
+  const [footerBtnOrder, setFooterBtnOrder] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tidyups_footer_btn_order_v1');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const merged = [...parsed.filter((k) => DEFAULT_FOOTER_BTN_ORDER.includes(k))];
+            DEFAULT_FOOTER_BTN_ORDER.forEach((k) => {
+              if (!merged.includes(k)) merged.push(k);
+            });
+            return merged;
+          }
+        }
+      } catch {}
+    }
+    return DEFAULT_FOOTER_BTN_ORDER;
+  });
+
+  // Default footer buttons to the RIGHT-HAND SIDE as requested ("move them over to the right hand side instead of the left")
+  const [footerButtonsSide, setFooterButtonsSide] = useState<'right' | 'left'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tidyups_footer_side_v1');
+        if (saved === 'left' || saved === 'right') return saved;
+      } catch {}
+    }
+    return 'right';
+  });
+
+  const [isRearrangingBars, setIsRearrangingBars] = useState<boolean>(false);
+  const [draggedBarItem, setDraggedBarItem] = useState<{ bar: 'header' | 'footer'; id: string } | null>(null);
+
+  const updateHeaderOrder = useCallback((nextOrder: string[]) => {
+    setHeaderNavOrder(nextOrder);
+    try {
+      localStorage.setItem('tidyups_header_nav_order_v1', JSON.stringify(nextOrder));
+    } catch {}
+  }, []);
+
+  const updateFooterOrder = useCallback((nextOrder: string[]) => {
+    setFooterBtnOrder(nextOrder);
+    try {
+      localStorage.setItem('tidyups_footer_btn_order_v1', JSON.stringify(nextOrder));
+    } catch {}
+  }, []);
+
+  const toggleFooterSide = useCallback((side: 'left' | 'right') => {
+    setFooterButtonsSide(side);
+    try {
+      localStorage.setItem('tidyups_footer_side_v1', side);
+    } catch {}
+  }, []);
+
+  const moveBarButton = useCallback(
+    (bar: 'header' | 'footer', id: string, direction: 'left' | 'right') => {
+      const list = bar === 'header' ? [...headerNavOrder] : [...footerBtnOrder];
+      const idx = list.indexOf(id);
+      if (idx === -1) return;
+      const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= list.length) return;
+      const [item] = list.splice(idx, 1);
+      list.splice(targetIdx, 0, item);
+      if (bar === 'header') updateHeaderOrder(list);
+      else updateFooterOrder(list);
+    },
+    [headerNavOrder, footerBtnOrder, updateHeaderOrder, updateFooterOrder]
+  );
+
+  const handleBarDragStart = useCallback((bar: 'header' | 'footer', id: string) => {
+    setDraggedBarItem({ bar, id });
+  }, []);
+
+  const handleBarDrop = useCallback(
+    (bar: 'header' | 'footer', targetId: string) => {
+      if (!draggedBarItem || draggedBarItem.bar !== bar || draggedBarItem.id === targetId) {
+        setDraggedBarItem(null);
+        return;
+      }
+      const list = bar === 'header' ? [...headerNavOrder] : [...footerBtnOrder];
+      const fromIdx = list.indexOf(draggedBarItem.id);
+      const toIdx = list.indexOf(targetId);
+      if (fromIdx !== -1 && toIdx !== -1) {
+        const [moved] = list.splice(fromIdx, 1);
+        list.splice(toIdx, 0, moved);
+        if (bar === 'header') updateHeaderOrder(list);
+        else updateFooterOrder(list);
+      }
+      setDraggedBarItem(null);
+    },
+    [draggedBarItem, headerNavOrder, footerBtnOrder, updateHeaderOrder, updateFooterOrder]
+  );
+
   // Dedicated strictly to TidyUps Cleaning (app.tidyupscleaning.com)
   const [activeBrandId, setActiveBrandId] = useState<'dispatchgeeni' | 'tidyups' | 'easycleans'>('tidyups');
 
@@ -1912,7 +2055,7 @@ export function App() {
               <span>Block Caller / Area Code</span>
             </button>
 
-            {/* Dedicated Top Bar Primary Navigation Tabs */}
+            {/* Dedicated Top Bar Primary Navigation Tabs (Drag & Drop or Click ◀ ▶ to Rearrange Left-to-Right) */}
             <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/80 flex-shrink-0">
               {currentUser.role === 'CLEANER' ? (
                 <>
@@ -1950,252 +2093,335 @@ export function App() {
                 </>
               ) : (
                 <>
-                  {/* 0. PRIMARY HEADER LINK: TidyUps Master Leads & Quotes Table (4-Block Command Center) */}
+                  {headerNavOrder.map((btnKey, idx) => {
+                    let buttonElement: React.ReactNode = null;
+
+                    if (btnKey === 'MASTER_HUB') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-master-table"
+                          onClick={() => {
+                            setMasterHubFocusBlock('ALL');
+                            setActiveTopView('MASTER_HUB');
+                          }}
+                          className={`min-h-[34px] px-3.5 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'MASTER_HUB'
+                              ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white shadow-sm ring-2 ring-emerald-500/30'
+                              : 'bg-emerald-50 text-emerald-950 hover:bg-emerald-100 border border-emerald-300'
+                          }`}
+                          title="Drag left/right to rearrange • TidyUps Master Leads & Quotes Table: 1. Paste Table • 2. Master Leads & Quotes Table • 3. Schedule & Search • 4. Quick Maps"
+                        >
+                          <FileSpreadsheet className={`w-3.5 h-3.5 ${activeTopView === 'MASTER_HUB' ? 'text-white' : 'text-emerald-600'}`} />
+                          <span>Master Leads &amp; Quotes Table</span>
+                          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                            activeTopView === 'MASTER_HUB' ? 'bg-white/20 text-white' : 'bg-emerald-200/80 text-emerald-900'
+                          }`}>
+                            {leadsList.length + quotesList.length}
+                          </span>
+                        </button>
+                      );
+                    } else if (btnKey === 'QUICK_QUOTE') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-quick-quote"
+                          onClick={() => setActiveTopView('QUICK_QUOTE')}
+                          className={`min-h-[34px] px-3.5 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'QUICK_QUOTE'
+                              ? 'bg-gradient-to-r from-pink-600 via-fuchsia-600 to-purple-600 text-white shadow-sm ring-2 ring-pink-500/30'
+                              : 'bg-pink-50/90 text-pink-900 hover:bg-pink-100 border border-pink-200/80'
+                          }`}
+                          title="Drag left/right to rearrange • Live Voice Dictation, Customer Request Form, Quick Quote & Quick Map"
+                        >
+                          <Mic className={`w-3.5 h-3.5 ${activeTopView === 'QUICK_QUOTE' ? 'text-white' : 'text-pink-600'}`} />
+                          <span>Voice Dictation &amp; Intake</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'MAP') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-map"
+                          onClick={() => setActiveTopView('MAP')}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'MAP'
+                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                          title="Drag left/right to rearrange • Dispatch Map"
+                        >
+                          <MapIcon className={`w-3.5 h-3.5 ${activeTopView === 'MAP' ? 'text-white' : 'text-pink-600'}`} />
+                          <span>Dispatch Map</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'SCHEDULED_JOBS') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-jobs"
+                          onClick={() => {
+                            setActiveTopView('SCHEDULED_JOBS');
+                            setScheduledJobsSubTab('CALENDAR');
+                          }}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'SCHEDULED_JOBS'
+                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                          title="Drag left/right to rearrange • Scheduled and Unscheduled Jobs from Jobber"
+                        >
+                          <Calendar className={`w-3.5 h-3.5 ${activeTopView === 'SCHEDULED_JOBS' ? 'text-white' : 'text-purple-600'}`} />
+                          <span>Schedule</span>
+                          {scheduledJobsList.length > 0 && (
+                            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                              activeTopView === 'SCHEDULED_JOBS' ? 'bg-white/20 text-white' : 'bg-pink-100 text-pink-700'
+                            }`}>
+                              {scheduledJobsList.length}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    } else if (btnKey === 'MANAGEMENT') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-management"
+                          onClick={() => setActiveTopView('MANAGEMENT')}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL'].includes(activeTopView)
+                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                          title="Drag left/right to rearrange • Management: Intakes, Quotes, Invoices, Staff Roster, Policies & Terms"
+                        >
+                          <SlidersHorizontal className={`w-3.5 h-3.5 ${
+                            ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL'].includes(activeTopView) ? 'text-white' : 'text-indigo-600'
+                          }`} />
+                          <span>Management</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'INTAKES') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-intakes"
+                          onClick={() => setActiveTopView('INTAKES')}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'INTAKES'
+                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                          title="Drag left/right to rearrange • Separate page for Voice & Customer Intakes Info"
+                        >
+                          <ClipboardList className={`w-3.5 h-3.5 ${activeTopView === 'INTAKES' ? 'text-white' : 'text-pink-600'}`} />
+                          <span>Intakes</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'CLEAN_SHEET') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-clean-sheet"
+                          onClick={() => setActiveTopView('LEADS')}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'LEADS'
+                              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-xs font-extrabold ring-2 ring-emerald-500/30'
+                              : 'text-emerald-800 bg-emerald-50/80 hover:text-emerald-950 hover:bg-emerald-100 border border-emerald-200/80'
+                          }`}
+                          title="Drag left/right to rearrange • Clean Google Sheet Hub: Facebook Leads, Google Leads, Voice Quotes & Paste Table"
+                        >
+                          <FileSpreadsheet className={`w-3.5 h-3.5 ${activeTopView === 'LEADS' ? 'text-white' : 'text-emerald-600'}`} />
+                          <span>Clean Google Sheet</span>
+                          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                            activeTopView === 'LEADS' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {leadsList.length}
+                          </span>
+                        </button>
+                      );
+                    } else if (btnKey === 'SPAM_SHIELD') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-spam-shield"
+                          onClick={() => setActiveTopView('SPAM_SHIELD')}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'SPAM_SHIELD'
+                              ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-xs font-extrabold ring-2 ring-rose-500/30'
+                              : 'text-rose-700 bg-rose-50/70 hover:text-rose-900 hover:bg-rose-100 border border-rose-200/60'
+                          }`}
+                          title="Drag left/right to rearrange • Twilio Spam Shield: Block nuisance callers, rotating numbers & area codes"
+                        >
+                          <ShieldAlert className={`w-3.5 h-3.5 ${activeTopView === 'SPAM_SHIELD' ? 'text-white' : 'text-rose-600'}`} />
+                          <span>Spam Shield</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'ADDRESS_SEARCH') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-address-radar"
+                          onClick={() => setActiveTopView('ADDRESS_SEARCH')}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'ADDRESS_SEARCH'
+                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                          title="Drag left/right to rearrange • Dedicated Quick Map, Schedule Day Radar, Cleaner Hubs & Distance Calculator"
+                        >
+                          <Compass className={`w-3.5 h-3.5 ${activeTopView === 'ADDRESS_SEARCH' ? 'text-white' : 'text-purple-600'}`} />
+                          <span>Quick Map &amp; Radar</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'CLIENTS') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-clients"
+                          onClick={() => setActiveTopView('CLIENTS')}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'CLIENTS'
+                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                          title="Drag left/right to rearrange • Clients database, lead verdicts, phone numbers & Jobber sync"
+                        >
+                          <Users className={`w-3.5 h-3.5 ${activeTopView === 'CLIENTS' ? 'text-white' : 'text-blue-600'}`} />
+                          <span>Clients</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'LEADS') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-leads"
+                          onClick={() => setActiveTopView('LEADS')}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'LEADS'
+                              ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                          title="Drag left/right to rearrange • Ad Leads from Google Sheets (FB Leads, Google Ads, forms)"
+                        >
+                          <Flame className={`w-3.5 h-3.5 ${activeTopView === 'LEADS' ? 'text-white' : 'text-rose-600'}`} />
+                          <span>Leads</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'CUSTOMER_PORTAL') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-customer-portal"
+                          onClick={() => setActiveTopView('CUSTOMER_PORTAL')}
+                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'CUSTOMER_PORTAL'
+                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                          title="Drag left/right to rearrange • Customer Booking & Services Portal"
+                        >
+                          <Sparkles className={`w-3.5 h-3.5 ${activeTopView === 'CUSTOMER_PORTAL' ? 'text-white' : 'text-fuchsia-600'}`} />
+                          <span>Customer Page</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'QUICK_LINKS') {
+                      buttonElement = (
+                        <button
+                          id="nav-quick-links"
+                          onClick={() => setIsQuickLinksOpen(true)}
+                          className="min-h-[34px] px-3 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-xs active:scale-95"
+                          title="Drag left/right to rearrange • Quick Links & Jobber Shortcuts"
+                        >
+                          <Zap className="w-3.5 h-3.5 fill-white" />
+                          <span>Quick Links</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'SMS_REPLIES') {
+                      buttonElement = (
+                        <button
+                          id="nav-quick-replies"
+                          onClick={() => setIsQuickRepliesOpen(true)}
+                          className="min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-pink-50 hover:bg-pink-100 text-pink-800 border border-pink-200/80 shadow-2xs active:scale-95"
+                          title="Drag left/right to rearrange • Client-ready SMS Quick Replies"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-pink-600" />
+                          <span className="hidden sm:inline">SMS Replies</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'PRICE_LIST') {
+                      buttonElement = (
+                        <button
+                          id="nav-price-list"
+                          onClick={() => setIsServiceCatalogModalOpen(true)}
+                          className="min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 shadow-2xs active:scale-95"
+                          title="Drag left/right to rearrange • Service Catalog Price List"
+                        >
+                          <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="hidden sm:inline">Price List</span>
+                        </button>
+                      );
+                    } else if (btnKey === 'BACKUP_ZIP') {
+                      buttonElement = (
+                        <button
+                          id="nav-project-backup"
+                          onClick={() => setIsProjectBackupModalOpen(true)}
+                          className="min-h-[34px] px-3 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs active:scale-95"
+                          title="Drag left/right to rearrange • Download Complete Project ZIP, Backup to Google Drive & GitHub Sync"
+                        >
+                          <FileArchive className="w-3.5 h-3.5 text-white shrink-0" />
+                          <span>Backup ZIP &amp; Drive</span>
+                        </button>
+                      );
+                    }
+
+                    if (!buttonElement) return null;
+
+                    return (
+                      <div
+                        key={btnKey}
+                        draggable
+                        onDragStart={() => handleBarDragStart('header', btnKey)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => handleBarDrop('header', btnKey)}
+                        className={`flex items-center gap-0.5 rounded-lg transition-all ${
+                          isRearrangingBars ? 'ring-1 ring-amber-400 bg-amber-50/70 p-0.5' : ''
+                        } ${draggedBarItem?.bar === 'header' && draggedBarItem?.id === btnKey ? 'opacity-40 scale-95' : ''}`}
+                      >
+                        {isRearrangingBars && (
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              moveBarButton('header', btnKey, 'left');
+                            }}
+                            className="px-1 py-1 rounded bg-slate-900 text-amber-300 hover:bg-slate-700 disabled:opacity-25 text-[10px] font-black cursor-pointer"
+                            title="Move Button Left"
+                          >
+                            ◀
+                          </button>
+                        )}
+                        {buttonElement}
+                        {isRearrangingBars && (
+                          <button
+                            type="button"
+                            disabled={idx === headerNavOrder.length - 1}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              moveBarButton('header', btnKey, 'right');
+                            }}
+                            className="px-1 py-1 rounded bg-slate-900 text-amber-300 hover:bg-slate-700 disabled:opacity-25 text-[10px] font-black cursor-pointer"
+                            title="Move Button Right"
+                          >
+                            ▶
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Rearrange Header / Footer Toggle Button */}
                   <button
-                    id="nav-tab-master-table"
-                    onClick={() => {
-                      setMasterHubFocusBlock('ALL');
-                      setActiveTopView('MASTER_HUB');
-                    }}
-                    className={`min-h-[34px] px-3.5 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'MASTER_HUB'
-                        ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white shadow-sm ring-2 ring-emerald-500/30'
-                        : 'bg-emerald-50 text-emerald-950 hover:bg-emerald-100 border border-emerald-300'
+                    type="button"
+                    onClick={() => setIsRearrangingBars((prev) => !prev)}
+                    className={`min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1 transition-all cursor-pointer border ${
+                      isRearrangingBars
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm ring-2 ring-amber-400/40'
+                        : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
                     }`}
-                    title="TidyUps Master Leads & Quotes Table: 1. Paste Table • 2. Master Leads & Quotes Table • 3. Schedule & Search • 4. Quick Maps"
+                    title="Move / Rearrange Header & Footer Buttons Left or Right"
                   >
-                    <FileSpreadsheet className={`w-3.5 h-3.5 ${activeTopView === 'MASTER_HUB' ? 'text-white' : 'text-emerald-600'}`} />
-                    <span>Master Leads &amp; Quotes Table</span>
-                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                      activeTopView === 'MASTER_HUB' ? 'bg-white/20 text-white' : 'bg-emerald-200/80 text-emerald-900'
-                    }`}>
-                      {leadsList.length + quotesList.length}
-                    </span>
-                  </button>
-
-                  {/* 1. MAIN HEADER LINK: Voice Dictation, Intake Form, Quick Quote & Quick Map */}
-                  <button
-                    id="nav-tab-quick-quote"
-                    onClick={() => setActiveTopView('QUICK_QUOTE')}
-                    className={`min-h-[34px] px-3.5 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'QUICK_QUOTE'
-                        ? 'bg-gradient-to-r from-pink-600 via-fuchsia-600 to-purple-600 text-white shadow-sm ring-2 ring-pink-500/30'
-                        : 'bg-pink-50/90 text-pink-900 hover:bg-pink-100 border border-pink-200/80'
-                    }`}
-                    title="Live Voice Dictation, Customer Request Form (with Bedrooms & Bathrooms), Quick Quote & Quick Map (/voice, /quote)"
-                  >
-                    <Mic className={`w-3.5 h-3.5 ${activeTopView === 'QUICK_QUOTE' ? 'text-white' : 'text-pink-600'}`} />
-                    <span>Voice Dictation &amp; Intake</span>
-                  </button>
-
-                  {/* 2. Dispatch Map */}
-                  <button
-                    id="nav-tab-map"
-                    onClick={() => setActiveTopView('MAP')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'MAP'
-                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                    }`}
-                  >
-                    <MapIcon className={`w-3.5 h-3.5 ${activeTopView === 'MAP' ? 'text-white' : 'text-pink-600'}`} />
-                    <span>Dispatch Map</span>
-                  </button>
-
-                  {/* 3. Schedule & Calendar */}
-                  <button
-                    id="nav-tab-jobs"
-                    onClick={() => {
-                      setActiveTopView('SCHEDULED_JOBS');
-                      setScheduledJobsSubTab('CALENDAR');
-                    }}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'SCHEDULED_JOBS'
-                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                    }`}
-                    title="Scheduled and Unscheduled Jobs from Jobber"
-                  >
-                    <Calendar className={`w-3.5 h-3.5 ${activeTopView === 'SCHEDULED_JOBS' ? 'text-white' : 'text-purple-600'}`} />
-                    <span>Schedule</span>
-                    {scheduledJobsList.length > 0 && (
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                        activeTopView === 'SCHEDULED_JOBS' ? 'bg-white/20 text-white' : 'bg-pink-100 text-pink-700'
-                      }`}>
-                        {scheduledJobsList.length}
-                      </span>
-                    )}
-                  </button>
-
-                  {/* 4. Management Hub (With Intakes Box, Quotes, Invoices, Fleet & Staff) */}
-                  <button
-                    id="nav-tab-management"
-                    onClick={() => setActiveTopView('MANAGEMENT')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL'].includes(activeTopView)
-                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                    }`}
-                    title="Management: Intakes, Quotes, Invoices, Staff Roster, Policies & Terms (/management)"
-                  >
-                    <SlidersHorizontal className={`w-3.5 h-3.5 ${
-                      ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL'].includes(activeTopView) ? 'text-white' : 'text-indigo-600'
-                    }`} />
-                    <span>Management</span>
-                  </button>
-
-                  {/* 5. Dedicated Intakes Info Page */}
-                  <button
-                    id="nav-tab-intakes"
-                    onClick={() => setActiveTopView('INTAKES')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'INTAKES'
-                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                    }`}
-                    title="Separate page for Voice & Customer Intakes Info (/intakes)"
-                  >
-                    <ClipboardList className={`w-3.5 h-3.5 ${activeTopView === 'INTAKES' ? 'text-white' : 'text-pink-600'}`} />
-                    <span>Intakes</span>
-                  </button>
-
-                  {/* 5b. Clean Google Sheet (FB Leads, Google Leads, Voice Quotes & Paste Table) */}
-                  <button
-                    id="nav-tab-clean-sheet"
-                    onClick={() => setActiveTopView('LEADS')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'LEADS'
-                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-xs font-extrabold ring-2 ring-emerald-500/30'
-                        : 'text-emerald-800 bg-emerald-50/80 hover:text-emerald-950 hover:bg-emerald-100 border border-emerald-200/80'
-                    }`}
-                    title="Clean Google Sheet Hub: Facebook Leads, Google Leads, Voice Quotes & Paste Table (/leads)"
-                  >
-                    <FileSpreadsheet className={`w-3.5 h-3.5 ${activeTopView === 'LEADS' ? 'text-white' : 'text-emerald-600'}`} />
-                    <span>Clean Google Sheet</span>
-                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                      activeTopView === 'LEADS' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
-                    }`}>
-                      {leadsList.length}
-                    </span>
-                  </button>
-
-                  {/* 6. Dedicated Twilio Spam Shield & Call Blocker Tab */}
-                  <button
-                    id="nav-tab-spam-shield"
-                    onClick={() => setActiveTopView('SPAM_SHIELD')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'SPAM_SHIELD'
-                        ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-xs font-extrabold ring-2 ring-rose-500/30'
-                        : 'text-rose-700 bg-rose-50/70 hover:text-rose-900 hover:bg-rose-100 border border-rose-200/60'
-                    }`}
-                    title="Twilio Spam Shield: Block nuisance callers, rotating numbers & area codes (/spam, /shield)"
-                  >
-                    <ShieldAlert className={`w-3.5 h-3.5 ${activeTopView === 'SPAM_SHIELD' ? 'text-white' : 'text-rose-600'}`} />
-                    <span>Spam Shield</span>
-                  </button>
-
-                  {/* Quick Map & Address Distance Radar Tab */}
-                  <button
-                    id="nav-tab-address-radar"
-                    onClick={() => setActiveTopView('ADDRESS_SEARCH')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'ADDRESS_SEARCH'
-                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                    }`}
-                    title="Dedicated Quick Map, Schedule Day Radar, Cleaner Hubs & Distance Calculator (/radar, /search)"
-                  >
-                    <Compass className={`w-3.5 h-3.5 ${activeTopView === 'ADDRESS_SEARCH' ? 'text-white' : 'text-purple-600'}`} />
-                    <span>Quick Map &amp; Radar</span>
-                  </button>
-
-                  {/* Dedicated Clients Database Tab */}
-                  <button
-                    id="nav-tab-clients"
-                    onClick={() => setActiveTopView('CLIENTS')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'CLIENTS'
-                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                    }`}
-                    title="Clients database, lead verdicts, phone numbers & Jobber sync (/clients)"
-                  >
-                    <Users className={`w-3.5 h-3.5 ${activeTopView === 'CLIENTS' ? 'text-white' : 'text-blue-600'}`} />
-                    <span>Clients</span>
-                  </button>
-
-                  {/* Dedicated Google Sheets & Ad Leads Tab */}
-                  <button
-                    id="nav-tab-leads"
-                    onClick={() => setActiveTopView('LEADS')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'LEADS'
-                        ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                    }`}
-                    title="Ad Leads from Google Sheets (FB Leads, Google Ads, forms) (/leads)"
-                  >
-                    <Flame className={`w-3.5 h-3.5 ${activeTopView === 'LEADS' ? 'text-white' : 'text-rose-600'}`} />
-                    <span>Leads</span>
-                  </button>
-
-                  {/* Customer Booking Portal Tab */}
-                  <button
-                    id="nav-tab-customer-portal"
-                    onClick={() => setActiveTopView('CUSTOMER_PORTAL')}
-                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      activeTopView === 'CUSTOMER_PORTAL'
-                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                    }`}
-                    title="Customer Booking & Services Portal (/book)"
-                  >
-                    <Sparkles className={`w-3.5 h-3.5 ${activeTopView === 'CUSTOMER_PORTAL' ? 'text-white' : 'text-fuchsia-600'}`} />
-                    <span>Customer Page</span>
-                  </button>
-
-                  {/* Quick Links Button */}
-                  <button
-                    id="nav-quick-links"
-                    onClick={() => setIsQuickLinksOpen(true)}
-                    className="min-h-[34px] px-3 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-xs active:scale-95"
-                    title="Quick Links & Jobber Shortcuts"
-                  >
-                    <Zap className="w-3.5 h-3.5 fill-white" />
-                    <span>Quick Links</span>
-                  </button>
-
-                  {/* Client SMS Quick Replies Assistant Button */}
-                  <button
-                    id="nav-quick-replies"
-                    onClick={() => setIsQuickRepliesOpen(true)}
-                    className="min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-pink-50 hover:bg-pink-100 text-pink-800 border border-pink-200/80 shadow-2xs active:scale-95"
-                    title="Client-ready SMS Quick Replies for Standard, Deep & Move-Out Cleaning"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5 text-pink-600" />
-                    <span className="hidden sm:inline">SMS Replies</span>
-                  </button>
-
-                  {/* Service Catalog & Price List Button */}
-                  <button
-                    id="nav-price-list"
-                    onClick={() => setIsServiceCatalogModalOpen(true)}
-                    className="min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 shadow-2xs active:scale-95"
-                    title="Service Catalog Price List: View, Add, or Paste / Import Price List items & Jobber line items"
-                  >
-                    <Tag className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="hidden sm:inline">Price List</span>
-                  </button>
-
-                  {/* Project ZIP Download, Google Drive Backup & AI Build Guide */}
-                  <button
-                    id="nav-project-backup"
-                    onClick={() => setIsProjectBackupModalOpen(true)}
-                    className="min-h-[34px] px-3 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs active:scale-95"
-                    title="Download Complete Project ZIP, Backup to Google Drive, AI Build Workflow & GitHub / Domain Publish Guide"
-                  >
-                    <FileArchive className="w-3.5 h-3.5 text-white shrink-0" />
-                    <span>Backup ZIP &amp; Drive</span>
+                    <span>⇄</span>
+                    <span className="hidden xl:inline">{isRearrangingBars ? 'Done Moving' : 'Move Buttons'}</span>
                   </button>
                 </>
               )}
@@ -3007,119 +3233,18 @@ export function App() {
         </main>
         )}
 
-        {/* Global Quick-Link Footer Bar (Paste Table, Master Leads Table, Maps & 1-Click Sync Everything) */}
+        {/* Global Quick-Link Footer Bar (Buttons moved to Right-Hand Side by default + Management & Block Spam Caller + Rearrangeable Left-to-Right) */}
         {!isZenMode && (
           <footer
             id="global-footer"
-            className="min-h-[42px] py-1.5 bg-slate-900 text-slate-300 flex flex-wrap items-center px-3 sm:px-5 justify-between gap-2 text-xs shrink-0 font-medium z-30 border-t border-slate-700 shadow-lg"
+            className={`min-h-[44px] py-1.5 bg-slate-900 text-slate-300 flex flex-wrap items-center px-3 sm:px-5 justify-between gap-2 text-xs shrink-0 font-medium z-30 border-t border-slate-700 shadow-lg ${
+              footerButtonsSide === 'right' ? 'flex-row' : 'flex-row-reverse'
+            }`}
           >
-            {/* Left / Center: Primary Footer Quick-Link Buttons requested by User */}
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsStaffAuthenticated(true);
-                  setMasterHubFocusBlock('PASTE_TABLE');
-                  setActiveTopView('MASTER_HUB');
-                }}
-                className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
-                  activeTopView === 'MASTER_HUB' && masterHubFocusBlock === 'PASTE_TABLE'
-                    ? 'bg-amber-500 text-slate-950 ring-2 ring-amber-300'
-                    : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
-                }`}
-                title="Quicklink: Paste Quotes & Pasted Leads Table (links into Master Leads, Jobber Quotes, Schedule & Maps)"
-              >
-                <ClipboardPaste className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>Paste Table (Paste Quotes &amp; Leads)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsStaffAuthenticated(true);
-                  setMasterHubFocusBlock('MASTER_TABLE');
-                  setActiveTopView('MASTER_HUB');
-                }}
-                className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
-                  activeTopView === 'MASTER_HUB' && (masterHubFocusBlock === 'MASTER_TABLE' || masterHubFocusBlock === 'ALL')
-                    ? 'bg-emerald-500 text-slate-950 ring-2 ring-emerald-300'
-                    : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
-                }`}
-                title="Open TidyUps Master Leads & Quotes Table (Facebook, Google, Voice Quotes, Pasted Leads & Jobber Quotes)"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>Master Leads &amp; Quotes Table</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsStaffAuthenticated(true);
-                  setMasterHubFocusBlock('QUICK_MAPS');
-                  setActiveTopView('MASTER_HUB');
-                }}
-                className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
-                  activeTopView === 'MASTER_HUB' && masterHubFocusBlock === 'QUICK_MAPS'
-                    ? 'bg-sky-500 text-slate-950 ring-2 ring-sky-300'
-                    : 'bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40'
-                }`}
-                title="Jump to Quick Maps on the Master Page"
-              >
-                <MapIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                <span>Quick Maps</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsStaffAuthenticated(true);
-                  setActiveTopView('MAP');
-                }}
-                className={`px-2.5 py-1 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer transition-all ${
-                  activeTopView === 'MAP'
-                    ? 'bg-pink-600 text-white'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-                }`}
-                title="Open Full Screen Territory Dispatch Map"
-              >
-                <Navigation className="w-3 h-3 text-pink-400 shrink-0" />
-                <span>Full Dispatch Map</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsStaffAuthenticated(true);
-                  setMasterHubFocusBlock('SCHEDULE_SEARCH');
-                  setActiveTopView('MASTER_HUB');
-                }}
-                className={`px-2.5 py-1 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer transition-all ${
-                  activeTopView === 'MASTER_HUB' && masterHubFocusBlock === 'SCHEDULE_SEARCH'
-                    ? 'bg-purple-500 text-white'
-                    : 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40'
-                }`}
-                title="Jump to Schedule & Search Block"
-              >
-                <Calendar className="w-3 h-3 text-purple-400 shrink-0" />
-                <span>Schedule &amp; Search</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSyncEverything(false)}
-                disabled={isSyncingEverything}
-                className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
-                title="1-Click Sync Everything: Quotes, Invoices, Jobber Calendar, Clients, Quo Calls & Master Leads Sheet"
-              >
-                <RefreshCw className={`w-3 h-3 ${isSyncingEverything ? 'animate-spin' : ''}`} />
-                <span>{isSyncingEverything ? 'Syncing...' : 'Sync All'}</span>
-              </button>
-            </div>
-
-            {/* Right: Legal Links & Live Status */}
-            <div className="hidden lg:flex items-center gap-3 text-[11px]">
+            {/* Status, Legal Links & Rearrange Controls (Sits on the Left when Footer Buttons are on the Right) */}
+            <div className="flex flex-wrap items-center gap-2.5 text-[11px]">
               <span className="text-pink-400 font-mono font-bold">1-833-TIDYUPS</span>
-              <div className="flex items-center gap-2 border-l border-slate-700 pl-3">
+              <div className="hidden sm:flex items-center gap-2 border-l border-slate-700 pl-2.5">
                 <button
                   onClick={() => {
                     setActiveLegalTab('SUPPORT');
@@ -3150,10 +3275,249 @@ export function App() {
                   /privacy-policy
                 </button>
               </div>
-              <div className="flex items-center gap-1.5 border-l border-slate-700 pl-3">
+              <div className="hidden xl:flex items-center gap-1.5 border-l border-slate-700 pl-2.5">
                 <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
                 <span className="uppercase tracking-widest text-slate-300 text-[10px]">TidyUps Master v4.25</span>
               </div>
+
+              {/* Rearrange Header & Footer Buttons Control */}
+              <div className="flex items-center gap-1.5 border-l border-slate-700 pl-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsRearrangingBars((prev) => !prev)}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all border ${
+                    isRearrangingBars
+                      ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600'
+                  }`}
+                  title="Rearrange Header or Footer buttons from left to right (or drag any button directly)"
+                >
+                  <span>⇄ {isRearrangingBars ? 'Done Rearranging' : 'Rearrange Header / Footer'}</span>
+                </button>
+
+                {isRearrangingBars && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => toggleFooterSide(footerButtonsSide === 'right' ? 'left' : 'right')}
+                      className="px-2 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-extrabold cursor-pointer"
+                      title="Move all footer buttons between Left Side and Right Side"
+                    >
+                      Footer Side: {footerButtonsSide === 'right' ? 'Right → (Switch to Left)' : '← Left (Switch to Right)'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateHeaderOrder(DEFAULT_HEADER_NAV_ORDER);
+                        updateFooterOrder(DEFAULT_FOOTER_BTN_ORDER);
+                        toggleFooterSide('right');
+                      }}
+                      className="px-2 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 text-[10px] font-bold cursor-pointer"
+                      title="Reset Header and Footer button positions to default"
+                    >
+                      Reset Order
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Right-Hand Side (by default): Rearrangeable Footer Action Buttons including Management & Block Spam Caller */}
+            <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2 ml-auto">
+              {footerBtnOrder.map((btnKey, idx) => {
+                let btnNode: React.ReactNode = null;
+
+                if (btnKey === 'PASTE_TABLE') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffAuthenticated(true);
+                        setMasterHubFocusBlock('PASTE_TABLE');
+                        setActiveTopView('MASTER_HUB');
+                      }}
+                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                        activeTopView === 'MASTER_HUB' && masterHubFocusBlock === 'PASTE_TABLE'
+                          ? 'bg-amber-500 text-slate-950 ring-2 ring-amber-300'
+                          : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
+                      }`}
+                      title="Drag left/right to rearrange • Quicklink: Paste Quotes & Pasted Leads Table"
+                    >
+                      <ClipboardPaste className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Paste Table (Paste Quotes &amp; Leads)</span>
+                    </button>
+                  );
+                } else if (btnKey === 'MASTER_TABLE') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffAuthenticated(true);
+                        setMasterHubFocusBlock('MASTER_TABLE');
+                        setActiveTopView('MASTER_HUB');
+                      }}
+                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                        activeTopView === 'MASTER_HUB' && (masterHubFocusBlock === 'MASTER_TABLE' || masterHubFocusBlock === 'ALL')
+                          ? 'bg-emerald-500 text-slate-950 ring-2 ring-emerald-300'
+                          : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
+                      }`}
+                      title="Drag left/right to rearrange • Open TidyUps Master Leads & Quotes Table"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Master Leads &amp; Quotes Table</span>
+                    </button>
+                  );
+                } else if (btnKey === 'QUICK_MAPS') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffAuthenticated(true);
+                        setMasterHubFocusBlock('QUICK_MAPS');
+                        setActiveTopView('MASTER_HUB');
+                      }}
+                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                        activeTopView === 'MASTER_HUB' && masterHubFocusBlock === 'QUICK_MAPS'
+                          ? 'bg-sky-500 text-slate-950 ring-2 ring-sky-300'
+                          : 'bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40'
+                      }`}
+                      title="Drag left/right to rearrange • Jump to Quick Maps on the Master Page"
+                    >
+                      <MapIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span>Quick Maps</span>
+                    </button>
+                  );
+                } else if (btnKey === 'DISPATCH_MAP') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffAuthenticated(true);
+                        setActiveTopView('MAP');
+                      }}
+                      className={`px-2.5 py-1 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer transition-all ${
+                        activeTopView === 'MAP'
+                          ? 'bg-pink-600 text-white'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                      }`}
+                      title="Drag left/right to rearrange • Open Full Screen Territory Dispatch Map"
+                    >
+                      <Navigation className="w-3 h-3 text-pink-400 shrink-0" />
+                      <span>Full Dispatch Map</span>
+                    </button>
+                  );
+                } else if (btnKey === 'SCHEDULE_SEARCH') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffAuthenticated(true);
+                        setMasterHubFocusBlock('SCHEDULE_SEARCH');
+                        setActiveTopView('MASTER_HUB');
+                      }}
+                      className={`px-2.5 py-1 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer transition-all ${
+                        activeTopView === 'MASTER_HUB' && masterHubFocusBlock === 'SCHEDULE_SEARCH'
+                          ? 'bg-purple-500 text-white'
+                          : 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40'
+                      }`}
+                      title="Drag left/right to rearrange • Jump to Schedule & Search Block"
+                    >
+                      <Calendar className="w-3 h-3 text-purple-400 shrink-0" />
+                      <span>Schedule &amp; Search</span>
+                    </button>
+                  );
+                } else if (btnKey === 'SYNC_ALL') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => handleSyncEverything(false)}
+                      disabled={isSyncingEverything}
+                      className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                      title="Drag left/right to rearrange • 1-Click Sync Everything"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isSyncingEverything ? 'animate-spin' : ''}`} />
+                      <span>{isSyncingEverything ? 'Syncing...' : 'Sync All'}</span>
+                    </button>
+                  );
+                } else if (btnKey === 'MANAGEMENT') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffAuthenticated(true);
+                        setActiveTopView('MANAGEMENT');
+                      }}
+                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-md ${
+                        ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL'].includes(activeTopView)
+                          ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white ring-2 ring-indigo-300'
+                          : 'bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-400/50'
+                      }`}
+                      title="Drag left/right to rearrange • Open Management Hub (Intakes, Quotes, Invoices, Staff Roster & Settings)"
+                    >
+                      <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                      <span>Management</span>
+                    </button>
+                  );
+                } else if (btnKey === 'BLOCK_SPAM') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenSpamShield()}
+                      className="px-3 py-1 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs shadow-md flex items-center gap-1.5 border border-rose-300/50 cursor-pointer transition-all active:scale-95"
+                      title="Drag left/right to rearrange • Instant Call Blocker: Block nuisance callers, area codes & telemarketers across all Twilio lines"
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                      <ShieldAlert className="w-3.5 h-3.5 text-white shrink-0" />
+                      <span>Block Spam Caller</span>
+                    </button>
+                  );
+                }
+
+                if (!btnNode) return null;
+
+                return (
+                  <div
+                    key={btnKey}
+                    draggable
+                    onDragStart={() => handleBarDragStart('footer', btnKey)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => handleBarDrop('footer', btnKey)}
+                    className={`flex items-center gap-0.5 rounded-xl transition-all ${
+                      isRearrangingBars ? 'ring-1 ring-amber-400 bg-slate-800 p-0.5' : ''
+                    } ${draggedBarItem?.bar === 'footer' && draggedBarItem?.id === btnKey ? 'opacity-40 scale-95' : ''}`}
+                  >
+                    {isRearrangingBars && (
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          moveBarButton('footer', btnKey, 'left');
+                        }}
+                        className="px-1.5 py-0.5 rounded bg-slate-950 text-amber-300 hover:bg-slate-700 disabled:opacity-25 text-[10px] font-black cursor-pointer"
+                        title="Move Button Left"
+                      >
+                        ◀
+                      </button>
+                    )}
+                    {btnNode}
+                    {isRearrangingBars && (
+                      <button
+                        type="button"
+                        disabled={idx === footerBtnOrder.length - 1}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          moveBarButton('footer', btnKey, 'right');
+                        }}
+                        className="px-1.5 py-0.5 rounded bg-slate-950 text-amber-300 hover:bg-slate-700 disabled:opacity-25 text-[10px] font-black cursor-pointer"
+                        title="Move Button Right"
+                      >
+                        ▶
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </footer>
         )}
@@ -3435,18 +3799,6 @@ export function App() {
             </button>
           </div>
         )}
-        {/* Floating 1-Click Spam Shield & Call Blocker Quick Trigger (Always Accessible) */}
-        <button
-          type="button"
-          onClick={() => handleOpenSpamShield()}
-          className="fixed bottom-4 left-4 z-40 px-3.5 py-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs shadow-2xl flex items-center gap-2 border border-rose-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 animate-fadeIn"
-          title="Instant Call Blocker: Block nuisance callers, area codes & telemarketers across all Twilio lines"
-          aria-label="Open Twilio Spam Shield & Call Blocker"
-        >
-          <div className="w-2 h-2 rounded-full bg-white animate-ping" />
-          <ShieldAlert className="w-4 h-4 text-white shrink-0" />
-          <span>Block Spam Caller</span>
-        </button>
       </div>
     </APIProvider>
   );
