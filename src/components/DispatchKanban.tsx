@@ -421,7 +421,7 @@ export const DispatchKanban: React.FC<DispatchKanbanProps> = ({
                 onClick={() => setActiveTab('BOARD')}
                 className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
               >
-                ← 15 Vans
+                ← 15 Techs
               </button>
               <span className="text-slate-300">|</span>
               <span className="font-bold text-xs text-slate-800">Pending Queue</span>

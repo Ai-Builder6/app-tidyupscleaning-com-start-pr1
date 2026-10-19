@@ -15,9 +15,9 @@ export default defineConfig(() => {
         includeAssets: ['favicon.ico', 'icon.svg'],
         manifest: {
           id: '/',
-          name: 'TidyUps Cleaning & Dispatch Genie',
-          short_name: 'TidyUps',
-          description: 'TidyUps Cleaning, EasyCleans & Dispatch Genie operations console, live field service dispatch board, automated scheduling, and Jobber sync.',
+          name: 'Tidyups Cleaning Dispatch App',
+          short_name: 'Tidyups Dispatch',
+          description: "Interactive regional territory dispatch board for 15 mobile cleaning tech's and 3 core cleaning services (Standard, Deep, Move-Out) with voice dictation booking intake, Edmonton route optimization, and Jobber backend sync.",
           theme_color: '#2563EB',
           background_color: '#F8FAFC',
           display: 'standalone',

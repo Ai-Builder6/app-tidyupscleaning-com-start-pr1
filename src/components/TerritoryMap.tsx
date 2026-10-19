@@ -970,11 +970,11 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               className={`min-h-[38px] px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
                 showVehicles ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="Toggle 15 Vans"
-              aria-label="Toggle 15 service vans"
+              title="Toggle 15 Cleaning Techs"
+              aria-label="Toggle 15 cleaning techs"
             >
               <Truck className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden sm:inline">15 Vans</span>
+              <span className="hidden sm:inline">15 Techs</span>
             </button>
 
             <button
@@ -1112,14 +1112,14 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 id="toggle-vehicles-layer"
                 onClick={() => setShowVehicles(!showVehicles)}
                 aria-pressed={showVehicles}
-                aria-label="Toggle display of 15 service vans on map"
+                aria-label="Toggle display of 15 cleaning techs on map"
                 className={`min-h-[38px] px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
                   showVehicles ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:text-slate-900'
                 }`}
-                title="Toggle 15 Service Vans"
+                title="Toggle 15 Cleaning Techs"
               >
                 <Truck className="w-4 h-4 text-blue-600" aria-hidden="true" />
-                <span className="hidden sm:inline">15 Vans</span>
+                <span className="hidden sm:inline">15 Techs</span>
               </button>
 
               <button
@@ -3268,7 +3268,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             title="Open Live Fleet Summary"
           >
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Fleet: 15 Vans</span>
+            <span>Fleet: 15 Techs</span>
             <span className="text-slate-500 text-[10px] font-normal">(Stats ↗)</span>
           </button>
         ) : (

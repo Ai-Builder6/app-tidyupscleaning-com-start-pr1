@@ -3159,7 +3159,7 @@ export function App() {
                         {unassignedCount} Queue
                       </span>
                     ) : (
-                      <span className="text-slate-500 font-normal text-[11px]">(15 Vans)</span>
+                      <span className="text-slate-500 font-normal text-[11px]">(15 Techs)</span>
                     )}
                   </div>
 
