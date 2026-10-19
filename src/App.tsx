@@ -79,6 +79,7 @@ import { RoleSelectorModal } from './components/RoleSelectorModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { BookMyCleaningLogo } from './components/BookMyCleaningLogo';
 import { AddressSearchRadarView } from './components/AddressSearchRadarView';
+import { QuickMapScheduleRadarView } from './components/QuickMapScheduleRadarView';
 import { JobberQuote, JobberInvoice } from './services/jobberSyncModules';
 import { AppUser, APP_USERS, getRolePermissions } from './types/authAndChat';
 import { 
@@ -2665,14 +2666,18 @@ export function App() {
             onOpenVoiceIntake={() => setActiveTopView('QUICK_QUOTE')}
           />
         ) : activeTopView === 'ADDRESS_SEARCH' ? (
-          <AddressSearchRadarView
+          <QuickMapScheduleRadarView
+            mode="FULL_PAGE"
             technicians={technicians}
             scheduledJobs={scheduledJobsList}
-            tickets={tickets}
+            leads={leadsList}
+            quotes={quotesList}
             onBookCleaner={handleBookFromRadar}
-            onUpdateCleanerHub={handleUpdateCleanerHub}
-            googleMapsApiKey={apiKey}
-            isMapsAuthError={mapsAuthError}
+            onNavigateToMasterHub={() => {
+              setMasterHubFocusBlock('ALL');
+              setActiveTopView('MASTER_HUB');
+            }}
+            onNavigateToFullDispatchMap={() => setActiveTopView('MAP')}
             onNavigateToSchedule={() => {
               setActiveTopView('SCHEDULED_JOBS');
               setScheduledJobsSubTab('CALENDAR');
@@ -3373,18 +3378,17 @@ export function App() {
                       type="button"
                       onClick={() => {
                         setIsStaffAuthenticated(true);
-                        setMasterHubFocusBlock('QUICK_MAPS');
-                        setActiveTopView('MASTER_HUB');
+                        setActiveTopView('ADDRESS_SEARCH');
                       }}
                       className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
-                        activeTopView === 'MASTER_HUB' && masterHubFocusBlock === 'QUICK_MAPS'
+                        activeTopView === 'ADDRESS_SEARCH'
                           ? 'bg-sky-500 text-slate-950 ring-2 ring-sky-300'
                           : 'bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40'
                       }`}
-                      title="Drag left/right to rearrange • Jump to Quick Maps on the Master Page"
+                      title="Drag left/right to rearrange • Open Dedicated Quick Map & Schedule Radar Page"
                     >
                       <MapIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                      <span>Quick Maps</span>
+                      <span>Quick Map &amp; Schedule Radar</span>
                     </button>
                   );
                 } else if (btnKey === 'DISPATCH_MAP') {
