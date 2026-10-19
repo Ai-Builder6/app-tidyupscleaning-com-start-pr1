@@ -29,6 +29,8 @@ import {
   normalizeAndRepairCatalogItems,
   buildPriceListWorkbook,
   generatePriceListSheetRows,
+  generateCombinedAllCleanersCatalog,
+  generateJobberMasterSinglePageSheetRows,
 } from '../data/serviceCatalogData';
 import { saveServiceCatalogToFirestore } from '../services/firestoreSyncService';
 import { downloadFileFromApiWithoutNavigation } from '../services/googleDriveBackupService';
@@ -57,6 +59,7 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
   );
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [pageLayoutMode, setPageLayoutMode] = useState<'COMBINED_1_2_3' | 'SINGLE_CREW'>('COMBINED_1_2_3');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [pastedText, setPastedText] = useState('');
   const [importMode, setImportMode] = useState<'REPLACE' | 'APPEND'>('REPLACE');
@@ -164,9 +167,19 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
     [liveCatalog, catalog]
   );
 
+  const combinedAllCleanersItems = useMemo(
+    () => generateCombinedAllCleanersCatalog(currentItems),
+    [currentItems]
+  );
+
+  const displayedBaseItems = useMemo(
+    () => (pageLayoutMode === 'COMBINED_1_2_3' ? combinedAllCleanersItems : currentItems),
+    [pageLayoutMode, combinedAllCleanersItems, currentItems]
+  );
+
   // Filtered catalog list
   const filteredItems = useMemo(() => {
-    return currentItems.filter((item) => {
+    return displayedBaseItems.filter((item) => {
       if (selectedCategory !== 'ALL' && item.category !== selectedCategory) return false;
       if (!search.trim()) return true;
       const q = search.toLowerCase();
@@ -181,7 +194,7 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
         String(item.total).includes(q)
       );
     });
-  }, [currentItems, selectedCategory, search]);
+  }, [displayedBaseItems, selectedCategory, search]);
 
   // Preview of pasted or attached file text
   const parsedPreview = useMemo(() => {
@@ -244,15 +257,16 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
     }
   };
 
-  // Toggle a single item between 1 Cleaner (QTY × $52.50) and 2 Cleaners (QTY × $105.00)
+  // Toggle a single item between 1 Cleaner ($52.50), 2 Cleaners ($105.00), and 3 Cleaners ($157.50)
   const handleToggleItemCleaners = async (item: ServiceCatalogItem) => {
     if (item.isAddon) return;
+    const baseId = item.id.replace(/-crew-[123]$/, '');
     const currentCleaners = Math.max(1, Number(item.cleanersCount) || 2);
-    const targetCleaners = currentCleaners === 2 ? 1 : 2;
+    const targetCleaners = currentCleaners === 1 ? 2 : currentCleaners === 2 ? 3 : 1;
     const conv = convertItemForCleanersCount(item, targetCleaners);
 
     const nextCatalog = currentItems.map((c) =>
-      c.id === item.id
+      c.id === item.id || c.id === baseId
         ? {
             ...c,
             cleanersCount: conv.cleanersCount,
@@ -566,29 +580,28 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
     setIsAddItemModalOpen(true);
   };
 
-  // Download LIVE Updated Price List as a real Google Sheets (.xlsx) Workbook (3 tabs: Active Live, 2 Cleaners, 1 Cleaner)
+  // Download Single-Page Jobber Master Price List (.xlsx) with 1, 2 & 3 Cleaners + TAXABLE=true
   const handleDownloadGoogleSheetsXlsx = async () => {
     try {
-      // Ensure latest state is persisted to server before downloading
       await persistCatalogEverywhere(currentItems);
     } catch {}
 
     const wb = buildPriceListWorkbook(currentItems);
     const dateStr = new Date().toISOString().slice(0, 10);
-    const filename = `Tidyups_Updated_Price_List_Google_Sheets_${dateStr}.xlsx`;
+    const filename = `Tidyups_Jobber_Master_Price_List_1_2_3_Cleaners_${dateStr}.xlsx`;
     XLSX.writeFile(wb, filename);
     setFeedbackNotice(
-      `✓ Downloaded "${filename}" (${currentItems.length} updated items with Number of Cleaners × QTY × Unit Price = Total & 1-Cleaner / 2-Cleaner sheets)!`
+      `✓ Downloaded "${filename}" (Single Page with 1 Cleaner, 2 Cleaners & 3 Cleaners + TAXABLE = true for all ${combinedAllCleanersItems.length} items)!`
     );
   };
 
-  // Download LIVE Updated Price List as a Google Sheets (.csv) file
-  const handleDownloadGoogleSheetsCsv = async () => {
+  // Download Single-Page Jobber Master Price List as a separate CSV file directly to computer
+  const handleDownloadJobberMasterCsv = async () => {
     try {
       await persistCatalogEverywhere(currentItems);
     } catch {}
 
-    const { headers, rows } = generatePriceListSheetRows(currentItems);
+    const { headers, rows } = generateJobberMasterSinglePageSheetRows(currentItems);
     const escapeCsv = (val: any) => {
       const str = String(val ?? '');
       if (str.includes(',') || str.includes('"') || str.includes('\n')) {
@@ -602,29 +615,25 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
     ].join('\n');
 
     const dateStr = new Date().toISOString().slice(0, 10);
-    const filename = `Tidyups_Updated_Price_List_Google_Sheets_${dateStr}.csv`;
+    const filename = `Tidyups_Jobber_Master_Price_List_1_2_3_Cleaners_${dateStr}.csv`;
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    try {
-      const { uploadAppFileToTidyUpsDriveFolder, TIDYUPS_DRIVE_FOLDER_NAME } = await import(
-        '../services/googleDriveBackupService'
-      );
-      setFeedbackNotice(
-        `Uploading "${filename}" into Google Drive folder "${TIDYUPS_DRIVE_FOLDER_NAME}"...`
-      );
-      const { file, folder } = await uploadAppFileToTidyUpsDriveFolder({
-        filename,
-        blob,
-        mimeType: 'text/csv',
-        description: `TidyUps Service Catalog & Price List (${currentItems.length} items)`,
-      });
-      setFeedbackNotice(
-        `✓ Uploaded "${file.name}" (${currentItems.length} items) directly into Google Drive folder "${folder.name}"!`
-      );
-    } catch (err: any) {
-      setFeedbackNotice(
-        err?.message || 'Could not upload Price List CSV to Google Drive folder.'
-      );
-    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setFeedbackNotice(
+      `✓ Downloaded "${filename}"! Contains 1 Cleaner (top), 2 Cleaners (lower), and 3 Cleaners (lower again) on 1 single page with TAXABLE = true for all ${rows.length} items.`
+    );
+  };
+
+  // Optional: Also allow uploading CSV to Google Drive folder
+  const handleDownloadGoogleSheetsCsv = async () => {
+    await handleDownloadJobberMasterCsv();
   };
 
   if (!isOpen) return null;
@@ -671,24 +680,24 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Download Updated Google Sheets (.xlsx) */}
+            {/* Download Jobber Master CSV (Single Page: 1, 2 & 3 Cleaners + TAXABLE=true) */}
             <button
-              onClick={handleDownloadGoogleSheetsXlsx}
+              onClick={handleDownloadJobberMasterCsv}
               className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-              title="Download your live updated price list as a Google Sheets (.xlsx) file with 1-Cleaner & 2-Cleaner sheets"
+              title="Download Single-Page Jobber Master Price List CSV (1 Cleaner, 2 Cleaners & 3 Cleaners on 1 sheet with TAXABLE = true)"
             >
-              <FileSpreadsheet className="w-4 h-4" />
-              <span>Download Google Sheets (.xlsx)</span>
+              <Download className="w-4 h-4" />
+              <span>Download Jobber Master CSV (1, 2 &amp; 3 Cleaners)</span>
             </button>
 
-            {/* Download Updated Google Sheets (.csv) */}
+            {/* Download Updated Single-Sheet (.xlsx) */}
             <button
-              onClick={handleDownloadGoogleSheetsCsv}
+              onClick={handleDownloadGoogleSheetsXlsx}
               className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-white/20 cursor-pointer"
-              title="Download live updated price list as CSV for Google Sheets"
+              title="Download single-sheet Excel (.xlsx) with 1, 2 & 3 Cleaners on 1 page and TAXABLE = true"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Download CSV</span>
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Download Single-Page .XLSX</span>
             </button>
 
             <button
@@ -725,42 +734,73 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
           </div>
         </div>
 
-        {/* Formula & Cleaner Count Conversion Banner */}
+        {/* Formula & Single-Page 1, 2 & 3 Cleaners Banner */}
         <div className="px-4 py-2.5 bg-purple-950/5 border-b border-purple-200/80 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 text-xs">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 font-extrabold text-purple-950">
               <Calculator className="w-4 h-4 text-purple-700" />
-              <span>Active Formula:</span>
+              <span>Jobber Single-Page Format:</span>
             </span>
-            <code className="px-2 py-0.5 rounded bg-purple-100 text-purple-900 font-mono font-extrabold text-xs">
-              Number of Cleaners ( QTY × Unit Price ) = Total
+            <code className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-mono font-extrabold text-xs">
+              TAXABLE = true (All Items)
             </code>
             <span className="text-slate-600">
-              • <strong>2 Cleaners:</strong> 2 (3 × $105.00) = $315.00 &nbsp;↔&nbsp; <strong>1 Cleaner:</strong> 1 (6 × $52.50) = $315.00
+              • <strong>1 Cleaner:</strong> QTY × $52.50 &nbsp;|&nbsp; <strong>2 Cleaners:</strong> QTY × $105.00 &nbsp;|&nbsp; <strong>3 Cleaners:</strong> QTY × $157.50
             </span>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] font-bold text-slate-600">Convert Catalog Crew Rates:</span>
+          <div className="flex items-center gap-1.5 flex-wrap">
             <button
               type="button"
-              disabled={isSaving}
-              onClick={() => handleConvertAllCleaners(2)}
-              className="px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-800 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
-              title="Set all residential services to 2 Cleaners (e.g. QTY 3 × $105.00 = $315.00)"
+              onClick={() => setPageLayoutMode('COMBINED_1_2_3')}
+              className={`px-2.5 py-1 rounded-lg font-extrabold text-[11px] flex items-center gap-1 cursor-pointer transition-colors ${
+                pageLayoutMode === 'COMBINED_1_2_3'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+              }`}
+              title="Show 1 Cleaner at top, 2 Cleaners lower down, and 3 Cleaners lower down again on ONE single page"
             >
-              <Users className="w-3 h-3" />
-              <span>2 Cleaners (QTY × $105.00)</span>
+              <CheckCircle2 className="w-3 h-3" />
+              <span>All on 1 Page (1, 2 &amp; 3 Cleaners)</span>
             </button>
             <button
               type="button"
               disabled={isSaving}
-              onClick={() => handleConvertAllCleaners(1)}
+              onClick={() => {
+                setPageLayoutMode('SINGLE_CREW');
+                handleConvertAllCleaners(1);
+              }}
               className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-900 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
-              title="Convert all residential services to 1 Cleaner (e.g. QTY 6 × $52.50 = $315.00)"
+              title="Convert base catalog to 1 Cleaner (QTY × $52.50)"
             >
               <Users className="w-3 h-3" />
-              <span>1 Cleaner (QTY × $52.50)</span>
+              <span>1 Cleaner ($52.50)</span>
+            </button>
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => {
+                setPageLayoutMode('SINGLE_CREW');
+                handleConvertAllCleaners(2);
+              }}
+              className="px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-800 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+              title="Convert base catalog to 2 Cleaners (QTY × $105.00)"
+            >
+              <Users className="w-3 h-3" />
+              <span>2 Cleaners ($105.00)</span>
+            </button>
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => {
+                setPageLayoutMode('SINGLE_CREW');
+                handleConvertAllCleaners(3);
+              }}
+              className="px-2.5 py-1 rounded-lg bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors"
+              title="Convert base catalog to 3 Cleaners (QTY × $157.50)"
+            >
+              <Users className="w-3 h-3" />
+              <span>3 Cleaners ($157.50)</span>
             </button>
           </div>
         </div>
@@ -800,20 +840,15 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
           </div>
 
           <div className="flex items-center gap-3 text-xs text-slate-600 font-mono">
-            <span>Showing {filteredItems.length} of {currentItems.length} live items</span>
+            <span>Showing {filteredItems.length} of {displayedBaseItems.length} items</span>
             <span>•</span>
             <button
               type="button"
-              onClick={() =>
-                downloadFileFromApiWithoutNavigation(
-                  `/api/price-list/export.xlsx?project=${projectId}&t=${Date.now()}`,
-                  `TidyUps_Service_Catalog_Price_List_${new Date().toISOString().slice(0, 10)}.xlsx`
-                )
-              }
+              onClick={handleDownloadJobberMasterCsv}
               className="text-emerald-700 hover:text-emerald-900 font-sans font-bold underline flex items-center gap-1 cursor-pointer"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Download .XLSX File</span>
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Jobber Master .CSV</span>
             </button>
           </div>
         </div>
@@ -842,7 +877,7 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
           ))}
         </div>
 
-        {/* Main Price List Table with exact schema: Service Name | Category | Beds/Baths | # Cleaners | Quantity | Unit Price | Formula | Total | Status | Actions */}
+        {/* Main Price List Table with exact schema: Service Name | Category | Beds/Baths | # Cleaners | Quantity | Unit Price | Formula | Total | TAXABLE | Status | Actions */}
         <div className="flex-1 overflow-y-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200 font-extrabold uppercase text-[10px] tracking-wider">
@@ -855,6 +890,7 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
                 <th className="py-2.5 px-2.5 text-right">Unit Price</th>
                 <th className="py-2.5 px-3">Number of Cleaners (QTY × Unit Price) = Total</th>
                 <th className="py-2.5 px-3 text-right">Total (CAD)</th>
+                <th className="py-2.5 px-2.5 text-center bg-emerald-50 text-emerald-900">TAXABLE</th>
                 <th className="py-2.5 px-2 text-center">Status</th>
                 <th className="py-2.5 px-3 text-right">Actions</th>
               </tr>
@@ -862,153 +898,194 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
             <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
               {filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400">
+                  <td colSpan={11} className="py-12 text-center text-slate-400">
                     <ClipboardList className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                     <p className="font-bold text-sm text-slate-600">No matching service items found</p>
                     <p className="text-xs mt-1">Try clearing your search or paste a new price list</p>
                   </td>
                 </tr>
               ) : (
-                filteredItems.map((item) => {
+                filteredItems.map((item, idx) => {
                   const cleaners = Math.max(1, Number(item.cleanersCount) || 1);
                   const qty = Number(item.quantity ?? item.baseHours ?? 1);
                   const unitPrice = Number(item.unitPrice ?? item.basePrice ?? 0);
                   const total = Number(item.total ?? Math.round(qty * unitPrice * 100) / 100);
+                  const isTaxable = item.taxable !== false;
 
-                  const altCleaners = cleaners === 2 ? 1 : 2;
+                  const prevItem = idx > 0 ? filteredItems[idx - 1] : null;
+                  const getSectionGroup = (it: ServiceCatalogItem) => {
+                    if (it.isAddon || it.category === 'HOURLY') return 'ADDON_HOURLY';
+                    return `CREW_${it.cleanersCount || 2}`;
+                  };
+                  const currGroup = getSectionGroup(item);
+                  const prevGroup = prevItem ? getSectionGroup(prevItem) : null;
+                  const showSectionHeader = pageLayoutMode === 'COMBINED_1_2_3' && currGroup !== prevGroup;
+
+                  const altCleaners = cleaners === 1 ? 2 : cleaners === 2 ? 3 : 1;
                   const altConv = convertItemForCleanersCount(item, altCleaners);
 
                   return (
-                    <tr
-                      key={item.id}
-                      className="hover:bg-purple-50/40 transition-colors group"
-                    >
-                      {/* Name & Jobber Item */}
-                      <td className="py-2.5 px-3">
-                        <div className="font-bold text-slate-900 group-hover:text-purple-900 flex items-center gap-1.5">
-                          <span>{item.name}</span>
-                          {item.isAddon && (
-                            <span className="text-[10px] font-bold text-pink-700">
-                              · Add-on
-                            </span>
+                    <React.Fragment key={item.id}>
+                      {showSectionHeader && (
+                        <tr className="bg-gradient-to-r from-slate-900 via-purple-950 to-slate-900 text-white">
+                          <td colSpan={11} className="py-2.5 px-4 font-extrabold text-xs tracking-wide">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <div className="flex items-center gap-2">
+                                <Users className="w-4 h-4 text-emerald-400" />
+                                <span>
+                                  {currGroup === 'CREW_1'
+                                    ? 'SECTION 1: 1 CLEANER PRICE LIST (Solo Tech @ $52.50/hr — TAXABLE: true)'
+                                    : currGroup === 'CREW_2'
+                                    ? 'SECTION 2: 2 CLEANERS PRICE LIST (2-Tech Crew @ $105.00/hr — TAXABLE: true)'
+                                    : currGroup === 'CREW_3'
+                                    ? 'SECTION 3: 3 CLEANERS PRICE LIST (3-Tech Crew @ $157.50/hr — TAXABLE: true)'
+                                    : 'SECTION 4: ADD-ON SERVICES & HOURLY CREW RATES (TAXABLE: true)'}
+                                </span>
+                              </div>
+                              <span className="font-mono text-[11px] text-emerald-300">
+                                TAXABLE = true • Ready for Jobber Single-Page CSV Import
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      <tr className="hover:bg-purple-50/40 transition-colors group">
+                        {/* Name & Jobber Item */}
+                        <td className="py-2.5 px-3">
+                          <div className="font-bold text-slate-900 group-hover:text-purple-900 flex items-center gap-1.5">
+                            <span>{item.name}</span>
+                            {item.isAddon && (
+                              <span className="text-[10px] font-bold text-pink-700">
+                                · Add-on
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 font-mono truncate max-w-xs">
+                            {item.jobberItemName || item.description}
+                          </div>
+                        </td>
+
+                        {/* Category */}
+                        <td className="py-2.5 px-2.5 text-[11px] text-slate-600">
+                          {item.categoryLabel || item.category}
+                        </td>
+
+                        {/* Beds / Baths */}
+                        <td className="py-2.5 px-2.5 text-slate-600 font-mono text-[11px]">
+                          {item.bedrooms || item.bathrooms || item.beds || item.baths ? (
+                            <div className="flex items-center gap-1">
+                              {(item.bedrooms || item.beds) && <span>{item.bedrooms || item.beds}</span>}
+                              {(item.bedrooms || item.beds) && (item.bathrooms || item.baths) && <span>·</span>}
+                              {(item.bathrooms || item.baths) && <span>{item.bathrooms || item.baths}</span>}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">—</span>
                           )}
-                        </div>
-                        <div className="text-[11px] text-slate-500 font-mono truncate max-w-xs">
-                          {item.jobberItemName || item.description}
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Category */}
-                      <td className="py-2.5 px-2.5 text-[11px] text-slate-600">
-                        {item.categoryLabel || item.category}
-                      </td>
-
-                      {/* Beds / Baths */}
-                      <td className="py-2.5 px-2.5 text-slate-600 font-mono text-[11px]">
-                        {item.bedrooms || item.bathrooms || item.beds || item.baths ? (
-                          <div className="flex items-center gap-1">
-                            {(item.bedrooms || item.beds) && <span>{item.bedrooms || item.beds}</span>}
-                            {(item.bedrooms || item.beds) && (item.bathrooms || item.baths) && <span>·</span>}
-                            {(item.bathrooms || item.baths) && <span>{item.bathrooms || item.baths}</span>}
-                          </div>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-
-                      {/* Number of Cleaners with 1-Click Toggle */}
-                      <td className="py-2.5 px-2.5 text-center">
-                        {item.isAddon ? (
-                          <span className="text-[11px] font-mono text-slate-400">1</span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleItemCleaners(item)}
-                            title="Click to switch between 2 Cleaners (QTY × $105) and 1 Cleaner (QTY × $52.50)"
-                            className={`px-2 py-1 rounded-lg text-[11px] font-mono font-bold inline-flex items-center gap-1 cursor-pointer transition-colors ${
-                              cleaners >= 2
-                                ? 'bg-purple-100 hover:bg-purple-200 text-purple-900'
-                                : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
-                            }`}
-                          >
-                            <span>{cleaners} Cln</span>
-                            <ArrowLeftRight className="w-3 h-3 opacity-70" />
-                          </button>
-                        )}
-                      </td>
-
-                      {/* Quantity */}
-                      <td className="py-2.5 px-2.5 text-center font-mono font-bold text-slate-900">
-                        {qty}
-                      </td>
-
-                      {/* Unit Price */}
-                      <td className="py-2.5 px-2.5 text-right font-mono font-bold text-slate-800">
-                        ${unitPrice.toFixed(2)}
-                      </td>
-
-                      {/* Formula: Number of Cleaners ( QTY × Unit Price ) = Total */}
-                      <td className="py-2.5 px-3 font-mono text-[11px]">
-                        {item.isAddon ? (
-                          <div className="text-slate-700 font-bold">
-                            1 ({qty} × ${unitPrice.toFixed(2)}) = ${total.toFixed(2)}
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="font-bold text-purple-900">
-                              {cleaners} Cleaner{cleaners > 1 ? 's' : ''} ({qty} × ${unitPrice.toFixed(2)}) = ${total.toFixed(2)}
-                            </div>
-                            <div className="text-[10px] text-slate-500">
-                              {altCleaners} Cleaner{altCleaners > 1 ? 's' : ''} ({altConv.quantity} × ${altConv.unitPrice.toFixed(2)}) = ${altConv.total.toFixed(2)}
-                            </div>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Total = Qty * Unit Price */}
-                      <td className="py-2.5 px-3 text-right font-mono font-extrabold text-emerald-700 text-xs">
-                        ${total.toFixed(2)}
-                      </td>
-
-                      {/* Status */}
-                      <td className="py-2.5 px-2 text-center text-[11px] font-semibold">
-                        <span className={item.isActive !== false ? 'text-emerald-700' : 'text-slate-400'}>
-                          {item.status || (item.isActive !== false ? 'Active' : 'Draft')}
-                        </span>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {onSelectForQuote && (
+                        {/* Number of Cleaners with 1-Click Toggle */}
+                        <td className="py-2.5 px-2.5 text-center">
+                          {item.isAddon ? (
+                            <span className="text-[11px] font-mono text-slate-400">1</span>
+                          ) : (
                             <button
-                              onClick={() => {
-                                onSelectForQuote(item);
-                                onClose();
-                              }}
-                              className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"
-                              title="Add this line item to the current quote"
+                              type="button"
+                              onClick={() => handleToggleItemCleaners(item)}
+                              title="Click to cycle between 1 Cleaner ($52.50), 2 Cleaners ($105.00), and 3 Cleaners ($157.50)"
+                              className={`px-2 py-1 rounded-lg text-[11px] font-mono font-bold inline-flex items-center gap-1 cursor-pointer transition-colors ${
+                                cleaners === 3
+                                  ? 'bg-indigo-100 hover:bg-indigo-200 text-indigo-900'
+                                  : cleaners === 2
+                                  ? 'bg-purple-100 hover:bg-purple-200 text-purple-900'
+                                  : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+                              }`}
                             >
-                              Use
+                              <span>{cleaners} Cln</span>
+                              <ArrowLeftRight className="w-3 h-3 opacity-70" />
                             </button>
                           )}
-                          <button
-                            onClick={() => startEdit(item)}
-                            className="p-1.5 text-slate-500 hover:text-purple-600 rounded cursor-pointer"
-                            title="Edit Item"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteItem(item.id, item.name)}
-                            className="p-1.5 text-slate-500 hover:text-rose-600 rounded cursor-pointer"
-                            title="Delete Item"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+
+                        {/* Quantity */}
+                        <td className="py-2.5 px-2.5 text-center font-mono font-bold text-slate-900">
+                          {qty}
+                        </td>
+
+                        {/* Unit Price */}
+                        <td className="py-2.5 px-2.5 text-right font-mono font-bold text-slate-800">
+                          ${unitPrice.toFixed(2)}
+                        </td>
+
+                        {/* Formula: Number of Cleaners ( QTY × Unit Price ) = Total */}
+                        <td className="py-2.5 px-3 font-mono text-[11px]">
+                          {item.isAddon ? (
+                            <div className="text-slate-700 font-bold">
+                              1 ({qty} × ${unitPrice.toFixed(2)}) = ${total.toFixed(2)}
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="font-bold text-purple-900">
+                                {cleaners} Cleaner{cleaners > 1 ? 's' : ''} ({qty} × ${unitPrice.toFixed(2)}) = ${total.toFixed(2)}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                {altCleaners} Cleaner{altCleaners > 1 ? 's' : ''} ({altConv.quantity} × ${altConv.unitPrice.toFixed(2)}) = ${altConv.total.toFixed(2)}
+                              </div>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Total = Qty * Unit Price */}
+                        <td className="py-2.5 px-3 text-right font-mono font-extrabold text-emerald-700 text-xs">
+                          ${total.toFixed(2)}
+                        </td>
+
+                        {/* TAXABLE (true/false) */}
+                        <td className="py-2.5 px-2.5 text-center font-mono">
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-extrabold text-[11px]">
+                            {isTaxable ? 'true' : 'false'}
+                          </span>
+                        </td>
+
+                        {/* Status */}
+                        <td className="py-2.5 px-2 text-center text-[11px] font-semibold">
+                          <span className={item.isActive !== false ? 'text-emerald-700' : 'text-slate-400'}>
+                            {item.status || (item.isActive !== false ? 'Active' : 'Draft')}
+                          </span>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-2.5 px-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {onSelectForQuote && (
+                              <button
+                                onClick={() => {
+                                  onSelectForQuote(item);
+                                  onClose();
+                                }}
+                                className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                title="Add this line item to the current quote"
+                              >
+                                Use
+                              </button>
+                            )}
+                            <button
+                              onClick={() => startEdit(item)}
+                              className="p-1.5 text-slate-500 hover:text-purple-600 rounded cursor-pointer"
+                              title="Edit Item"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteItem(item.id, item.name)}
+                              className="p-1.5 text-slate-500 hover:text-rose-600 rounded cursor-pointer"
+                              title="Delete Item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </React.Fragment>
                   );
                 })
               )}
@@ -1020,28 +1097,28 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
         <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-600">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-extrabold text-slate-800">
-              Total Catalog Items: {currentItems.length}
+              Single-Page Combined Items: {combinedAllCleanersItems.length} (1, 2 &amp; 3 Cleaners + Add-ons)
             </span>
             <span>·</span>
             <span className="font-mono text-emerald-700 font-bold">
-              Formula: Number of Cleaners ( QTY × Unit Price ) = Total (CAD)
+              TAXABLE = true (All Items)
             </span>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={handleDownloadGoogleSheetsXlsx}
+              onClick={handleDownloadJobberMasterCsv}
               className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold cursor-pointer transition-all flex items-center gap-1.5"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Download Google Sheets (.xlsx)</span>
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Jobber Master CSV (1, 2 &amp; 3 Cleaners)</span>
             </button>
             <button
-              onClick={handleDownloadGoogleSheetsCsv}
+              onClick={handleDownloadGoogleSheetsXlsx}
               className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-bold cursor-pointer transition-all flex items-center gap-1.5"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Download CSV</span>
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Download Single-Page .XLSX</span>
             </button>
             <button
               onClick={onClose}

@@ -95,6 +95,7 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
   preFillNumber = '',
 }) => {
   const [activeTab, setActiveTab] = useState<'PREFIXES' | 'COUNTRIES' | 'NUMBERS' | 'LOGS' | 'TEST' | 'COST_LINES'>('PREFIXES');
+  const [isInstantBlockerCollapsed, setIsInstantBlockerCollapsed] = useState(false);
   const [calcMinutes, setCalcMinutes] = useState(1000);
   const [calcBlockedCalls, setCalcBlockedCalls] = useState(350);
   const [config, setConfig] = useState<SpamShieldConfig>({
@@ -351,335 +352,275 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fadeIn pointer-events-auto">
-      <div className="bg-[#10131d] border border-slate-700/80 rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl text-slate-100 overflow-hidden font-sans">
-        {/* Header */}
-        <div className="p-5 sm:p-6 bg-[#161a28] border-b border-slate-800 flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
-              <ShieldAlert className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                  Twilio Spam Shield &amp; Call Blocker
-                </h2>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Live TwiML Protection
-                </span>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md animate-fadeIn pointer-events-auto">
+      <div className="bg-[#10131d] border border-slate-700/80 rounded-2xl sm:rounded-3xl w-full max-w-6xl max-h-[95vh] flex flex-col shadow-2xl text-slate-100 overflow-hidden font-sans">
+        {/* Compact Header + Inline Status Badges + Main Tabs (No Horizontal Scrollbar) */}
+        <div className="px-4 sm:px-6 pt-3.5 pb-0 bg-[#161a28] border-b border-slate-800 shrink-0">
+          <div className="flex items-center justify-between gap-3 pb-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
+                <ShieldAlert className="w-5 h-5" />
               </div>
-              <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                Automatically stop robocalls, international numbers, and spammers who call over and over with rotating numbers. Blocked callers receive a busy signal before your phones ring.
-              </p>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base sm:text-lg font-black text-white tracking-tight">
+                    Twilio Spam Shield &amp; Call Blocker
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {config.enabled ? 'ACTIVE & ENFORCING' : 'DISABLED'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                    {config.blockedPrefixes.length} Prefixes Active
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                    {config.blockAllNonNorthAmerica ? '+1 US/Canada Only' : `${config.blockedCountryCodes.length} Countries`}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    {history.length} Robocalls Dropped
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsInstantBlockerCollapsed((prev) => !prev)}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold border border-slate-700 transition-all cursor-pointer"
+                title="Show or hide the top Instant Blocker box to open up more screen space"
+              >
+                {isInstantBlockerCollapsed ? '▼ Show Instant Blocker' : '▲ Hide Top Blocker'}
+              </button>
+              <button
+                onClick={onClose}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white transition-all cursor-pointer"
+                title="Close Spam Shield"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer shrink-0"
-            title="Close"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
 
-        {/* Status Notification Toast */}
-        {statusNotice && (
-          <div className="mx-6 mt-4 p-3 rounded-xl bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 text-xs flex items-center justify-between shadow-lg animate-fadeIn">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="font-extrabold">{statusNotice}</span>
-            </div>
-            <button onClick={() => setStatusNotice(null)} className="text-emerald-400 hover:text-white font-bold">×</button>
-          </div>
-        )}
-
-        {/* ⚡ INSTANT 1-CLICK BLOCK CALLER OR 3-DIGIT AREA CODE BAR */}
-        <div className="mx-6 mt-4 p-4 rounded-2xl bg-gradient-to-r from-rose-950/70 via-[#1a1528] to-slate-900 border border-rose-500/40 shadow-lg">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
-            <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider">
-                Instant Blocker
-              </span>
-              <h3 className="text-xs sm:text-sm font-black text-white">
-                Someone Just Called? Block Their Phone Number or Entire 3-Digit Area Code Now
-              </h3>
-            </div>
+          {/* Primary Navigation Tabs — Clean Flex Wrap with Zero Horizontal Scrollbar */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-1 text-xs">
             <button
-              type="button"
-              onClick={fetchSpamShield}
-              className="self-start sm:self-auto px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer"
+              onClick={() => setActiveTab('PREFIXES')}
+              className={`pb-2.5 px-3 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer ${
+                activeTab === 'PREFIXES'
+                  ? 'border-rose-500 text-rose-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
             >
-              <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
-              <span>Refresh Live Calls</span>
+              <Hash className="w-3.5 h-3.5" />
+              <span>Rotating Numbers &amp; Prefixes</span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-500/20 text-rose-300">
+                {config.blockedPrefixes.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('COUNTRIES')}
+              className={`pb-2.5 px-3 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer ${
+                activeTab === 'COUNTRIES'
+                  ? 'border-blue-500 text-blue-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Country Codes</span>
+              {config.blockAllNonNorthAmerica && (
+                <span className="px-1.5 py-0.2 rounded text-[10px] bg-blue-500/20 text-blue-300">
+                  +1 Only
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('NUMBERS')}
+              className={`pb-2.5 px-3 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer ${
+                activeTab === 'NUMBERS'
+                  ? 'border-amber-500 text-amber-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <PhoneOff className="w-3.5 h-3.5" />
+              <span>Blacklisted Numbers</span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-500/20 text-amber-300">
+                {config.blockedNumbers.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('LOGS')}
+              className={`pb-2.5 px-3 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer ${
+                activeTab === 'LOGS'
+                  ? 'border-purple-500 text-purple-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Blocked Calls Log</span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-purple-500/20 text-purple-300">
+                {history.length}
+              </span>
             </button>
           </div>
+        </div>
 
-          <div className="flex flex-col md:flex-row gap-2">
-            <input
-              type="text"
-              value={quickBlockInput}
-              onChange={(e) => setQuickBlockInput(e.target.value)}
-              placeholder="Type phone number (e.g. 780-555-0199) OR 3-digit Area Code (e.g. 844, 647)..."
-              className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950/90 border border-slate-700 text-white text-xs sm:text-sm font-mono placeholder:text-slate-500 focus:outline-none focus:border-rose-500"
-            />
-            <div className="flex flex-wrap sm:flex-nowrap gap-2">
-              <button
-                type="button"
-                disabled={quickDigitsCount < 7}
-                onClick={() =>
-                  handleBlockItem(
-                    quickBlockInput,
-                    'number',
-                    `Blocked exact caller (${quickBlockInput.trim()}) from main website`
-                  )
-                }
-                className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all whitespace-nowrap"
-                title="Block this exact phone number"
-              >
-                <PhoneOff className="w-3.5 h-3.5" />
-                <span>Block Exact Number</span>
-              </button>
-
-              <button
-                type="button"
-                disabled={!quickDetectedAreaCode}
-                onClick={() =>
-                  handleBlockItem(
-                    quickDetectedAreaCode,
-                    'areacode',
-                    `Blocked entire (${quickDetectedAreaCode}) area code from main website`
-                  )
-                }
-                className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all whitespace-nowrap"
-                title="Block all calls from this 3-digit area code"
-              >
-                <Hash className="w-3.5 h-3.5" />
-                <span>
-                  {quickDetectedAreaCode
-                    ? `Block Area Code (${quickDetectedAreaCode}*)`
-                    : 'Block 3-Digit Area Code'}
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {/* Live Recent Callers Strip (1-Click Block Without Typing) */}
-          {recentCalls.length > 0 && (
-            <div className="mt-3 pt-2.5 border-t border-slate-800/80">
-              <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1.5">
-                <PhoneCall className="w-3 h-3 text-emerald-400" />
-                <span>Recent Live Callers to Your Twilio Lines — Click to Block in 1 Tap:</span>
+        {/* Unified Open Scrollable Body (Nothing traps the top half of the screen) */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+          {/* Status Notification Toast */}
+          {statusNotice && (
+            <div className="p-3 rounded-xl bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 text-xs flex items-center justify-between shadow-lg animate-fadeIn">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-extrabold">{statusNotice}</span>
               </div>
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-                {recentCalls.slice(0, 6).map((call) => {
-                  const callArea = call.areaCode || extractAreaCode(call.callerNumber || '');
-                  const isAlreadyBlocked = call.status === 'BLOCKED';
-                  const dateObj = new Date(call.timestamp);
-                  const formattedTime = !isNaN(dateObj.getTime())
-                    ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : (call.timestamp || 'Just now');
-                  return (
-                    <div
-                      key={call.id}
-                      className={`shrink-0 px-3 py-1.5 rounded-xl border flex items-center gap-2.5 text-xs ${
-                        isAlreadyBlocked
-                          ? 'bg-rose-950/40 border-rose-500/30 text-rose-200'
-                          : 'bg-slate-900/90 border-slate-700/80 text-slate-200'
-                      }`}
-                    >
-                      <div className="flex flex-col">
-                        <span className="font-mono font-black text-white text-[11px]">
-                          {call.callerNumber}
-                        </span>
-                        <span className="text-[9px] text-slate-400">
-                          {formattedTime}
-                          {' • '}
-                          {isAlreadyBlocked ? '🚫 Blocked' : '✅ Rang Line'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleBlockItem(
-                              call.callerNumber,
-                              'number',
-                              `Blocked recent caller ${call.callerNumber}`
-                            )
-                          }
-                          className="px-2 py-1 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-white font-extrabold text-[10px] cursor-pointer"
-                          title={`Block ${call.callerNumber}`}
-                        >
-                          Block Caller
-                        </button>
-                        {callArea && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleBlockItem(
-                                callArea,
-                                'areacode',
-                                `Blocked area code (${callArea}) from caller ${call.callerNumber}`
-                              )
-                            }
-                            className="px-2 py-1 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-white font-extrabold text-[10px] cursor-pointer"
-                            title={`Block entire (${callArea}) area code`}
-                          >
-                            Block {callArea}*
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <button onClick={() => setStatusNotice(null)} className="text-emerald-400 hover:text-white font-bold">×</button>
             </div>
           )}
-        </div>
 
-        {/* Quick Stats Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-6 pt-4">
-          <div className="p-3 bg-[#171b29] rounded-2xl border border-slate-800 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-              <ShieldCheck className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase font-bold text-slate-500">Master Shield</div>
-              <div className="text-xs font-black text-emerald-400">
-                {config.enabled ? 'ACTIVE & ENFORCING' : 'DISABLED'}
+          {/* ⚡ INSTANT 1-CLICK BLOCK CALLER OR 3-DIGIT AREA CODE BAR (Collapsible & Scrollable) */}
+          {!isInstantBlockerCollapsed && (
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-rose-950/70 via-[#1a1528] to-slate-900 border border-rose-500/40 shadow-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider">
+                    Instant Blocker
+                  </span>
+                  <h3 className="text-xs font-black text-white">
+                    Someone Just Called? Block Their Phone Number or Entire 3-Digit Area Code Now
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsInstantBlockerCollapsed(true)}
+                  className="self-start sm:self-auto text-[11px] text-slate-400 hover:text-white font-bold cursor-pointer"
+                >
+                  Minimize ▲
+                </button>
               </div>
-            </div>
-          </div>
 
-          <div className="p-3 bg-[#171b29] rounded-2xl border border-slate-800 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
-              <Hash className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase font-bold text-slate-500">Rotating Prefixes</div>
-              <div className="text-xs font-black text-white">
-                {config.blockedPrefixes.length} Patterns Active
+              <div className="flex flex-col md:flex-row gap-2">
+                <input
+                  type="text"
+                  value={quickBlockInput}
+                  onChange={(e) => setQuickBlockInput(e.target.value)}
+                  placeholder="Type phone number (e.g. 780-555-0199) OR 3-digit Area Code (e.g. 408, 844, 647)..."
+                  className="flex-1 px-3 py-2 rounded-xl bg-slate-950/90 border border-slate-700 text-white text-xs font-mono placeholder:text-slate-500 focus:outline-none focus:border-rose-500"
+                />
+                <div className="flex flex-wrap sm:flex-nowrap gap-2">
+                  <button
+                    type="button"
+                    disabled={quickDigitsCount < 7}
+                    onClick={() =>
+                      handleBlockItem(
+                        quickBlockInput,
+                        'number',
+                        `Blocked exact caller (${quickBlockInput.trim()}) from main website`
+                      )
+                    }
+                    className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all whitespace-nowrap"
+                    title="Block this exact phone number"
+                  >
+                    <PhoneOff className="w-3.5 h-3.5" />
+                    <span>Block Exact Number</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!quickDetectedAreaCode}
+                    onClick={() =>
+                      handleBlockItem(
+                        quickDetectedAreaCode,
+                        'areacode',
+                        `Blocked entire (${quickDetectedAreaCode}) area code from main website`
+                      )
+                    }
+                    className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all whitespace-nowrap"
+                    title="Block all calls from this 3-digit area code"
+                  >
+                    <Hash className="w-3.5 h-3.5" />
+                    <span>
+                      {quickDetectedAreaCode
+                        ? `Block Area Code (${quickDetectedAreaCode}*)`
+                        : 'Block 3-Digit Area Code'}
+                    </span>
+                  </button>
+                </div>
               </div>
+
+              {/* Live Recent Callers Strip (1-Click Block Without Typing) */}
+              {recentCalls.length > 0 && (
+                <div className="mt-2.5 pt-2 border-t border-slate-800/80">
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1.5">
+                    <PhoneCall className="w-3 h-3 text-emerald-400" />
+                    <span>Recent Live Callers — Click to Block in 1 Tap:</span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {recentCalls.slice(0, 4).map((call) => {
+                      const callArea = call.areaCode || extractAreaCode(call.callerNumber || '');
+                      const isAlreadyBlocked = call.status === 'BLOCKED';
+                      const dateObj = new Date(call.timestamp);
+                      const formattedTime = !isNaN(dateObj.getTime())
+                        ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : (call.timestamp || 'Just now');
+                      return (
+                        <div
+                          key={call.id}
+                          className={`px-2.5 py-1 rounded-xl border flex items-center gap-2 text-xs ${
+                            isAlreadyBlocked
+                              ? 'bg-rose-950/40 border-rose-500/30 text-rose-200'
+                              : 'bg-slate-900/90 border-slate-700/80 text-slate-200'
+                          }`}
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-mono font-black text-white text-[11px]">
+                              {call.callerNumber}
+                            </span>
+                            <span className="text-[9px] text-slate-400">
+                              {formattedTime} • {isAlreadyBlocked ? '🚫 Blocked' : '✅ Rang'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleBlockItem(
+                                  call.callerNumber,
+                                  'number',
+                                  `Blocked recent caller ${call.callerNumber}`
+                                )
+                              }
+                              className="px-2 py-0.5 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-white font-extrabold text-[10px] cursor-pointer"
+                            >
+                              Block #
+                            </button>
+                            {callArea && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleBlockItem(
+                                    callArea,
+                                    'areacode',
+                                    `Blocked area code (${callArea}) from caller ${call.callerNumber}`
+                                  )
+                                }
+                                className="px-2 py-0.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-white font-extrabold text-[10px] cursor-pointer"
+                              >
+                                Block {callArea}*
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-
-          <div className="p-3 bg-[#171b29] rounded-2xl border border-slate-800 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
-              <Globe className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase font-bold text-slate-500">Country Policy</div>
-              <div className="text-xs font-black text-blue-300">
-                {config.blockAllNonNorthAmerica ? '+1 US/Canada Only' : `${config.blockedCountryCodes.length} Blocked`}
-              </div>
-            </div>
-          </div>
-
-          <div className="p-3 bg-[#171b29] rounded-2xl border border-slate-800 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
-              <PhoneOff className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase font-bold text-slate-500">Stopped Calls</div>
-              <div className="text-xs font-black text-amber-400">
-                {history.length} Robocalls Dropped
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 px-6 pt-4 border-b border-slate-800 overflow-x-auto scrollbar-none text-xs">
-          <button
-            onClick={() => setActiveTab('PREFIXES')}
-            className={`pb-3 px-3.5 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer whitespace-nowrap ${
-              activeTab === 'PREFIXES'
-                ? 'border-rose-500 text-rose-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Hash className="w-3.5 h-3.5" />
-            <span>Rotating Numbers &amp; Prefixes</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/20 text-rose-300">
-              {config.blockedPrefixes.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('COUNTRIES')}
-            className={`pb-3 px-3.5 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer whitespace-nowrap ${
-              activeTab === 'COUNTRIES'
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5" />
-            <span>Country Codes</span>
-            {config.blockAllNonNorthAmerica && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-500/20 text-blue-300">
-                +1 Only
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('NUMBERS')}
-            className={`pb-3 px-3.5 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer whitespace-nowrap ${
-              activeTab === 'NUMBERS'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <PhoneOff className="w-3.5 h-3.5" />
-            <span>Blacklisted Numbers</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-300">
-              {config.blockedNumbers.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('LOGS')}
-            className={`pb-3 px-3.5 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer whitespace-nowrap ${
-              activeTab === 'LOGS'
-                ? 'border-purple-500 text-purple-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            <span>Blocked Calls Log</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-purple-500/20 text-purple-300">
-              {history.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('TEST')}
-            className={`pb-3 px-3.5 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer whitespace-nowrap ${
-              activeTab === 'TEST'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Zap className="w-3.5 h-3.5" />
-            <span>Live Tester &amp; Webhook</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('COST_LINES')}
-            className={`pb-3 px-3.5 font-bold transition-all flex items-center gap-1.5 border-b-2 cursor-pointer whitespace-nowrap ${
-              activeTab === 'COST_LINES'
-                ? 'border-amber-400 text-amber-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <DollarSign className="w-3.5 h-3.5" />
-            <span>Pricing &amp; 6-Line Strategy</span>
-          </button>
-        </div>
-
-        {/* Tab Content Body */}
-        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
+          )}
           {/* TAB 1: ROTATING NUMBERS & PREFIXES */}
           {activeTab === 'PREFIXES' && (
             <div className="space-y-5 animate-fadeIn">
@@ -1732,17 +1673,52 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
           )}
         </div>
 
-        {/* Modal Footer */}
-        <div className="p-4 sm:p-5 bg-[#161a28] border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+        {/* Modal Footer — Action Buttons Moved Here Beside Done / Close */}
+        <div className="px-4 sm:px-6 py-3 bg-[#161a28] border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-2.5 shrink-0">
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
             <span>Real-time protection enabled for all incoming Twilio &amp; Quo calls</span>
           </div>
 
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          <div className="flex items-center gap-2 flex-wrap justify-end w-full md:w-auto">
+            <button
+              type="button"
+              onClick={fetchSpamShield}
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer transition-all"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+              <span>Refresh Live Calls</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('TEST')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border cursor-pointer transition-all ${
+                activeTab === 'TEST'
+                  ? 'bg-emerald-600 text-white border-emerald-500'
+                  : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-slate-700'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Live Tester &amp; Webhook</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('COST_LINES')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border cursor-pointer transition-all ${
+                activeTab === 'COST_LINES'
+                  ? 'bg-amber-600 text-white border-amber-500'
+                  : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700'
+              }`}
+            >
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>Pricing &amp; 6-Line Strategy</span>
+            </button>
+
             <button
               onClick={onClose}
-              className="flex-1 sm:flex-none px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-extrabold transition-all cursor-pointer shadow-md"
             >
               Done / Close
             </button>

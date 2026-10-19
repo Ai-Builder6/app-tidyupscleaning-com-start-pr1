@@ -77,6 +77,7 @@ import {
   normalizeAndRepairCatalogItems,
   buildPriceListWorkbook,
   generatePriceListSheetRows,
+  generateJobberMasterSinglePageSheetRows,
   convertItemForCleanersCount,
 } from "./src/data/serviceCatalogData";
 
@@ -3518,7 +3519,7 @@ app.post("/api/price-list/convert-cleaners", (req, res) => {
   });
 });
 
-// GET /api/price-list/export.xlsx: Download live updated Google Sheets (.xlsx) file of actual price list
+// GET /api/price-list/export.xlsx: Download live updated Single-Sheet Jobber Master Price List (.xlsx)
 app.get("/api/price-list/export.xlsx", (req, res) => {
   const projectId = getProjectId(req);
   const currentStore = loadStore(projectId);
@@ -3531,7 +3532,7 @@ app.get("/api/price-list/export.xlsx", (req, res) => {
   const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
   const dateStr = new Date().toISOString().slice(0, 10);
-  const filename = `Tidyups_Updated_Price_List_Google_Sheets_${dateStr}.xlsx`;
+  const filename = `Tidyups_Jobber_Master_Price_List_${dateStr}.xlsx`;
   res.setHeader(
     "Content-Type",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -3540,7 +3541,7 @@ app.get("/api/price-list/export.xlsx", (req, res) => {
   res.send(buffer);
 });
 
-// GET /api/price-list/export.csv: Download live updated Google Sheets (.csv) file of actual price list
+// GET /api/price-list/export.csv: Download live updated Single-Page Jobber Master Price List (.csv) with 1, 2 & 3 Cleaners + TAXABLE=true
 app.get("/api/price-list/export.csv", (req, res) => {
   const projectId = getProjectId(req);
   const cleanersParam = req.query.cleaners ? Number(req.query.cleaners) : undefined;
@@ -3550,7 +3551,9 @@ app.get("/api/price-list/export.csv", (req, res) => {
       ? currentStore.serviceCatalog
       : CANONICAL_SERVICE_CATALOG;
   const items = normalizeAndRepairCatalogItems(rawItems);
-  const { headers, rows } = generatePriceListSheetRows(items, cleanersParam);
+  const { headers, rows } = cleanersParam
+    ? generatePriceListSheetRows(items, cleanersParam)
+    : generateJobberMasterSinglePageSheetRows(items);
 
   const escapeCsvCell = (val: any) => {
     const str = String(val ?? "");
@@ -3566,7 +3569,7 @@ app.get("/api/price-list/export.csv", (req, res) => {
   ].join("\n");
 
   const dateStr = new Date().toISOString().slice(0, 10);
-  const filename = `Tidyups_Updated_Price_List_Google_Sheets_${dateStr}.csv`;
+  const filename = `Tidyups_Jobber_Master_Price_List_${dateStr}.csv`;
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(csvContent);
@@ -9014,19 +9017,23 @@ const DEFAULT_SPAM_SHIELD_CONFIG = {
   enabled: true,
   blockAllNonNorthAmerica: true, // Only allows +1 (Canada & US)
   blockedCountryCodes: ["+44", "+91", "+234", "+86", "+7", "+37", "+20", "+33"],
-  blockedPrefixes: ["1800*", "1888*", "1877*", "1844*", "1855*", "1866*"],
-  blockedNumbers: ["+18005550199", "+18885550123"],
+  blockedPrefixes: ["1408*", "1301*", "1406*", "1800*", "1888*", "1877*", "1844*", "1855*", "1866*"],
+  blockedNumbers: ["+18005550199", "+18885550123", "+14084617990", "+14084385789", "+14083207557", "+14083206464", "+14084615808", "+14084585452"],
   blockRobocallFloods: true,
   rejectionAction: "busy" as const,
   forwardDestinationNumber: "+15879007223",
   callerIdMode: "caller" as const,
   lineMappings: {
-    "+15872063733": "+15879007223", // Google My Business Direct
-    "+15877130465": "+15876027792", // Door Hangers & Signs
-    "+15878050247": "+15877422500", // Cleaning Services Ads
-    "+18253053456": "+15875708005", // Primary Dispatch
-    "+18255334317": "+18338439877", // Toll Free TIDYUPS
+    "+15872063733": "+15879007223", // Stony Plain -> Google My Business Direct
+    "+15877130465": "+15876027792", // Sherwood Park -> Door Hangers & Signs
+    "+15878050247": "+15877422500", // Saint Albert -> Cleaning Services Ads
+    "+18253053456": "+15875708005", // Calgary -> Primary Dispatch
+    "+18255334317": "+18338439877", // Calgary -> Toll Free TIDYUPS
     "+1 (825) 533 - 4317": "+18338439877",
+    "+15877138443": "+18338439877", // Sherwood Park GMB833 -> Toll Free TIDYUPS
+    "+18886145145": "+18338439877", // Toll Free 888 -> Toll Free TIDYUPS
+    "+15879063015": "+15879007223", // Leduc -> GMB / Dispatch
+    "+15872063277": "+15879007223", // Stony Plain -> GMB / Dispatch
   } as Record<string, string>,
 };
 
@@ -9179,6 +9186,16 @@ app.post("/api/twilio/spam-shield", (req, res) => {
   store.lastSavedAt = new Date().toISOString();
   saveStore(store, projectId);
 
+  if (!req.headers["x-tidyups-sync"]) {
+    for (const host of ["https://app.tidyupscleaning.com", "https://dispatchgeeni.com"]) {
+      fetch(`${host}/api/twilio/spam-shield`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-tidyups-sync": "1" },
+        body: JSON.stringify({ config: store.spamShieldConfig }),
+      }).catch(() => {});
+    }
+  }
+
   res.json({
     success: true,
     message: "Twilio & Quo Spam Shield configuration updated!",
@@ -9283,6 +9300,16 @@ app.post("/api/twilio/block-number", (req, res) => {
   store.lastSavedAt = new Date().toISOString();
   saveStore(store, projectId);
 
+  if (!req.headers["x-tidyups-sync"]) {
+    for (const host of ["https://app.tidyupscleaning.com", "https://dispatchgeeni.com"]) {
+      fetch(`${host}/api/twilio/block-number`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-tidyups-sync": "1" },
+        body: JSON.stringify({ number, reason, type }),
+      }).catch(() => {});
+    }
+  }
+
   res.json({
     success: true,
     appliedRule: appliedRuleLabel,
@@ -9339,6 +9366,16 @@ app.post("/api/twilio/unblock-number", (req, res) => {
 
   store.lastSavedAt = new Date().toISOString();
   saveStore({ ...store, explicitReplaceSpamShield: true }, projectId);
+
+  if (!req.headers["x-tidyups-sync"]) {
+    for (const host of ["https://app.tidyupscleaning.com", "https://dispatchgeeni.com"]) {
+      fetch(`${host}/api/twilio/unblock-number`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-tidyups-sync": "1" },
+        body: JSON.stringify({ number, type }),
+      }).catch(() => {});
+    }
+  }
 
   res.json({
     success: true,

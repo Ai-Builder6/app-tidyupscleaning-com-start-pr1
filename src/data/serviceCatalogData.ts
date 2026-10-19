@@ -96,7 +96,7 @@ export function convertItemForCleanersCount(
 
   const newQuantity = Math.round((totalPersonHours / nextCleaners) * 100) / 100;
   const newUnitPrice = Math.round(perCleanerRate * nextCleaners * 100) / 100;
-  const newTotal = Math.round(newQuantity * newUnitPrice * 100) / 100;
+  const newTotal = currentTotal > 0 ? currentTotal : Math.round(newQuantity * newUnitPrice * 100) / 100;
 
   return {
     cleanersCount: nextCleaners,
@@ -1350,6 +1350,7 @@ export function generatePriceListSheetRows(
   const normalized = normalizeAndRepairCatalogItems(catalog);
   const headers = [
     'SERVICE NAME/JOBBER LINE ITEM',
+    'DESCRIPTION',
     'CATEGORY',
     'BEDS',
     'BATHS',
@@ -1357,9 +1358,11 @@ export function generatePriceListSheetRows(
     'QUANTITY',
     'UNIT PRICE (CAD)',
     'TOTAL (CAD)',
+    'TAXABLE',
     'FORMULA: NUMBER OF CLEANERS (QTY x UNIT PRICE) = TOTAL',
     '1 CLEANER EQUIVALENT (QTY x $52.50)',
     '2 CLEANERS EQUIVALENT (QTY x $105.00)',
+    '3 CLEANERS EQUIVALENT (QTY x $157.50)',
     'DEPOSIT REQUIRED (CAD)',
     'STATUS',
     'ACTIVE?',
@@ -1378,9 +1381,11 @@ export function generatePriceListSheetRows(
     const qty = Number(item.quantity ?? item.baseHours ?? 1);
     const unitPrice = Number(item.unitPrice ?? item.basePrice ?? 0);
     const total = Number(item.total ?? Math.round(qty * unitPrice * 100) / 100);
+    const isTaxableStr = item.taxable !== false ? 'true' : 'false';
 
     const oneCleanerConv = convertItemForCleanersCount(item, 1);
     const twoCleanersConv = convertItemForCleanersCount(item, 2);
+    const threeCleanersConv = convertItemForCleanersCount(item, 3);
 
     const activeFormulaStr = item.isAddon
       ? `1 Add-on (${qty} x $${unitPrice.toFixed(2)}) = $${total.toFixed(2)}`
@@ -1394,8 +1399,13 @@ export function generatePriceListSheetRows(
       ? `1 (${qty} x $${unitPrice.toFixed(2)}) = $${total.toFixed(2)}`
       : `2 Cleaners (${twoCleanersConv.quantity} x $${twoCleanersConv.unitPrice.toFixed(2)}) = $${twoCleanersConv.total.toFixed(2)}`;
 
+    const threeCleanersStr = item.isAddon
+      ? `1 (${qty} x $${unitPrice.toFixed(2)}) = $${total.toFixed(2)}`
+      : `3 Cleaners (${threeCleanersConv.quantity} x $${threeCleanersConv.unitPrice.toFixed(2)}) = $${threeCleanersConv.total.toFixed(2)}`;
+
     return [
       item.name,
+      item.description || `${item.name} — ${activeFormulaStr}`,
       item.categoryLabel || item.category,
       item.bedrooms || item.beds || '',
       item.bathrooms || item.baths || '',
@@ -1403,9 +1413,11 @@ export function generatePriceListSheetRows(
       qty,
       Number(unitPrice.toFixed(2)),
       Number(total.toFixed(2)),
+      isTaxableStr,
       activeFormulaStr,
       oneCleanerStr,
       twoCleanersStr,
+      threeCleanersStr,
       Number((item.depositRequired || 0).toFixed(2)),
       item.status || (item.isActive !== false ? 'Active' : 'Draft'),
       item.isActive !== false ? 'Yes' : 'No',
@@ -1416,46 +1428,110 @@ export function generatePriceListSheetRows(
 }
 
 /**
- * Builds a complete multi-tab XLSX WorkBook ready for Google Sheets / Excel download
- * from the active ServiceCatalogItem[] list.
+ * Expands the catalog into a single unified list containing:
+ * 1) All residential services for 1 Cleaner ($52.50/hr) at the top
+ * 2) All residential services for 2 Cleaners ($105.00/hr) lower down
+ * 3) All residential services for 3 Cleaners ($157.50/hr) lower down again
+ * 4) All Add-on & Hourly items
+ * Every item has taxable = true so Jobber and TidyUps share the exact same single-page price list.
+ */
+export function generateCombinedAllCleanersCatalog(
+  catalog: ServiceCatalogItem[]
+): ServiceCatalogItem[] {
+  const normalized = normalizeAndRepairCatalogItems(catalog);
+  const residentialItems = normalized.filter((item) => !item.isAddon && item.category !== 'HOURLY');
+  const addonAndHourlyItems = normalized.filter((item) => item.isAddon || item.category === 'HOURLY');
+
+  const stripCleanerSuffix = (name: string) =>
+    name.replace(/\s*\([123]\s*Cleaners?[^)]*\)\s*$/i, '').replace(/\s*-\s*[123]\s*Cleaners?\s*$/i, '').trim();
+
+  const buildForCrew = (crewCount: 1 | 2 | 3): ServiceCatalogItem[] => {
+    return residentialItems.map((baseItem, idx) => {
+      const conv = convertItemForCleanersCount(baseItem, crewCount);
+      const cleanBaseName = stripCleanerSuffix(baseItem.name);
+      const crewLabel = crewCount === 1 ? '1 Cleaner' : `${crewCount} Cleaners`;
+      const fullName = `${cleanBaseName} (${crewLabel})`;
+      const formulaLine = `${crewLabel} (${conv.quantity} × $${conv.unitPrice.toFixed(2)}) = $${conv.total.toFixed(2)} CAD`;
+      return {
+        ...baseItem,
+        id: `${baseItem.id}-crew-${crewCount}`,
+        name: fullName,
+        shortName: fullName.length > 42 ? `${fullName.slice(0, 39)}...` : fullName,
+        jobberItemName: fullName,
+        cleanersCount: crewCount,
+        quantity: conv.quantity,
+        unitPrice: conv.unitPrice,
+        total: conv.total,
+        baseHours: conv.quantity,
+        basePrice: conv.total,
+        taxable: baseItem.taxable !== false ? true : false,
+        description: `${fullName} — ${formulaLine}${baseItem.bedrooms ? ` | ${baseItem.bedrooms}${baseItem.bathrooms ? `, ${baseItem.bathrooms}` : ''}` : ''}`,
+        sortOrder: crewCount * 1000 + (idx + 1) * 10,
+      };
+    });
+  };
+
+  const oneCleanerSection = buildForCrew(1);
+  const twoCleanersSection = buildForCrew(2);
+  const threeCleanersSection = buildForCrew(3);
+  const addonsSection = addonAndHourlyItems.map((item, idx) => ({
+    ...item,
+    taxable: item.taxable !== false ? true : false,
+    sortOrder: 4000 + (idx + 1) * 10,
+  }));
+
+  return [
+    ...oneCleanerSection,
+    ...twoCleanersSection,
+    ...threeCleanersSection,
+    ...addonsSection,
+  ];
+}
+
+/**
+ * Generates a single-page Jobber-ready CSV/Sheet structure containing 1 Cleaner at the top,
+ * 2 Cleaners lower down, 3 Cleaners lower down again, and Add-ons at the bottom,
+ * with TAXABLE = true for all rows.
+ */
+export function generateJobberMasterSinglePageSheetRows(
+  catalog: ServiceCatalogItem[]
+) {
+  const combinedItems = generateCombinedAllCleanersCatalog(catalog);
+  return generatePriceListSheetRows(combinedItems);
+}
+
+/**
+ * Builds a single-sheet XLSX WorkBook with all 1, 2 & 3 Cleaners
+ * on ONE page and TAXABLE = true for every item so Jobber accepts it directly.
  */
 export function buildPriceListWorkbook(catalog: ServiceCatalogItem[]): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
 
   const colWidths = [
-    { wch: 44 }, // SERVICE NAME/JOBBER LINE ITEM
-    { wch: 28 }, // CATEGORY
+    { wch: 48 }, // SERVICE NAME/JOBBER LINE ITEM
+    { wch: 52 }, // DESCRIPTION
+    { wch: 26 }, // CATEGORY
     { wch: 15 }, // BEDS
     { wch: 15 }, // BATHS
     { wch: 20 }, // NUMBER OF CLEANERS
     { wch: 12 }, // QUANTITY
     { wch: 18 }, // UNIT PRICE (CAD)
     { wch: 16 }, // TOTAL (CAD)
-    { wch: 42 }, // FORMULA: NUMBER OF CLEANERS (QTY x UNIT PRICE) = TOTAL
+    { wch: 12 }, // TAXABLE (true/false)
+    { wch: 44 }, // FORMULA: NUMBER OF CLEANERS (QTY x UNIT PRICE) = TOTAL
     { wch: 38 }, // 1 CLEANER EQUIVALENT (QTY x $52.50)
     { wch: 38 }, // 2 CLEANERS EQUIVALENT (QTY x $105.00)
+    { wch: 38 }, // 3 CLEANERS EQUIVALENT (QTY x $157.50)
     { wch: 20 }, // DEPOSIT REQUIRED
     { wch: 12 }, // STATUS
     { wch: 10 }, // ACTIVE?
   ];
 
-  // Sheet 1: Active Price List (as configured by user)
-  const { headers: h1, rows: r1 } = generatePriceListSheetRows(catalog);
-  const ws1 = XLSX.utils.aoa_to_sheet([h1, ...r1]);
-  ws1['!cols'] = colWidths;
-  XLSX.utils.book_append_sheet(wb, ws1, 'Updated Price List (Live)');
-
-  // Sheet 2: 2 Cleaners Rate ($105/hr)
-  const { headers: h2, rows: r2 } = generatePriceListSheetRows(catalog, 2);
-  const ws2 = XLSX.utils.aoa_to_sheet([h2, ...r2]);
-  ws2['!cols'] = colWidths;
-  XLSX.utils.book_append_sheet(wb, ws2, '2 Cleaners (QTY x $105)');
-
-  // Sheet 3: 1 Solo Cleaner Rate ($52.50/hr)
-  const { headers: h3, rows: r3 } = generatePriceListSheetRows(catalog, 1);
-  const ws3 = XLSX.utils.aoa_to_sheet([h3, ...r3]);
-  ws3['!cols'] = colWidths;
-  XLSX.utils.book_append_sheet(wb, ws3, '1 Cleaner (QTY x $52.50)');
+  // Single Unified Sheet: 1 Cleaner (top), 2 Cleaners (lower), 3 Cleaners (lower again), Add-ons
+  const { headers, rows } = generateJobberMasterSinglePageSheetRows(catalog);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = colWidths;
+  XLSX.utils.book_append_sheet(wb, ws, 'Jobber Master Price List');
 
   return wb;
 }

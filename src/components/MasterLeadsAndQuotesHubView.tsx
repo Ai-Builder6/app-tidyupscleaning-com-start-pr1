@@ -1890,6 +1890,16 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                     const blocked = isCallerPhoneBlocked(call.callerPhone, call);
                     const isCleaning = Boolean(call.hasCleaningIntent);
                     const isBusy = togglingCallId === call.id;
+                    const rawCallDigits = String(call.callerPhone || '').replace(/\D/g, '');
+                    const norm10 = rawCallDigits.length === 11 && rawCallDigits.startsWith('1') ? rawCallDigits.slice(1) : rawCallDigits;
+                    const callAreaCode = norm10.length >= 3 ? norm10.slice(0, 3) : '';
+                    const isLocalAlberta = ['780', '587', '825', '403', '368'].includes(callAreaCode);
+                    const isAreaCodeBlocked = Boolean(
+                      callAreaCode &&
+                        (spamShieldConfig?.blockedPrefixes || []).some(
+                          (p: string) => p === `1${callAreaCode}*` || p === `${callAreaCode}*`
+                        )
+                    );
                     return (
                       <div
                         key={call.id}
@@ -1938,40 +1948,72 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                           </p>
                         </div>
 
-                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/10">
+                        <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-white/10 flex-wrap">
                           <span className="text-[10px] font-mono text-slate-400 truncate">
                             {call.callCategory || (blocked ? 'SOLICITOR_BLOCKED' : 'SCREENED')}
                           </span>
-                          {onToggleBlockScreenedCall && (
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={async () => {
-                                setTogglingCallId(call.id);
-                                await onToggleBlockScreenedCall({
-                                  callId: call.id,
-                                  callerPhone: call.callerPhone,
-                                  callerName: call.callerName,
-                                  reason: call.summary
-                                    ? `Screened Call (${call.callerName || call.callerPhone}): ${String(call.summary).slice(0, 80)}`
-                                    : undefined,
-                                  block: !blocked,
-                                });
-                                setTogglingCallId(null);
-                              }}
-                              className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer transition-all disabled:opacity-50 ${
-                                blocked
-                                  ? 'bg-slate-800 hover:bg-emerald-700 text-slate-200 border border-slate-600'
-                                  : 'bg-rose-600 hover:bg-rose-500 text-white shadow-2xs'
-                              }`}
-                            >
-                              {isBusy
-                                ? 'Saving...'
-                                : blocked
-                                ? '✓ Saved as Blocked (Click to Unblock)'
-                                : '🚫 Block & Save to DB'}
-                            </button>
-                          )}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {callAreaCode && !isLocalAlberta && !isCleaning && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={async () => {
+                                  setTogglingCallId(call.id);
+                                  try {
+                                    await fetch(`/api/twilio/block-number?project=${projectId || 'tidyups'}`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        number: callAreaCode,
+                                        type: 'areacode',
+                                        reason: `Blocked entire (${callAreaCode}) area code from main website`,
+                                      }),
+                                    });
+                                    onSyncEverything();
+                                  } catch {}
+                                  setTogglingCallId(null);
+                                }}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all disabled:opacity-50 ${
+                                  isAreaCodeBlocked
+                                    ? 'bg-red-900/70 text-rose-200 border border-rose-500/40'
+                                    : 'bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white shadow-2xs'
+                                }`}
+                                title={`1-Click Block ALL rotating numbers from area code (${callAreaCode})`}
+                              >
+                                {isAreaCodeBlocked ? `✓ Area (${callAreaCode}) Blocked` : `🚫 Block Area (${callAreaCode})`}
+                              </button>
+                            )}
+                            {onToggleBlockScreenedCall && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={async () => {
+                                  setTogglingCallId(call.id);
+                                  await onToggleBlockScreenedCall({
+                                    callId: call.id,
+                                    callerPhone: call.callerPhone,
+                                    callerName: call.callerName,
+                                    reason: call.summary
+                                      ? `Screened Call (${call.callerName || call.callerPhone}): ${String(call.summary).slice(0, 80)}`
+                                      : undefined,
+                                    block: !blocked,
+                                  });
+                                  setTogglingCallId(null);
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer transition-all disabled:opacity-50 ${
+                                  blocked
+                                    ? 'bg-slate-800 hover:bg-emerald-700 text-slate-200 border border-slate-600'
+                                    : 'bg-rose-600 hover:bg-rose-500 text-white shadow-2xs'
+                                }`}
+                              >
+                                {isBusy
+                                  ? 'Saving...'
+                                  : blocked
+                                  ? '✓ Blocked (Unblock)'
+                                  : '🚫 Block Number'}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );

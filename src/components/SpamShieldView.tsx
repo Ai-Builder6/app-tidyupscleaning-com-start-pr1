@@ -837,9 +837,16 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
                 {quoScreenedCalls.map((call) => {
                   const callDigits = String(call.callerPhone || '').replace(/\D/g, '');
                   const normCall = callDigits.length === 11 && callDigits.startsWith('1') ? callDigits.slice(1) : callDigits;
+                  const areaCode = normCall.length >= 3 ? normCall.slice(0, 3) : '';
+                  const isLocalAlberta = ['780', '587', '825', '403', '368'].includes(areaCode);
+                  const isAreaCodeBlocked = Boolean(
+                    areaCode &&
+                      (config.blockedPrefixes || []).some((p) => p === `1${areaCode}*` || p === `${areaCode}*`)
+                  );
                   const isBlocked =
                     Boolean(call.isBlocked) ||
                     call.status === 'SOLICITOR_BLOCKED' ||
+                    isAreaCodeBlocked ||
                     (config.blockedNumbers || []).some((b) => {
                       const bd = String(b || '').replace(/\D/g, '');
                       const nb = bd.length === 11 && bd.startsWith('1') ? bd.slice(1) : bd;
@@ -852,24 +859,48 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
                         isBlocked ? 'bg-rose-950/35 border-rose-500/50' : 'bg-slate-900/80 border-slate-800'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start justify-between gap-2 flex-wrap">
                         <div>
                           <div className="font-black text-white">{call.callerName || call.callerPhone}</div>
                           <div className="font-mono text-emerald-300 text-[11px]">
                             {call.callerPhone} • {String(call.timestamp || '').slice(0, 16).replace('T', ' ')}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleScreenedCallBlock(call, !isBlocked)}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer ${
-                            isBlocked
-                              ? 'bg-rose-600 hover:bg-emerald-700 text-white'
-                              : 'bg-slate-800 hover:bg-rose-600 text-slate-200 border border-slate-700'
-                          }`}
-                        >
-                          {isBlocked ? '🚫 Blocked in DB (Unblock)' : '+ Block Number'}
-                        </button>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {areaCode && !isLocalAlberta && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                isAreaCodeBlocked
+                                  ? handleUnblockItem(`1${areaCode}*`, 'prefix')
+                                  : handleBlockItem(areaCode, 'areacode', `Blocked entire (${areaCode}) area code`)
+                              }
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer transition-all ${
+                                isAreaCodeBlocked
+                                  ? 'bg-red-800/80 hover:bg-emerald-700 text-rose-100 border border-rose-400/40'
+                                  : 'bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white shadow-2xs'
+                              }`}
+                              title={
+                                isAreaCodeBlocked
+                                  ? `Area code (${areaCode}) is blocked (1${areaCode}*). Click to unblock.`
+                                  : `1-Click Block ALL calls from area code (${areaCode})`
+                              }
+                            >
+                              {isAreaCodeBlocked ? `✓ Area (${areaCode}) Blocked` : `🚫 Block Area (${areaCode})`}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleScreenedCallBlock(call, !isBlocked)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer ${
+                              isBlocked
+                                ? 'bg-rose-600 hover:bg-emerald-700 text-white'
+                                : 'bg-slate-800 hover:bg-rose-600 text-slate-200 border border-slate-700'
+                            }`}
+                          >
+                            {isBlocked ? '🚫 Blocked in DB (Unblock)' : '+ Block Number'}
+                          </button>
+                        </div>
                       </div>
                       <p className="text-[11px] text-slate-300 bg-black/30 p-2 rounded-lg border border-slate-800/80 line-clamp-2">
                         {call.summary || call.blockedReason || 'Screened inbound call'}
