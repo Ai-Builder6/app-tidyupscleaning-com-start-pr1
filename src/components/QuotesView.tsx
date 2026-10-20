@@ -27,7 +27,7 @@ import { getCustomerIntelligence } from '../services/customerIntelligenceService
 import { CustomerIntelligenceBadge } from './CustomerIntelligenceBadge';
 import { QuoteDetailModal } from './QuoteDetailModal';
 import { ServiceCatalogModal } from './ServiceCatalogModal';
-import { ServiceCatalogItem, CANONICAL_SERVICE_CATALOG, matchCatalogItem } from '../data/serviceCatalogData';
+import { ServiceCatalogItem, CANONICAL_SERVICE_CATALOG, matchCatalogItem, convertItemForCleanersCount } from '../data/serviceCatalogData';
 
 interface QuotesViewProps {
   quotes: JobberQuote[];
@@ -115,22 +115,25 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
     setNewService(item.categoryLabel || item.name);
     if (item.bedrooms || item.beds) setNewBedrooms(item.bedrooms || item.beds || '2 Bedrooms');
     if (item.bathrooms || item.baths) setNewBathrooms(item.bathrooms || item.baths || '2 Bathrooms');
-    const qty = item.quantity ?? item.baseHours ?? 1;
-    const unitPrice = item.unitPrice ?? item.basePrice ?? 105;
-    const total = item.total ?? (qty * unitPrice);
+    const conv = convertItemForCleanersCount(item, item.cleanersCount || 2);
+    const qty = conv.quantity;
+    const unitPrice = conv.unitPrice;
+    const total = conv.total;
+    const exactJobberName = conv.jobberItemName || item.jobberItemName || item.name;
     setNewTotal(String(total));
     setNewDeposit(String(item.depositRequired));
-    if (item.description) setNewNotes(item.description);
+    if (conv.description || item.description) setNewNotes(conv.description || item.description);
     setSelectedLineItems([
       {
-        name: item.jobberItemName || item.name,
-        description: item.description || `${item.name}\nQuantity: ${qty} @ $${unitPrice.toFixed(2)} = $${total.toFixed(2)} CAD`,
+        name: exactJobberName,
+        description: conv.description || item.description || `${exactJobberName} - (${qty} x $${unitPrice.toFixed(2)}) = $${total.toFixed(2)} CAD`,
         quantity: qty,
         unitPrice: unitPrice,
         total: total,
+        taxable: true,
       },
     ]);
-    setSyncFeedback(`Applied line item: ${item.name} (${qty} @ $${unitPrice.toFixed(2)} = $${total.toFixed(2)} CAD)`);
+    setSyncFeedback(`Applied Jobber item: ${exactJobberName} (${qty} x $${unitPrice.toFixed(2)} = $${total.toFixed(2)} CAD)`);
   };
 
   const uniqueQuotes = React.useMemo(() => {
@@ -331,7 +334,17 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
       const totalNum = Number(newTotal) || 280;
       let lineItems = selectedLineItems;
       if (lineItems.length === 0) {
-        const matched = matchCatalogItem(newService, newBedrooms, newBathrooms, localCatalog || CANONICAL_SERVICE_CATALOG);
+        const crewOverride =
+          newAssignedCleaners.length >= 1 && newAssignedCleaners.length <= 3
+            ? newAssignedCleaners.length
+            : undefined;
+        const matched = matchCatalogItem(
+          newService,
+          newBedrooms,
+          newBathrooms,
+          localCatalog || CANONICAL_SERVICE_CATALOG,
+          crewOverride
+        );
         if (matched) {
           const qty = matched.quantity ?? matched.baseHours ?? 1;
           const unitPrice = matched.unitPrice ?? matched.basePrice ?? 105;
@@ -339,10 +352,11 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
           lineItems = [
             {
               name: matched.jobberItemName || matched.name,
-              description: matched.description || `${matched.name} (${newBedrooms}, ${newBathrooms})`,
+              description: matched.description || `${matched.jobberItemName || matched.name} (${newBedrooms}, ${newBathrooms})`,
               quantity: qty,
               unitPrice: unitPrice,
               total: total,
+              taxable: true,
             },
           ];
         } else {
@@ -353,6 +367,7 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
               quantity: 1,
               unitPrice: totalNum,
               total: totalNum,
+              taxable: true,
             },
           ];
         }

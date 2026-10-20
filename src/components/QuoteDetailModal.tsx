@@ -26,6 +26,7 @@ import {
 import { JobberQuote, extractJobberNumericId } from '../services/jobberSyncModules';
 import { saveQuoteToFirestore, saveClientToFirestore } from '../services/firestoreSyncService';
 import { syncLeadsToLiveGoogleSheetInDrive } from '../services/googleDriveBackupService';
+import { matchCatalogItem, CANONICAL_SERVICE_CATALOG } from '../data/serviceCatalogData';
 
 interface QuoteDetailModalProps {
   isOpen: boolean;
@@ -144,9 +145,36 @@ export const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
   const discountNum = Number(editDiscount) || 0;
   const depositNum = Number(editDeposit) || 0;
 
+  const crewOverride =
+    schedCleaners.length >= 1 && schedCleaners.length <= 3 ? schedCleaners.length : undefined;
+  const matchedCatalog = matchCatalogItem(
+    editService || quote.service || 'Move Out Cleaning Services 2026',
+    editBedrooms,
+    editBathrooms,
+    CANONICAL_SERVICE_CATALOG,
+    crewOverride
+  );
+
   const lineItems =
     quote.lineItems && quote.lineItems.length > 0
       ? quote.lineItems
+      : matchedCatalog
+      ? [
+          {
+            name: matchedCatalog.jobberItemName || matchedCatalog.name,
+            description: matchedCatalog.description || matchedCatalog.jobberItemName || matchedCatalog.name,
+            quantity: matchedCatalog.quantity ?? matchedCatalog.baseHours ?? 3,
+            unitPrice: matchedCatalog.unitPrice ?? 105,
+            total: matchedCatalog.total ?? matchedCatalog.basePrice ?? 315,
+          },
+          {
+            name: 'Fuel Surcharge 2',
+            description: 'Fuel Surcharge 2 - Tidyups Cleaning Service',
+            quantity: 1,
+            unitPrice: 12.5,
+            total: 12.5,
+          },
+        ]
       : [
           {
             description: `${editService || quote.service || 'Residential Cleaning'} (${editBedrooms}, ${editBathrooms})`,
@@ -155,7 +183,8 @@ export const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
             total: Math.round((totalNum / 1.125 - 12.5 + discountNum) * 100) / 100,
           },
           {
-            description: 'Fuel & Travel Surcharge',
+            name: 'Fuel Surcharge 2',
+            description: 'Fuel Surcharge 2 - Tidyups Cleaning Service',
             quantity: 1,
             unitPrice: 12.5,
             total: 12.5,
@@ -184,26 +213,54 @@ export const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     setIsSyncingBoth(true);
     setFeedbackBanner(null);
     try {
-      const updatedLineItems = [
-        {
-          description: `${editService} (${editBedrooms}, ${editBathrooms})`,
-          quantity: 1,
-          unitPrice: Math.max(0, Math.round((totalNum / 1.125 - 12.5 + discountNum) * 100) / 100),
-          total: Math.max(0, Math.round((totalNum / 1.125 - 12.5 + discountNum) * 100) / 100),
-        },
-        {
-          description: 'Fuel & Travel Surcharge',
-          quantity: 1,
-          unitPrice: 12.5,
-          total: 12.5,
-        },
-      ];
+      const updatedLineItems: any[] = matchedCatalog
+        ? [
+            {
+              name: matchedCatalog.jobberItemName || matchedCatalog.name,
+              description: matchedCatalog.description || `${matchedCatalog.jobberItemName || matchedCatalog.name} (${editBedrooms}, ${editBathrooms})`,
+              quantity: matchedCatalog.quantity ?? matchedCatalog.baseHours ?? 3,
+              unitPrice: matchedCatalog.unitPrice ?? 105,
+              total: matchedCatalog.total ?? matchedCatalog.basePrice ?? 315,
+              taxable: true,
+            },
+            {
+              name: 'Fuel Surcharge 2',
+              description: 'Fuel Surcharge 2 - Tidyups Cleaning Service',
+              quantity: 1,
+              unitPrice: 12.5,
+              total: 12.5,
+              taxable: true,
+            },
+          ]
+        : [
+            {
+              name: `${editService} (${editBedrooms}, ${editBathrooms})`,
+              description: `${editService} (${editBedrooms}, ${editBathrooms})`,
+              quantity: 1,
+              unitPrice: Math.max(0, Math.round((totalNum / 1.125 - 12.5 + discountNum) * 100) / 100),
+              total: Math.max(0, Math.round((totalNum / 1.125 - 12.5 + discountNum) * 100) / 100),
+              taxable: true,
+            },
+            {
+              name: 'Fuel Surcharge 2',
+              description: 'Fuel Surcharge 2 - Tidyups Cleaning Service',
+              quantity: 1,
+              unitPrice: 12.5,
+              total: 12.5,
+              taxable: true,
+            },
+          ];
       if (discountNum > 0) {
         updatedLineItems.push({
-          description: `Custom Discount Applied (-$${discountNum.toFixed(2)})`,
+          name: discountNum === 10 ? 'Discount $10 Facebook Ad' : `Custom Discount Applied (-$${discountNum.toFixed(2)})`,
+          description:
+            discountNum === 10
+              ? 'Discount $10 Facebook Ad - Tidyups Cleaning Service'
+              : `Custom Discount Applied (-$${discountNum.toFixed(2)})`,
           quantity: 1,
           unitPrice: -discountNum,
           total: -discountNum,
+          taxable: true,
         });
       }
 

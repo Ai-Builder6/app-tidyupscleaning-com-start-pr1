@@ -68,9 +68,17 @@ export function convertItemForCleanersCount(
   perCleanerRate: number;
   soloEquivalentQty: number;
   soloEquivalentRate: number;
+  jobberItemName: string;
+  description: string;
 } {
+  const isHourlyOrAddon = Boolean(
+    item.isAddon ||
+      item.category === 'ADD_ON' ||
+      item.category === 'HOURLY' ||
+      /Hourly Rate|Crew Rate/i.test(item.name || '')
+  );
   const currentCleaners = Math.max(1, Number(item.cleanersCount) || 1);
-  const nextCleaners = Math.max(1, Number(targetCleaners) || 1);
+  const nextCleaners = isHourlyOrAddon ? currentCleaners : Math.max(1, Number(targetCleaners) || 1);
   const currentQty = Number(item.quantity) || 1;
   const currentUnitPrice = Number(item.unitPrice) || 0;
   const currentTotal =
@@ -82,7 +90,13 @@ export function convertItemForCleanersCount(
   const perCleanerRate = Math.round((currentUnitPrice / currentCleaners) * 100) / 100;
   const totalPersonHours = Math.round(currentQty * currentCleaners * 100) / 100;
 
-  if (item.isAddon || currentCleaners === nextCleaners) {
+  const stripSuffix = (name: string) =>
+    (name || '')
+      .replace(/\s*\([123]\s*Cleaners?[^)]*\)\s*$/i, '')
+      .replace(/\s*-\s*[123]\s*Cleaners?\s*$/i, '')
+      .trim();
+
+  if (isHourlyOrAddon) {
     return {
       cleanersCount: currentCleaners,
       quantity: currentQty,
@@ -91,12 +105,31 @@ export function convertItemForCleanersCount(
       perCleanerRate,
       soloEquivalentQty: totalPersonHours,
       soloEquivalentRate: perCleanerRate,
+      jobberItemName: item.name,
+      description: item.description || `${item.name} - Tidyups Cleaning Service`,
     };
   }
 
-  const newQuantity = Math.round((totalPersonHours / nextCleaners) * 100) / 100;
-  const newUnitPrice = Math.round(perCleanerRate * nextCleaners * 100) / 100;
-  const newTotal = currentTotal > 0 ? currentTotal : Math.round(newQuantity * newUnitPrice * 100) / 100;
+  const newQuantity =
+    currentCleaners === nextCleaners
+      ? currentQty
+      : Math.round((totalPersonHours / nextCleaners) * 100) / 100;
+  const newUnitPrice =
+    currentCleaners === nextCleaners
+      ? currentUnitPrice
+      : Math.round(perCleanerRate * nextCleaners * 100) / 100;
+  const newTotal =
+    currentTotal > 0 ? Math.round(currentTotal * 100) / 100 : Math.round(newQuantity * newUnitPrice * 100) / 100;
+
+  const baseName = stripSuffix(item.name);
+  const crewLabel = nextCleaners === 1 ? '1 Cleaner' : `${nextCleaners} Cleaners`;
+  const jobberFullName = `${baseName} (${crewLabel})`;
+  const bedsBaths = [item.bedrooms || item.beds, item.bathrooms || item.baths]
+    .filter(Boolean)
+    .join(', ');
+  const jobberDesc = `${jobberFullName} - ${crewLabel} (${newQuantity} x $${newUnitPrice.toFixed(2)}) = $${newTotal.toFixed(2)} CAD${
+    bedsBaths ? ` | ${bedsBaths}` : ''
+  }`;
 
   return {
     cleanersCount: nextCleaners,
@@ -106,6 +139,8 @@ export function convertItemForCleanersCount(
     perCleanerRate,
     soloEquivalentQty: totalPersonHours,
     soloEquivalentRate: perCleanerRate,
+    jobberItemName: jobberFullName,
+    description: jobberDesc,
   };
 }
 
@@ -924,12 +959,38 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 2,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Bi-Weekly Maintenance Clean (4 Bed / 3 Bath)',
+    jobberItemName: 'Bi-Weekly Maintenance Clean (4 Bed / 3 Bath) (2 Cleaners)',
     description: 'Regular recurring bi-weekly home detail for 4 Bed / 3 Bath property. Full sanitization and maintenance.',
     isAddon: false,
     status: 'Active',
     isActive: true,
     sortOrder: 300,
+  },
+  {
+    id: 'cat-mo-2b2b-online',
+    category: 'MOVE_OUT',
+    categoryLabel: 'Move-Out Cleaning 2026',
+    name: '2Bed 2Bath Moveout Cleaning - Online Booking',
+    shortName: '2Bed 2Bath Moveout - Online Booking',
+    serviceType: 'Move-Out Cleaning',
+    bedrooms: '2 Bedrooms',
+    bathrooms: '2 Bathrooms',
+    beds: '2 Bedrooms',
+    baths: '2 Bathrooms',
+    quantity: 3,
+    unitPrice: 105,
+    total: 315,
+    basePrice: 315,
+    baseHours: 3,
+    cleanersCount: 2,
+    depositRequired: 100,
+    taxable: true,
+    jobberItemName: '2Bed 2Bath Moveout Cleaning - Online Booking (2 Cleaners)',
+    description: '2Bed 2Bath Moveout Cleaning - Online Booking (2 Cleaners) - 2 Cleaners (3 x $105.00) = $315.00 CAD | 2 Bedrooms, 2 Bathrooms',
+    isAddon: false,
+    status: 'Active',
+    isActive: true,
+    sortOrder: 305,
   },
 
   // ── 6. HOURLY CREW RATES ──
@@ -948,7 +1009,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 50,
     taxable: true,
-    jobberItemName: 'Solo Cleaner Hourly Rate ($52.50/hr)',
+    jobberItemName: 'Standard Hourly Rate (1 Cleaner @ $52.50/hr)',
     description: 'Billed per labor hour for 1 professional cleaner with all eco-friendly supplies and commercial vacuum equipment.',
     isAddon: false,
     status: 'Active',
@@ -970,7 +1031,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 2,
     depositRequired: 50,
     taxable: true,
-    jobberItemName: 'Tandem Crew Hourly Rate ($105.00/hr)',
+    jobberItemName: 'Tandem Crew Rate (2 Cleaners @ $105.00/hr)',
     description: 'Billed per clock hour for a 2-cleaner tandem crew (provides 2 person-hours per clock hour of service).',
     isAddon: false,
     status: 'Active',
@@ -994,7 +1055,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Inside Oven Cleaning',
+    jobberItemName: 'Inside Oven Deep Cleaning',
     description: 'Degrease and scrub inside of oven, racks, interior glass door, and bottom heating elements.',
     isAddon: true,
     status: 'Active',
@@ -1016,7 +1077,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Inside Refrigerator Sanitization',
+    jobberItemName: 'Inside Refrigerator & Freezer Deep Clean',
     description: 'Remove shelves & crispers, wash, sanitize interior walls, wipe seals, and replace items neatly.',
     isAddon: true,
     status: 'Active',
@@ -1038,7 +1099,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Inside Cabinets & Drawers Cleaning',
+    jobberItemName: 'Inside Kitchen Cabinets & Drawers Detail',
     description: 'Vacuum crumbs and wipe down inside shelves and drawers throughout the kitchen.',
     isAddon: true,
     status: 'Active',
@@ -1060,7 +1121,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Baseboards Hand-Scrub & Wipe',
+    jobberItemName: 'Baseboards Hand-Scrub & Detail',
     description: 'Detailed hand wipe and scrub of baseboards throughout the entire home to remove scuffs and dust.',
     isAddon: true,
     status: 'Active',
@@ -1082,7 +1143,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Interior Window Panes & Sills Clean',
+    jobberItemName: 'Interior Windows & Tracks (Up to 10 Panes)',
     description: 'Squeegee and polish interior window glass, vacuum and wipe window tracks and sills.',
     isAddon: true,
     status: 'Active',
@@ -1104,7 +1165,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Basement Living Space Cleaning',
+    jobberItemName: 'Finished Basement Living Area',
     description: 'Clean finished basement family room, rec space, dust surfaces, vacuum carpets, and mop hard floors.',
     isAddon: true,
     status: 'Active',
@@ -1126,7 +1187,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 25,
     taxable: true,
-    jobberItemName: 'Basement Suite Complete Detail',
+    jobberItemName: 'Full Basement Suite (Kitchenette + Bath)',
     description: 'Complete clean of basement rental or mother-in-law suite including kitchen/wet bar and full bathroom.',
     isAddon: true,
     status: 'Active',
@@ -1148,7 +1209,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Pet Hair & Dander Sanitizer Treatment',
+    jobberItemName: 'Pet Hair & Heavy Dander Detail Treatment',
     description: 'Specialized rubber squeegee carpet raking and pet-safe botanical enzyme sanitizer application.',
     isAddon: true,
     status: 'Active',
@@ -1170,7 +1231,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Horizontal / Faux-Wood Blinds Detail',
+    jobberItemName: 'Blinds Hand-Dusting & Wipe (Per Room)',
     description: 'Hand dusting and microfiber wiping of horizontal slats on faux-wood or vinyl window blinds.',
     isAddon: true,
     status: 'Active',
@@ -1192,7 +1253,7 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     cleanersCount: 1,
     depositRequired: 0,
     taxable: true,
-    jobberItemName: 'Balcony / Deck Sweep & Sliding Glass Door',
+    jobberItemName: 'Balcony / Patio Sweep & Glass Clean',
     description: 'Sweep exterior debris, wipe railings, and clean exterior of sliding patio glass doors.',
     isAddon: true,
     status: 'Active',
@@ -1222,6 +1283,28 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     sortOrder: 500,
   },
   {
+    id: 'addon-fuel-2',
+    category: 'ADD_ON',
+    categoryLabel: 'Add-on Services',
+    name: 'Fuel Surcharge 2',
+    shortName: 'Fuel Surcharge 2',
+    serviceType: 'Add-on',
+    quantity: 1,
+    unitPrice: 12.5,
+    total: 12.5,
+    basePrice: 12.5,
+    baseHours: 1,
+    cleanersCount: 1,
+    depositRequired: 0,
+    taxable: true,
+    jobberItemName: 'Fuel Surcharge 2',
+    description: 'Fuel Surcharge 2 - Tidyups Cleaning Service',
+    isAddon: true,
+    status: 'Active',
+    isActive: true,
+    sortOrder: 505,
+  },
+  {
     id: 'addon-discount-10',
     category: 'ADD_ON',
     categoryLabel: 'Add-on Services',
@@ -1235,9 +1318,9 @@ export const CANONICAL_SERVICE_CATALOG: ServiceCatalogItem[] = [
     baseHours: 1,
     cleanersCount: 1,
     depositRequired: 0,
-    taxable: false,
+    taxable: true,
     jobberItemName: 'Discount $10 Facebook Ad',
-    description: 'Discount $10 Facebook Ad Promo',
+    description: 'Discount $10 Facebook Ad - Tidyups Cleaning Service',
     isAddon: true,
     status: 'Active',
     isActive: true,
@@ -1255,11 +1338,11 @@ export function normalizeAndRepairCatalogItems(
     return [...CANONICAL_SERVICE_CATALOG];
   }
 
-  return rawItems.map((raw, idx) => {
+  const mapped = rawItems.map((raw, idx) => {
     const canonicalMatch = CANONICAL_SERVICE_CATALOG.find(
       (c) =>
         c.id === raw.id ||
-        (raw.name && c.name.toLowerCase() === String(raw.name).toLowerCase())
+        (raw.name && c.name.toLowerCase() === String(raw.name).replace(/\s*\([123]\s*Cleaners?\)\s*$/i, '').trim().toLowerCase())
     );
 
     const isAddon =
@@ -1297,16 +1380,40 @@ export function normalizeAndRepairCatalogItems(
         ? Number(raw.total)
         : Math.round(quantity * unitPrice * 100) / 100;
 
+    const isHourly =
+      raw.category === 'HOURLY' ||
+      canonicalMatch?.category === 'HOURLY' ||
+      /Hourly Rate|Crew Rate/i.test(String(raw.name || ''));
+
+    const stripSuffix = (name: string) =>
+      (name || '')
+        .replace(/\s*\([123]\s*Cleaners?[^)]*\)\s*$/i, '')
+        .replace(/\s*-\s*[123]\s*Cleaners?\s*$/i, '')
+        .trim();
+
+    const baseName =
+      isAddon || isHourly
+        ? String(raw.name || canonicalMatch?.name || `Service Item ${idx + 1}`).trim()
+        : stripSuffix(String(raw.name || canonicalMatch?.name || `Service Item ${idx + 1}`));
+
+    const crewLabel = cleanersCount === 1 ? '1 Cleaner' : `${cleanersCount} Cleaners`;
+    const exactJobberName =
+      isAddon || isHourly ? baseName : `${baseName} (${crewLabel})`;
+
     return {
       ...(canonicalMatch || {}),
       ...raw,
       id: raw.id || canonicalMatch?.id || `cat-item-${idx + 1}`,
-      name: raw.name || canonicalMatch?.name || `Service Item ${idx + 1}`,
+      name: baseName,
       shortName:
         raw.shortName ||
         canonicalMatch?.shortName ||
-        (raw.name ? String(raw.name).slice(0, 35) : `Item ${idx + 1}`),
-      category: raw.category || canonicalMatch?.category || 'MOVE_OUT',
+        (baseName ? String(baseName).slice(0, 35) : `Item ${idx + 1}`),
+      category: isHourly
+        ? 'HOURLY'
+        : isAddon
+        ? 'ADD_ON'
+        : raw.category || canonicalMatch?.category || 'MOVE_OUT',
       categoryLabel:
         raw.categoryLabel || canonicalMatch?.categoryLabel || raw.category || 'Move-Out Cleaning 2026',
       serviceType: raw.serviceType || canonicalMatch?.serviceType || 'Move-Out Cleaning',
@@ -1324,18 +1431,29 @@ export function normalizeAndRepairCatalogItems(
         raw.depositRequired !== undefined
           ? Number(raw.depositRequired)
           : canonicalMatch?.depositRequired ?? 50,
-      taxable: raw.taxable !== undefined ? Boolean(raw.taxable) : true,
-      jobberItemName: raw.jobberItemName || raw.name || canonicalMatch?.jobberItemName || '',
+      taxable: true,
+      jobberItemName: exactJobberName,
       description:
         raw.description ||
         canonicalMatch?.description ||
-        `${raw.name || 'Cleaning Service'} — ${cleanersCount} Cleaner${cleanersCount > 1 ? 's' : ''} (${quantity} × $${unitPrice.toFixed(2)}) = $${total.toFixed(2)}`,
+        `${exactJobberName} - ${crewLabel} (${quantity} x $${unitPrice.toFixed(2)}) = $${total.toFixed(2)} CAD`,
       isAddon,
       status: raw.status || 'Active',
       isActive: raw.isActive !== false,
-      sortOrder: raw.sortOrder ?? canonicalMatch?.sortOrder ?? (idx + 1) * 10,
+      sortOrder: canonicalMatch?.sortOrder ?? raw.sortOrder ?? (idx + 1) * 10,
     } as ServiceCatalogItem;
   });
+
+  // Ensure all 46 canonical base items exist so 1, 2 & 3 Cleaners expansion always matches all 108 Jobber items
+  const existingNames = new Set(mapped.map((m) => m.name.toLowerCase()));
+  for (const canon of CANONICAL_SERVICE_CATALOG) {
+    if (!existingNames.has(canon.name.toLowerCase())) {
+      mapped.push({ ...canon, taxable: true });
+      existingNames.add(canon.name.toLowerCase());
+    }
+  }
+
+  return mapped.sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
 }
 
 /**
@@ -1439,11 +1557,45 @@ export function generateCombinedAllCleanersCatalog(
   catalog: ServiceCatalogItem[]
 ): ServiceCatalogItem[] {
   const normalized = normalizeAndRepairCatalogItems(catalog);
-  const residentialItems = normalized.filter((item) => !item.isAddon && item.category !== 'HOURLY');
-  const addonAndHourlyItems = normalized.filter((item) => item.isAddon || item.category === 'HOURLY');
-
   const stripCleanerSuffix = (name: string) =>
-    name.replace(/\s*\([123]\s*Cleaners?[^)]*\)\s*$/i, '').replace(/\s*-\s*[123]\s*Cleaners?\s*$/i, '').trim();
+    (name || '')
+      .replace(/\s*\([123]\s*Cleaners?[^)]*\)\s*$/i, '')
+      .replace(/\s*-\s*[123]\s*Cleaners?\s*$/i, '')
+      .trim();
+
+  const isHourlyOrAddonItem = (item: ServiceCatalogItem) =>
+    Boolean(
+      item.isAddon ||
+        item.category === 'ADD_ON' ||
+        item.category === 'HOURLY' ||
+        /Hourly Rate|Crew Rate/i.test(item.name || '')
+    );
+
+  // Deduplicate residential items by stripped base name so even if an expanded 108-item catalog is passed,
+  // we always expand the 31 unique residential packages into 93 items + 15 hourly/add-ons = 108 items.
+  const residentialMap = new Map<string, ServiceCatalogItem>();
+  for (const item of normalized) {
+    if (isHourlyOrAddonItem(item)) continue;
+    const baseKey = stripCleanerSuffix(item.name).toLowerCase();
+    const existing = residentialMap.get(baseKey);
+    if (!existing || item.cleanersCount === 2) {
+      residentialMap.set(baseKey, {
+        ...item,
+        name: stripCleanerSuffix(item.name),
+      });
+    }
+  }
+  const residentialItems = Array.from(residentialMap.values());
+
+  const addonMap = new Map<string, ServiceCatalogItem>();
+  for (const item of normalized) {
+    if (!isHourlyOrAddonItem(item)) continue;
+    const key = (item.name || '').trim().toLowerCase();
+    if (!addonMap.has(key)) {
+      addonMap.set(key, item);
+    }
+  }
+  const addonAndHourlyItems = Array.from(addonMap.values());
 
   const buildForCrew = (crewCount: 1 | 2 | 3): ServiceCatalogItem[] => {
     return residentialItems.map((baseItem, idx) => {
@@ -1451,7 +1603,12 @@ export function generateCombinedAllCleanersCatalog(
       const cleanBaseName = stripCleanerSuffix(baseItem.name);
       const crewLabel = crewCount === 1 ? '1 Cleaner' : `${crewCount} Cleaners`;
       const fullName = `${cleanBaseName} (${crewLabel})`;
-      const formulaLine = `${crewLabel} (${conv.quantity} × $${conv.unitPrice.toFixed(2)}) = $${conv.total.toFixed(2)} CAD`;
+      const bedsBaths = [baseItem.bedrooms || baseItem.beds, baseItem.bathrooms || baseItem.baths]
+        .filter(Boolean)
+        .join(', ');
+      const exactDesc = `${fullName} - ${crewLabel} (${conv.quantity} x $${conv.unitPrice.toFixed(2)}) = $${conv.total.toFixed(2)} CAD${
+        bedsBaths ? ` | ${bedsBaths}` : ''
+      }`;
       return {
         ...baseItem,
         id: `${baseItem.id}-crew-${crewCount}`,
@@ -1464,8 +1621,8 @@ export function generateCombinedAllCleanersCatalog(
         total: conv.total,
         baseHours: conv.quantity,
         basePrice: conv.total,
-        taxable: baseItem.taxable !== false ? true : false,
-        description: `${fullName} — ${formulaLine}${baseItem.bedrooms ? ` | ${baseItem.bedrooms}${baseItem.bathrooms ? `, ${baseItem.bathrooms}` : ''}` : ''}`,
+        taxable: true,
+        description: exactDesc,
         sortOrder: crewCount * 1000 + (idx + 1) * 10,
       };
     });
@@ -1474,11 +1631,25 @@ export function generateCombinedAllCleanersCatalog(
   const oneCleanerSection = buildForCrew(1);
   const twoCleanersSection = buildForCrew(2);
   const threeCleanersSection = buildForCrew(3);
-  const addonsSection = addonAndHourlyItems.map((item, idx) => ({
-    ...item,
-    taxable: item.taxable !== false ? true : false,
-    sortOrder: 4000 + (idx + 1) * 10,
-  }));
+  const addonsSection = addonAndHourlyItems.map((item, idx) => {
+    let cleanDesc = item.description || `${item.name} - Tidyups Cleaning Service`;
+    cleanDesc = cleanDesc
+      .replace(/—/g, '-')
+      .replace(/Tidyups Cleaning Service$/, (m, offset, str) => {
+        const before = str.slice(0, offset);
+        if (before && !before.endsWith(' - ') && !before.endsWith(' ')) {
+          return ' - Tidyups Cleaning Service';
+        }
+        return m;
+      });
+    return {
+      ...item,
+      jobberItemName: item.name,
+      description: cleanDesc,
+      taxable: true,
+      sortOrder: 4000 + (idx + 1) * 10,
+    };
+  });
 
   return [
     ...oneCleanerSection,
@@ -1489,49 +1660,64 @@ export function generateCombinedAllCleanersCatalog(
 }
 
 /**
- * Generates a single-page Jobber-ready CSV/Sheet structure containing 1 Cleaner at the top,
- * 2 Cleaners lower down, 3 Cleaners lower down again, and Add-ons at the bottom,
- * with TAXABLE = true for all rows.
+ * Generates the exact 6-column Jobber Products & Services import structure
+ * matching jobber-products-services-import.csv (all 108 items):
+ * Columns: Name, Description, Unit Price, Taxable, Category, Active
+ * - Unit Price: plain number with 2 decimals (e.g. "52.50", "105.00", "-10.00")
+ * - Taxable: "TRUE" or "FALSE"
+ * - Category: "Service" or "Product"
+ * - Active: "TRUE" or "FALSE"
  */
 export function generateJobberMasterSinglePageSheetRows(
   catalog: ServiceCatalogItem[]
 ) {
   const combinedItems = generateCombinedAllCleanersCatalog(catalog);
-  return generatePriceListSheetRows(combinedItems);
+  const headers = ['Name', 'Description', 'Unit Price', 'Taxable', 'Category', 'Active'];
+  const rows = combinedItems.map((item) => [
+    item.name,
+    item.description || `${item.name} - Tidyups Cleaning Service`,
+    Number(item.unitPrice ?? 0).toFixed(2),
+    item.taxable !== false ? 'TRUE' : 'FALSE',
+    'Service',
+    item.isActive !== false ? 'TRUE' : 'FALSE',
+  ]);
+  return { headers, rows };
 }
 
 /**
- * Builds a single-sheet XLSX WorkBook with all 1, 2 & 3 Cleaners
- * on ONE page and TAXABLE = true for every item so Jobber accepts it directly.
+ * Generates the exact quoted CSV string for Jobber Products & Services import (108 items)
+ */
+export function generateExactJobberImportCsvString(
+  catalog: ServiceCatalogItem[]
+): string {
+  const { headers, rows } = generateJobberMasterSinglePageSheetRows(catalog);
+  const escapeCsvCell = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+  return [
+    headers.map(escapeCsvCell).join(','),
+    ...rows.map((r) => r.map(escapeCsvCell).join(',')),
+  ].join('\r\n');
+}
+
+/**
+ * Builds a single-sheet XLSX WorkBook with the exact 6 Jobber columns
+ * (Name, Description, Unit Price, Taxable, Category, Active) for all 108 items.
  */
 export function buildPriceListWorkbook(catalog: ServiceCatalogItem[]): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
 
   const colWidths = [
-    { wch: 48 }, // SERVICE NAME/JOBBER LINE ITEM
-    { wch: 52 }, // DESCRIPTION
-    { wch: 26 }, // CATEGORY
-    { wch: 15 }, // BEDS
-    { wch: 15 }, // BATHS
-    { wch: 20 }, // NUMBER OF CLEANERS
-    { wch: 12 }, // QUANTITY
-    { wch: 18 }, // UNIT PRICE (CAD)
-    { wch: 16 }, // TOTAL (CAD)
-    { wch: 12 }, // TAXABLE (true/false)
-    { wch: 44 }, // FORMULA: NUMBER OF CLEANERS (QTY x UNIT PRICE) = TOTAL
-    { wch: 38 }, // 1 CLEANER EQUIVALENT (QTY x $52.50)
-    { wch: 38 }, // 2 CLEANERS EQUIVALENT (QTY x $105.00)
-    { wch: 38 }, // 3 CLEANERS EQUIVALENT (QTY x $157.50)
-    { wch: 20 }, // DEPOSIT REQUIRED
-    { wch: 12 }, // STATUS
-    { wch: 10 }, // ACTIVE?
+    { wch: 56 }, // Name
+    { wch: 96 }, // Description
+    { wch: 14 }, // Unit Price
+    { wch: 12 }, // Taxable
+    { wch: 14 }, // Category
+    { wch: 12 }, // Active
   ];
 
-  // Single Unified Sheet: 1 Cleaner (top), 2 Cleaners (lower), 3 Cleaners (lower again), Add-ons
   const { headers, rows } = generateJobberMasterSinglePageSheetRows(catalog);
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   ws['!cols'] = colWidths;
-  XLSX.utils.book_append_sheet(wb, ws, 'Jobber Master Price List');
+  XLSX.utils.book_append_sheet(wb, ws, 'Jobber Products & Services');
 
   return wb;
 }
@@ -1572,16 +1758,41 @@ export function parsePastedPriceList(
     const lines = input.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     if (lines.length === 0) return [];
 
+    const splitCsvLine = (lineStr: string): string[] => {
+      const cells: string[] = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < lineStr.length; i++) {
+        const ch = lineStr[i];
+        if (inQuotes) {
+          if (ch === '"' && lineStr[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else if (ch === '"') {
+            inQuotes = false;
+          } else {
+            cur += ch;
+          }
+        } else {
+          if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ',') {
+            cells.push(cur.trim());
+            cur = '';
+          } else {
+            cur += ch;
+          }
+        }
+      }
+      cells.push(cur.trim());
+      return cells;
+    };
+
     for (const line of lines) {
       if (line.includes('\t')) {
         rawRows.push(line.split('\t').map((c) => c.trim().replace(/^["']|["']$/g, '')));
       } else if (line.includes(',')) {
-        const match = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
-        if (match && match.length > 1) {
-          rawRows.push(match.map((c) => c.trim().replace(/^["']|["']$/g, '')));
-        } else {
-          rawRows.push(line.split(',').map((c) => c.trim().replace(/^["']|["']$/g, '')));
-        }
+        rawRows.push(splitCsvLine(line));
       } else {
         rawRows.push([line]);
       }
@@ -1592,6 +1803,7 @@ export function parsePastedPriceList(
 
   let headerIndex = -1;
   let colServiceName = 0;
+  let colDescription = -1;
   let colCategory = -1;
   let colBeds = -1;
   let colBaths = -1;
@@ -1599,6 +1811,7 @@ export function parsePastedPriceList(
   let colQuantity = -1;
   let colUnitPrice = -1;
   let colTotal = -1;
+  let colTaxable = -1;
   let colDeposit = -1;
   let colStatus = -1;
   let colActive = -1;
@@ -1608,6 +1821,7 @@ export function parsePastedPriceList(
     const joined = row.join(' ').toLowerCase();
     if (
       joined.includes('service') ||
+      joined.includes('name') ||
       joined.includes('item') ||
       joined.includes('unit price') ||
       joined.includes('quantity') ||
@@ -1619,6 +1833,8 @@ export function parsePastedPriceList(
         const c = col.toLowerCase().trim();
         if (/service\s*name|jobber\s*line\s*item|line\s*item|^service$|^name$/i.test(c)) {
           colServiceName = idx;
+        } else if (/^description$|^desc$/i.test(c)) {
+          colDescription = idx;
         } else if (/category|cat|^type$/i.test(c)) {
           colCategory = idx;
         } else if (/^beds?$|bedroom/i.test(c)) {
@@ -1633,6 +1849,8 @@ export function parsePastedPriceList(
           colUnitPrice = idx;
         } else if (/^total|total\s*\(cad\)|total_price/i.test(c)) {
           colTotal = idx;
+        } else if (/^taxable$/i.test(c)) {
+          colTaxable = idx;
         } else if (/deposit/i.test(c)) {
           colDeposit = idx;
         } else if (/^status$/i.test(c)) {
@@ -1681,6 +1899,7 @@ export function parsePastedPriceList(
     }
 
     let serviceName = '';
+    let descriptionStr = '';
     let categoryStr = '';
     let bedsStr = '';
     let bathsStr = '';
@@ -1688,12 +1907,14 @@ export function parsePastedPriceList(
     let quantityNum: number | undefined;
     let unitPriceNum: number | undefined;
     let totalNum: number | undefined;
+    let taxableBool = true;
     let depositNum: number | undefined;
     let statusStr = 'Active';
     let isActiveBool = true;
 
     if (headerIndex !== -1) {
       serviceName = (row[colServiceName] || '').trim();
+      if (colDescription !== -1 && row[colDescription]) descriptionStr = row[colDescription].trim();
       if (colCategory !== -1 && row[colCategory]) categoryStr = row[colCategory].trim();
       if (colBeds !== -1 && row[colBeds]) bedsStr = row[colBeds].trim();
       if (colBaths !== -1 && row[colBaths]) bathsStr = row[colBaths].trim();
@@ -1712,6 +1933,10 @@ export function parsePastedPriceList(
       if (colTotal !== -1 && row[colTotal]) {
         const tParsed = parseFloat(String(row[colTotal]).replace(/[^\d.-]/g, ''));
         if (!isNaN(tParsed)) totalNum = tParsed;
+      }
+      if (colTaxable !== -1 && row[colTaxable]) {
+        const txVal = row[colTaxable].toLowerCase().trim();
+        taxableBool = txVal !== 'false' && txVal !== 'no' && txVal !== '0';
       }
       if (colDeposit !== -1 && row[colDeposit]) {
         const dParsed = parseFloat(String(row[colDeposit]).replace(/[^\d.-]/g, ''));
@@ -1748,6 +1973,30 @@ export function parsePastedPriceList(
       if (row[2]) {
         const p2 = parseFloat(String(row[2]).replace(/[^\d.-]/g, ''));
         if (!isNaN(p2)) quantityNum = p2;
+      }
+    }
+
+    // Extract formula & crew count from Jobber 6-column CSV Description if present:
+    // e.g. "1Bed 1Bath Moveout Cleaning 2026 (1 Cleaner) - 1 Cleaner (6 x $52.50) = $315.00 CAD | 1 Bedroom, 1 Bathroom"
+    const nameCrewMatch = serviceName.match(/\((\d+)\s*Cleaners?\)\s*$/i);
+    if (nameCrewMatch && cleanersNum === undefined) {
+      cleanersNum = parseInt(nameCrewMatch[1], 10);
+    }
+    if (descriptionStr) {
+      const formulaMatch = descriptionStr.match(
+        /(\d+)\s*Cleaners?\s*\(\s*(\d+(?:\.\d+)?)\s*[x×]\s*\$(-?\d+(?:\.\d+)?)\s*\)\s*=\s*\$(-?\d+(?:\.\d+)?)/i
+      );
+      if (formulaMatch) {
+        if (cleanersNum === undefined) cleanersNum = parseInt(formulaMatch[1], 10);
+        if (quantityNum === undefined) quantityNum = parseFloat(formulaMatch[2]);
+        if (unitPriceNum === undefined) unitPriceNum = parseFloat(formulaMatch[3]);
+        if (totalNum === undefined) totalNum = parseFloat(formulaMatch[4]);
+      }
+      const pipeMatch = descriptionStr.split('|')[1];
+      if (pipeMatch) {
+        const parts = pipeMatch.split(',').map((s) => s.trim());
+        if (!bedsStr && parts[0]) bedsStr = parts[0];
+        if (!bathsStr && parts[1]) bathsStr = parts[1];
       }
     }
 
@@ -1797,27 +2046,36 @@ export function parsePastedPriceList(
 
     let category = currentCategory;
     let categoryLabel = currentCategoryLabel;
-    const lowerName = `${serviceName} ${categoryStr}`.toLowerCase();
+    // Ignore generic Jobber category "Service" or "Product" when inferring our internal category
+    const effectiveCatStr = /^service$|^product$/i.test(categoryStr) ? '' : categoryStr;
+    const lowerName = `${serviceName} ${effectiveCatStr}`.toLowerCase();
 
     if (lowerName.includes('move out') || lowerName.includes('move-out') || lowerName.includes('moveout')) {
       category = 'MOVE_OUT';
       categoryLabel = 'Move-Out Cleaning 2026';
-    } else if (lowerName.includes('deep')) {
+    } else if (lowerName.includes('deep') && !lowerName.includes('oven') && !lowerName.includes('refrigerator')) {
       category = 'DEEP_CLEAN';
       categoryLabel = 'Deep Cleaning Services 2026';
     } else if (lowerName.includes('post') || lowerName.includes('construction') || lowerName.includes('movein') || lowerName.includes('move in')) {
       category = 'POST_CONSTRUCTION';
       categoryLabel = 'MoveIn - Post Construction';
+    } else if (lowerName.includes('initial basic') || lowerName.includes('standard cleaning')) {
+      category = 'STANDARD_CLEAN';
+      categoryLabel = 'Initial Basic / Standard Cleaning 2026';
     } else if (
       lowerName.includes('fuel') ||
       lowerName.includes('discount') ||
       lowerName.includes('oven') ||
       lowerName.includes('fridge') ||
+      lowerName.includes('refrigerator') ||
       lowerName.includes('cabinet') ||
       lowerName.includes('baseboard') ||
       lowerName.includes('window') ||
-      lowerName.includes('basement') ||
+      lowerName.includes('basement living') ||
+      lowerName.includes('full basement suite') ||
       lowerName.includes('pet hair') ||
+      lowerName.includes('blinds') ||
+      lowerName.includes('balcony') ||
       lowerName.includes('surcharge') ||
       lowerName.includes('add-on') ||
       lowerName.includes('addon')
@@ -1830,13 +2088,13 @@ export function parsePastedPriceList(
     } else if (lowerName.includes('recur') || lowerName.includes('bi-weekly')) {
       category = 'RECURRING';
       categoryLabel = 'Bi-Weekly Recurring Residential Clean';
-    } else if (categoryStr) {
-      categoryLabel = categoryStr;
+    } else if (effectiveCatStr) {
+      categoryLabel = effectiveCatStr;
     }
 
     const isAddon = category === 'ADD_ON';
     const resolvedCleaners =
-      cleanersNum || (isAddon ? 1 : finalUnitPrice >= 90 ? 2 : 1);
+      cleanersNum || (isAddon ? 1 : finalUnitPrice >= 140 ? 3 : finalUnitPrice >= 90 ? 2 : 1);
     const depositRequired =
       depositNum !== undefined
         ? depositNum
@@ -1848,12 +2106,20 @@ export function parsePastedPriceList(
         ? 50
         : 0;
 
+    const cleanBaseName = isAddon || category === 'HOURLY'
+      ? serviceName
+      : serviceName.replace(/\s*\([123]\s*Cleaners?\)\s*$/i, '').trim();
+
+    const canonicalMatch = CANONICAL_SERVICE_CATALOG.find(
+      (c) => c.name.toLowerCase() === cleanBaseName.toLowerCase()
+    );
+
     items.push({
-      id: `cat-import-${Date.now()}-${idx}`,
+      id: canonicalMatch?.id || `cat-import-${Date.now()}-${idx}`,
       category,
       categoryLabel,
-      name: serviceName,
-      shortName: serviceName.length > 35 ? `${serviceName.slice(0, 32)}...` : serviceName,
+      name: cleanBaseName,
+      shortName: cleanBaseName.length > 35 ? `${cleanBaseName.slice(0, 32)}...` : cleanBaseName,
       serviceType:
         category === 'MOVE_OUT'
           ? 'Move-Out Cleaning'
@@ -1866,46 +2132,95 @@ export function parsePastedPriceList(
           : category === 'HOURLY'
           ? ('Hourly Crew Rates' as any)
           : 'Standard Cleaning',
-      bedrooms: bedsStr || undefined,
-      bathrooms: bathsStr || undefined,
-      beds: bedsStr || undefined,
-      baths: bathsStr || undefined,
+      bedrooms: bedsStr || canonicalMatch?.bedrooms || undefined,
+      bathrooms: bathsStr || canonicalMatch?.bathrooms || undefined,
+      beds: bedsStr || canonicalMatch?.beds || undefined,
+      baths: bathsStr || canonicalMatch?.baths || undefined,
       quantity: finalQuantity,
       unitPrice: finalUnitPrice,
       total: finalTotal,
       basePrice: finalTotal,
       baseHours: finalQuantity,
       cleanersCount: resolvedCleaners,
-      depositRequired,
-      taxable: true,
+      depositRequired: canonicalMatch?.depositRequired ?? depositRequired,
+      taxable: taxableBool,
       jobberItemName: serviceName,
-      description: `${serviceName}${bedsStr ? `\n${bedsStr}, ${bathsStr || ''}` : ''}\n${
-        resolvedCleaners > 1 ? `${resolvedCleaners} Pro Cleaners\nIncludes Fuel Surcharge` : 'Tidyups Cleaning Service'
-      }`,
+      description:
+        descriptionStr ||
+        canonicalMatch?.description ||
+        `${serviceName} - Tidyups Cleaning Service`,
       isAddon,
       status: statusStr || 'Active',
       isActive: isActiveBool,
-      sortOrder: (idx + 1) * 10,
+      sortOrder: canonicalMatch?.sortOrder ?? (idx + 1) * 10,
     });
   });
 
-  return items;
+  // If the imported file was an expanded 108-item Jobber CSV containing (1 Cleaner), (2 Cleaners), (3 Cleaners)
+  // variants of the same residential base packages, deduplicate by base name (preferring the canonical default crew size)
+  // so the base catalog stays clean (46 base items -> 108 combined Jobber items).
+  const deduped = new Map<string, ServiceCatalogItem>();
+  for (const item of items) {
+    const key = item.name.toLowerCase();
+    const existing = deduped.get(key);
+    const canonicalDefaultCleaners =
+      CANONICAL_SERVICE_CATALOG.find((c) => c.name.toLowerCase() === key)?.cleanersCount ?? 2;
+    if (!existing || item.cleanersCount === canonicalDefaultCleaners) {
+      deduped.set(key, item);
+    }
+  }
+
+  return Array.from(deduped.values());
 }
 
 /**
- * Helper to match an item in the service catalog based on service type & bed/bath count
+ * Helper to match an item in the service catalog based on service type & bed/bath count,
+ * and format its jobberItemName to match the exact 108-item Jobber catalog.
  */
 export function matchCatalogItem(
   serviceType: string,
   bedrooms?: string,
   bathrooms?: string,
-  catalog: ServiceCatalogItem[] = CANONICAL_SERVICE_CATALOG
+  catalog: ServiceCatalogItem[] = CANONICAL_SERVICE_CATALOG,
+  cleanersCountOverride?: number
 ): ServiceCatalogItem | undefined {
   if (!catalog || catalog.length === 0) return undefined;
 
-  const normService = (serviceType || '').toLowerCase();
+  const normService = (serviceType || '').trim().toLowerCase();
   const normBed = (bedrooms || '').toLowerCase();
   const normBath = (bathrooms || '').toLowerCase();
+
+  // Check if serviceType explicitly specifies (1 Cleaner), (2 Cleaners), or (3 Cleaners)
+  const explicitCrewMatch = normService.match(/\((\d+)\s*cleaners?\)/i);
+  const requestedCrew =
+    cleanersCountOverride ||
+    (explicitCrewMatch ? parseInt(explicitCrewMatch[1], 10) : undefined);
+
+  const finalizeMatchedItem = (matched: ServiceCatalogItem): ServiceCatalogItem => {
+    const targetCrew = requestedCrew || matched.cleanersCount || 2;
+    const conv = convertItemForCleanersCount(matched, targetCrew);
+    return {
+      ...matched,
+      cleanersCount: conv.cleanersCount,
+      quantity: conv.quantity,
+      unitPrice: conv.unitPrice,
+      total: conv.total,
+      baseHours: conv.quantity,
+      basePrice: conv.total,
+      jobberItemName: conv.jobberItemName,
+      description: conv.description,
+    };
+  };
+
+  // 1. Check exact name match first (with or without cleaner suffix)
+  const strippedQuery = normService.replace(/\s*\([123]\s*cleaners?\)\s*$/i, '').trim();
+  const exactByName = catalog.find((item) => {
+    const itemStripped = item.name.replace(/\s*\([123]\s*cleaners?\)\s*$/i, '').trim().toLowerCase();
+    return item.name.toLowerCase() === normService || itemStripped === strippedQuery;
+  });
+  if (exactByName) {
+    return finalizeMatchedItem(exactByName);
+  }
 
   const bedDigit = normBed.match(/\d+/)?.[0] || normService.match(/(\d+)\s*(?:bed|bedroom)/i)?.[1];
   const bathDigit = normBath.match(/[\d.]+/)?.[0] || normService.match(/(\d+(?:\.5)?)\s*(?:bath|bathroom)/i)?.[1];
@@ -1915,7 +2230,7 @@ export function matchCatalogItem(
     targetCategory = 'MOVE_OUT';
   } else if (normService.includes('deep')) {
     targetCategory = 'DEEP_CLEAN';
-  } else if (normService.includes('post') || normService.includes('construction') || normService.includes('move in')) {
+  } else if (normService.includes('post') || normService.includes('construction') || normService.includes('move in') || normService.includes('movein')) {
     targetCategory = 'POST_CONSTRUCTION';
   } else if (normService.includes('recur') || normService.includes('bi-weekly')) {
     targetCategory = 'RECURRING';
@@ -1933,7 +2248,7 @@ export function matchCatalogItem(
         (itemBath.includes(`${bathDigit} bath`) || itemBath.includes(`${bathDigit}bath`))
       );
     });
-    if (exact) return exact;
+    if (exact) return finalizeMatchedItem(exact);
   }
 
   if (bedDigit) {
@@ -1942,11 +2257,11 @@ export function matchCatalogItem(
       const itemBed = (item.bedrooms || item.beds || item.name).toLowerCase();
       return itemBed.includes(`${bedDigit} bed`);
     });
-    if (bedMatch) return bedMatch;
+    if (bedMatch) return finalizeMatchedItem(bedMatch);
   }
 
   const catMatch = catalog.find((item) => item.category === targetCategory);
-  if (catMatch) return catMatch;
+  if (catMatch) return finalizeMatchedItem(catMatch);
 
-  return catalog[0];
+  return finalizeMatchedItem(catalog[0]);
 }

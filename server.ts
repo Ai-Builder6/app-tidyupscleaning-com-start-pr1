@@ -2845,14 +2845,16 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
           mutated = true;
         }
         if (!q.lineItems || q.lineItems.length === 0) {
-          const match = matchCatalogItem(q.service, q.bedrooms, q.bathrooms);
+          const match = matchCatalogItem(q.service, q.bedrooms, q.bathrooms, store.serviceCatalog || CANONICAL_SERVICE_CATALOG);
           if (match) {
             q.lineItems = [
               {
-                description: match.name,
-                quantity: 1,
-                unitPrice: match.basePrice,
-                total: match.basePrice,
+                name: match.jobberItemName || match.name,
+                description: match.description || match.jobberItemName || match.name,
+                quantity: match.quantity ?? match.baseHours ?? 1,
+                unitPrice: match.unitPrice ?? 105,
+                total: match.total ?? match.basePrice,
+                taxable: true,
               },
             ];
             mutated = true;
@@ -2997,7 +2999,9 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
         item.quantity === undefined ||
         item.unitPrice === undefined ||
         item.total === undefined ||
-        item.cleanersCount === undefined
+        item.cleanersCount === undefined ||
+        item.taxable === undefined ||
+        store.serviceCatalog.length < 46
     );
     if (needsRepair) {
       store.serviceCatalog = normalizeAndRepairCatalogItems(store.serviceCatalog);
@@ -3541,7 +3545,7 @@ app.get("/api/price-list/export.xlsx", (req, res) => {
   res.send(buffer);
 });
 
-// GET /api/price-list/export.csv: Download live updated Single-Page Jobber Master Price List (.csv) with 1, 2 & 3 Cleaners + TAXABLE=true
+// GET /api/price-list/export.csv: Download Jobber Products & Services Import CSV (all 108 items)
 app.get("/api/price-list/export.csv", (req, res) => {
   const projectId = getProjectId(req);
   const cleanersParam = req.query.cleaners ? Number(req.query.cleaners) : undefined;
@@ -3555,21 +3559,16 @@ app.get("/api/price-list/export.csv", (req, res) => {
     ? generatePriceListSheetRows(items, cleanersParam)
     : generateJobberMasterSinglePageSheetRows(items);
 
-  const escapeCsvCell = (val: any) => {
-    const str = String(val ?? "");
-    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
-      return `"${str.replace(/"/g, '""')}"`;
-    }
-    return str;
-  };
+  const escapeCsvCell = (val: any) => `"${String(val ?? "").replace(/"/g, '""')}"`;
 
   const csvContent = [
     headers.map(escapeCsvCell).join(","),
     ...rows.map((r) => r.map(escapeCsvCell).join(",")),
-  ].join("\n");
+  ].join("\r\n");
 
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const filename = `Tidyups_Jobber_Master_Price_List_${dateStr}.csv`;
+  const filename = cleanersParam
+    ? `Tidyups_Price_List_${cleanersParam}_Cleaners.csv`
+    : `jobber-products-services-import.csv`;
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(csvContent);

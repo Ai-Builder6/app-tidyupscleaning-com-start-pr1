@@ -595,27 +595,20 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
     );
   };
 
-  // Download Single-Page Jobber Master Price List as a separate CSV file directly to computer
+  // Download Single-Page Jobber Master Price List as jobber-products-services-import.csv (all 108 items)
   const handleDownloadJobberMasterCsv = async () => {
     try {
       await persistCatalogEverywhere(currentItems);
     } catch {}
 
     const { headers, rows } = generateJobberMasterSinglePageSheetRows(currentItems);
-    const escapeCsv = (val: any) => {
-      const str = String(val ?? '');
-      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
+    const escapeCsv = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
     const csvContent = [
       headers.map(escapeCsv).join(','),
       ...rows.map((r) => r.map(escapeCsv).join(',')),
-    ].join('\n');
+    ].join('\r\n');
 
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const filename = `Tidyups_Jobber_Master_Price_List_1_2_3_Cleaners_${dateStr}.csv`;
+    const filename = `jobber-products-services-import.csv`;
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -627,7 +620,7 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
     URL.revokeObjectURL(url);
 
     setFeedbackNotice(
-      `✓ Downloaded "${filename}"! Contains 1 Cleaner (top), 2 Cleaners (lower), and 3 Cleaners (lower again) on 1 single page with TAXABLE = true for all ${rows.length} items.`
+      `✓ Downloaded "${filename}" (${rows.length} items)! Exact Jobber columns: Name, Description, Unit Price (plain number), Taxable (TRUE), Category (Service), Active (TRUE).`
     );
   };
 
@@ -680,21 +673,21 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Download Jobber Master CSV (Single Page: 1, 2 & 3 Cleaners + TAXABLE=true) */}
+            {/* Download Jobber Master CSV (108 Items: Name, Description, Unit Price, Taxable, Category, Active) */}
             <button
               onClick={handleDownloadJobberMasterCsv}
               className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-              title="Download Single-Page Jobber Master Price List CSV (1 Cleaner, 2 Cleaners & 3 Cleaners on 1 sheet with TAXABLE = true)"
+              title="Download jobber-products-services-import.csv (All 108 items with exact Jobber headers: Name, Description, Unit Price, Taxable, Category, Active)"
             >
               <Download className="w-4 h-4" />
-              <span>Download Jobber Master CSV (1, 2 &amp; 3 Cleaners)</span>
+              <span>Download jobber-products-services-import.csv (108 Items)</span>
             </button>
 
             {/* Download Updated Single-Sheet (.xlsx) */}
             <button
               onClick={handleDownloadGoogleSheetsXlsx}
               className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-white/20 cursor-pointer"
-              title="Download single-sheet Excel (.xlsx) with 1, 2 & 3 Cleaners on 1 page and TAXABLE = true"
+              title="Download single-sheet Excel (.xlsx) with all 108 Jobber items"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>Download Single-Page .XLSX</span>
@@ -720,7 +713,7 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
             <button
               onClick={handleResetToCanonical}
               className="p-2 text-slate-400 hover:text-slate-200 rounded-lg cursor-pointer"
-              title="Reset to official Tidyups price list"
+              title="Reset & sync all 108 Jobber items"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
@@ -734,18 +727,18 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
           </div>
         </div>
 
-        {/* Formula & Single-Page 1, 2 & 3 Cleaners Banner */}
+        {/* Formula & Single-Page 108-Item Jobber Mapping Banner */}
         <div className="px-4 py-2.5 bg-purple-950/5 border-b border-purple-200/80 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 text-xs">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-1.5 font-extrabold text-purple-950">
               <Calculator className="w-4 h-4 text-purple-700" />
-              <span>Jobber Single-Page Format:</span>
+              <span>Jobber 108-Item Mapping:</span>
             </span>
             <code className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-mono font-extrabold text-xs">
-              TAXABLE = true (All Items)
+              Name | Description | Unit Price | Taxable: TRUE | Category: Service | Active: TRUE
             </code>
             <span className="text-slate-600">
-              • <strong>1 Cleaner:</strong> QTY × $52.50 &nbsp;|&nbsp; <strong>2 Cleaners:</strong> QTY × $105.00 &nbsp;|&nbsp; <strong>3 Cleaners:</strong> QTY × $157.50
+              • <strong>108 Items Mapped 1-to-1</strong> (31 × 1 Cleaner + 31 × 2 Cleaners + 31 × 3 Cleaners + 15 Hourly/Add-Ons)
             </span>
           </div>
 
@@ -882,16 +875,16 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200 font-extrabold uppercase text-[10px] tracking-wider">
               <tr>
-                <th className="py-2.5 px-3">Service Name / Jobber Line Item</th>
+                <th className="py-2.5 px-3">Name (Jobber Item Name)</th>
                 <th className="py-2.5 px-2.5">Category</th>
                 <th className="py-2.5 px-2.5">Beds / Baths</th>
                 <th className="py-2.5 px-2.5 text-center"># Cleaners</th>
                 <th className="py-2.5 px-2.5 text-center">QTY</th>
-                <th className="py-2.5 px-2.5 text-right">Unit Price</th>
-                <th className="py-2.5 px-3">Number of Cleaners (QTY × Unit Price) = Total</th>
+                <th className="py-2.5 px-2.5 text-right bg-amber-50/70 text-amber-950">Unit Price</th>
+                <th className="py-2.5 px-3">Description / Formula (QTY × Unit Price = Total)</th>
                 <th className="py-2.5 px-3 text-right">Total (CAD)</th>
-                <th className="py-2.5 px-2.5 text-center bg-emerald-50 text-emerald-900">TAXABLE</th>
-                <th className="py-2.5 px-2 text-center">Status</th>
+                <th className="py-2.5 px-2.5 text-center bg-emerald-50 text-emerald-900">Taxable</th>
+                <th className="py-2.5 px-2 text-center bg-emerald-50/60 text-emerald-900">Active</th>
                 <th className="py-2.5 px-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -923,6 +916,7 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
 
                   const altCleaners = cleaners === 1 ? 2 : cleaners === 2 ? 3 : 1;
                   const altConv = convertItemForCleanersCount(item, altCleaners);
+                  const exactJobberName = item.jobberItemName || item.name;
 
                   return (
                     <React.Fragment key={item.id}>
@@ -934,16 +928,16 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
                                 <Users className="w-4 h-4 text-emerald-400" />
                                 <span>
                                   {currGroup === 'CREW_1'
-                                    ? 'SECTION 1: 1 CLEANER PRICE LIST (Solo Tech @ $52.50/hr — TAXABLE: true)'
+                                    ? 'SECTION 1: 1 CLEANER PRICE LIST (31 Items — Unit Price: 52.50 / 57.50 / 49.00 — Category: Service — Taxable: TRUE)'
                                     : currGroup === 'CREW_2'
-                                    ? 'SECTION 2: 2 CLEANERS PRICE LIST (2-Tech Crew @ $105.00/hr — TAXABLE: true)'
+                                    ? 'SECTION 2: 2 CLEANERS PRICE LIST (31 Items — Unit Price: 105.00 / 115.00 / 98.00 — Category: Service — Taxable: TRUE)'
                                     : currGroup === 'CREW_3'
-                                    ? 'SECTION 3: 3 CLEANERS PRICE LIST (3-Tech Crew @ $157.50/hr — TAXABLE: true)'
-                                    : 'SECTION 4: ADD-ON SERVICES & HOURLY CREW RATES (TAXABLE: true)'}
+                                    ? 'SECTION 3: 3 CLEANERS PRICE LIST (31 Items — Unit Price: 157.50 / 172.50 / 147.00 — Category: Service — Taxable: TRUE)'
+                                    : 'SECTION 4: HOURLY RATES & ADD-ON SERVICES (15 Items — Category: Service — Taxable: TRUE)'}
                                 </span>
                               </div>
                               <span className="font-mono text-[11px] text-emerald-300">
-                                TAXABLE = true • Ready for Jobber Single-Page CSV Import
+                                Mapped 1-to-1 with jobber-products-services-import.csv (108 Items)
                               </span>
                             </div>
                           </td>
@@ -953,7 +947,7 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
                         {/* Name & Jobber Item */}
                         <td className="py-2.5 px-3">
                           <div className="font-bold text-slate-900 group-hover:text-purple-900 flex items-center gap-1.5">
-                            <span>{item.name}</span>
+                            <span>{exactJobberName}</span>
                             {item.isAddon && (
                               <span className="text-[10px] font-bold text-pink-700">
                                 · Add-on
@@ -961,13 +955,14 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
                             )}
                           </div>
                           <div className="text-[11px] text-slate-500 font-mono truncate max-w-xs">
-                            {item.jobberItemName || item.description}
+                            {item.description}
                           </div>
                         </td>
 
                         {/* Category */}
                         <td className="py-2.5 px-2.5 text-[11px] text-slate-600">
-                          {item.categoryLabel || item.category}
+                          <div className="font-mono font-bold text-slate-900">Service</div>
+                          <div className="text-[10px] text-slate-400">{item.categoryLabel || item.category}</div>
                         </td>
 
                         {/* Beds / Baths */}
@@ -1011,9 +1006,10 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
                           {qty}
                         </td>
 
-                        {/* Unit Price */}
-                        <td className="py-2.5 px-2.5 text-right font-mono font-bold text-slate-800">
-                          ${unitPrice.toFixed(2)}
+                        {/* Unit Price (Plain number for Jobber) */}
+                        <td className="py-2.5 px-2.5 text-right font-mono font-bold text-slate-900 bg-amber-50/30">
+                          <div>{unitPrice.toFixed(2)}</div>
+                          <div className="text-[10px] text-slate-400 font-normal">(${unitPrice.toFixed(2)})</div>
                         </td>
 
                         {/* Formula: Number of Cleaners ( QTY × Unit Price ) = Total */}
@@ -1039,17 +1035,17 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
                           ${total.toFixed(2)}
                         </td>
 
-                        {/* TAXABLE (true/false) */}
+                        {/* Taxable (TRUE/FALSE) */}
                         <td className="py-2.5 px-2.5 text-center font-mono">
                           <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-extrabold text-[11px]">
-                            {isTaxable ? 'true' : 'false'}
+                            {isTaxable ? 'TRUE' : 'FALSE'}
                           </span>
                         </td>
 
-                        {/* Status */}
-                        <td className="py-2.5 px-2 text-center text-[11px] font-semibold">
-                          <span className={item.isActive !== false ? 'text-emerald-700' : 'text-slate-400'}>
-                            {item.status || (item.isActive !== false ? 'Active' : 'Draft')}
+                        {/* Active (TRUE/FALSE) */}
+                        <td className="py-2.5 px-2 text-center font-mono">
+                          <span className={`px-2 py-0.5 rounded font-extrabold text-[11px] ${item.isActive !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                            {item.isActive !== false ? 'TRUE' : 'FALSE'}
                           </span>
                         </td>
 
@@ -1059,7 +1055,10 @@ export const ServiceCatalogModal: React.FC<ServiceCatalogModalProps> = ({
                             {onSelectForQuote && (
                               <button
                                 onClick={() => {
-                                  onSelectForQuote(item);
+                                  onSelectForQuote({
+                                    ...item,
+                                    jobberItemName: exactJobberName,
+                                  });
                                   onClose();
                                 }}
                                 className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"

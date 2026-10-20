@@ -1064,12 +1064,13 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     const unitPrice = item.unitPrice ?? item.basePrice ?? 105;
     const total = item.total ?? Math.round(qty * unitPrice * 100) / 100;
     const cleaners = item.cleanersCount || 2;
+    const exactJobberName = item.jobberItemName || item.name;
     setHours(qty);
     if (cleaners >= 2) setCrewSelection('2_CLEANERS');
     else setCrewSelection('1_CLEANER');
     if (item.depositRequired !== undefined) setDepositAmount(item.depositRequired);
     setFeedbackNotice(
-      `✓ Applied "${item.name}": ${cleaners} Cleaner${cleaners > 1 ? 's' : ''} (${qty} × $${unitPrice.toFixed(2)}) = $${total.toFixed(2)} CAD`
+      `✓ Applied Jobber item "${exactJobberName}": ${cleaners} Cleaner${cleaners > 1 ? 's' : ''} (${qty} × $${unitPrice.toFixed(2)}) = $${total.toFixed(2)} CAD`
     );
   }, []);
 
