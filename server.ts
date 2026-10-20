@@ -979,7 +979,7 @@ function parseVoiceTicketHeuristic(transcript: string) {
     recommendedCleaners = 1;
   }
 
-  // Spoken-number & conversational normalization for voice dictation
+  // Spoken-number, compound-number, and ordinal normalization for voice dictation
   const singleDigitWordMap: Record<string, string> = {
     zero: "0",
     oh: "0",
@@ -993,13 +993,97 @@ function parseVoiceTicketHeuristic(transcript: string) {
     eight: "8",
     nine: "9",
   };
+  const teenAndTensMap: Record<string, number> = {
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
+    seventy: 70,
+    eighty: 80,
+    ninety: 90,
+  };
+  const ordinalWordMap: Record<string, string> = {
+    first: "1st",
+    second: "2nd",
+    third: "3rd",
+    fourth: "4th",
+    fifth: "5th",
+    sixth: "6th",
+    seventh: "7th",
+    eighth: "8th",
+    ninth: "9th",
+    tenth: "10th",
+    eleventh: "11th",
+    twelfth: "12th",
+    thirteenth: "13th",
+    fourteenth: "14th",
+    fifteenth: "15th",
+    sixteenth: "16th",
+    seventeenth: "17th",
+    eighteenth: "18th",
+    nineteenth: "19th",
+    twentieth: "20th",
+    "twenty-first": "21st",
+    "twenty first": "21st",
+    "twenty-second": "22nd",
+    "twenty second": "22nd",
+    "twenty-third": "23rd",
+    "twenty third": "23rd",
+    "twenty-fourth": "24th",
+    "twenty fourth": "24th",
+    "twenty-fifth": "25th",
+    "twenty fifth": "25th",
+    "twenty-sixth": "26th",
+    "twenty sixth": "26th",
+    "twenty-seventh": "27th",
+    "twenty seventh": "27th",
+    "twenty-eighth": "28th",
+    "twenty eighth": "28th",
+    "twenty-ninth": "29th",
+    "twenty ninth": "29th",
+    thirtieth: "30th",
+    "thirty-first": "31st",
+    "thirty first": "31st",
+  };
 
   // Convert "two and a half" / "one and a half" / "three and a half" before general digit replacement
   let normalizedWords = t
     .replace(/\b(one|two|three|four|1|2|3|4)\s+and\s+a\s+half\b/gi, (_, d) => {
       const base = singleDigitWordMap[String(d).toLowerCase()] || d;
       return `${base}.5`;
-    })
+    });
+
+  // Replace multi-word and single-word ordinals (for dates like "October twenty fourth" or streets like "eighty second avenue")
+  for (const [word, ord] of Object.entries(ordinalWordMap)) {
+    const rx = new RegExp(`\\b${word}\\b`, "gi");
+    normalizedWords = normalizedWords.replace(rx, ord);
+  }
+
+  // Convert compound tens + units like "seventy two" -> "72", "twenty four" -> "24"
+  normalizedWords = normalizedWords
+    .replace(
+      /\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\s-]+(one|two|three|four|five|six|seven|eight|nine)\b/gi,
+      (_, tensW, unitW) => {
+        const tensVal = teenAndTensMap[String(tensW).toLowerCase()] || 0;
+        const unitVal = Number(singleDigitWordMap[String(unitW).toLowerCase()] || 0);
+        return String(tensVal + unitVal);
+      }
+    )
+    .replace(
+      /\b(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b/gi,
+      (m) => String(teenAndTensMap[m.toLowerCase()] ?? m)
+    )
     // Convert sequences of 2 to 10 spoken single digits (e.g. "Seven two two one" -> "7221")
     .replace(
       /\b(?:(zero|oh|one|two|three|four|five|six|seven|eight|nine)(?:[\s-]+|$)){2,10}/gi,
@@ -1014,9 +1098,12 @@ function parseVoiceTicketHeuristic(transcript: string) {
       }
     )
     .replace(/\b(one|two|three|four|five|six|seven|eight|nine)\b/gi, (m) => singleDigitWordMap[m.toLowerCase()] || m)
+    // Join split 2-digit + 2-digit house numbers before a street name (e.g., "72 21 Chivers" -> "7221 Chivers")
+    .replace(/\b(\d{2})\s+(\d{2})\s+([A-Za-z]{3,})/g, "$1$2 $3")
     // Common Edmonton phonetic street & quadrant normalizations from Web Speech API
     .replace(/\b(?:child'?s|shrivers?|shivers?)\s+place\b/gi, "Chivers Place")
     .replace(/\b(?:child'?s|shrivers?|shivers?)\s+way\b/gi, "Chivers Way")
+    .replace(/\bwhite\s+(ave|avenue)\b/gi, "Whyte $1")
     .replace(/\bsouth\s*west\b/gi, "SW")
     .replace(/\bnorth\s*west\b/gi, "NW")
     .replace(/\bsouth\s*east\b/gi, "SE")
@@ -1086,7 +1173,7 @@ function parseVoiceTicketHeuristic(transcript: string) {
   // City & Corridor extraction
   let city = "Edmonton";
   let selectedPresetIdx = 0;
-  if (lower.includes("st albert") || lower.includes("st. albert") || lower.includes("boudreau")) {
+  if (lower.includes("st albert") || lower.includes("st. albert") || lower.includes("saint albert") || lower.includes("boudreau")) {
     city = "St. Albert";
     selectedPresetIdx = 5;
   } else if (lower.includes("sherwood park") || lower.includes("premier way") || lower.includes("strathcona county")) {
@@ -1106,14 +1193,190 @@ function parseVoiceTicketHeuristic(transcript: string) {
     selectedPresetIdx = 3;
   }
 
-  // Street address extraction (supports both digits and normalized spoken digits like "7221 Chivers Place SW")
+  // Street address extraction — supports all Edmonton & Alberta street suffixes, numbered streets/avenues, and explicit "address is ..." cues
   let address = "";
-  const addrRegex = /\b(\d{2,5}\s+[A-Za-z0-9.'\s]{2,28}?\b(?:Ave|Avenue|St|Street|Rd|Road|Dr|Drive|Blvd|Boulevard|Way|Pl|Place|Cres|Crescent|Trail|Tr|Ct|Court|Close|Lane|Ln)\b(?:\s*(?:NW|NE|SW|SE))?)/gi;
-  const addrMatches = Array.from(normalizedWords.matchAll(addrRegex));
-  if (addrMatches.length > 0) {
-    // Prefer the last stated address in case the speaker repeated/corrected the street name
-    const bestAddr = addrMatches[addrMatches.length - 1][1].replace(/\s+/g, " ").trim();
+  const nonStreetWords = /^(?:bed|beds|bedroom|bedrooms|bath|baths|bathroom|bathrooms|hour|hours|hr|hrs|cleaner|cleaners|dollar|dollars|deposit|discount|phone|number|call|calling|is|are|for|with|and|the|at|on|in)$/i;
+  const suffixPattern =
+    "(?:Ave|Avenue|St|Street|Rd|Road|Dr|Drive|Blvd|Boulevard|Way|Pl|Place|Cres|Crescent|Trail|Tr|Ct|Court|Close|Lane|Ln|Gate|Green|Grove|Gardens?|Gdns|Circle|Cir|Cove|Cv|Common|Crossing|Bend|Bay|Heights|Hts|Hill|Hills|Heath|Hollow|Link|Landing|Lndg|Loop|Lookout|Manor|Mews|Meadows?|Mount|Mt|Park|Parkway|Pkwy|Pass|Path|Peak|Point|Pointe|Pt|Promenade|Plateau|Ridge|Rise|Row|Run|Square|Sq|Terrace|Terr|Turn|Valley|View|Vista|Villages?|Villas|Walk|Wynd|Woods|Hwy|Highway)";
+  const addrRegex = new RegExp(
+    `\\b(\\d{1,6}[A-Za-z]?\\s+(?:\\d{1,3}(?:st|nd|rd|th)?|[A-Za-z][A-Za-z0-9.']*?)(?:\\s+(?:\\d{1,3}(?:st|nd|rd|th)?|[A-Za-z][A-Za-z0-9.']*?)){0,2}\\s+${suffixPattern}\\b(?:\\s*(?:NW|NE|SW|SE))?)`,
+    "gi"
+  );
+  const validCandidates: string[] = [];
+  for (const m of normalizedWords.matchAll(addrRegex)) {
+    const rawCandidate = m[1].replace(/\s+/g, " ").trim();
+    const parts = rawCandidate.split(" ");
+    // Make sure the words between house number and street suffix are real street tokens, not filler like "and address is"
+    const middleTokens = parts.slice(1, -1);
+    if (middleTokens.length > 0 && middleTokens.every((w) => !nonStreetWords.test(w) && !/^\d{4,10}$/.test(w))) {
+      validCandidates.push(rawCandidate);
+    }
+  }
+  if (validCandidates.length > 0) {
+    const bestAddr = validCandidates[validCandidates.length - 1];
     address = `${bestAddr}, ${city}, AB`;
+  } else {
+    // Fallback: explicit cue phrase like "address is 7221 Chivers" or "located at 10405 82nd NW"
+    const cueRegex =
+      /(?:address\s+is|street\s+address\s+is|my\s+address\s+is|property\s+is\s+at|located\s+at|live\s+at|lives\s+at|clean\s+at)\s+(\d{1,6}[A-Za-z]?\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,3}(?:\s*(?:NW|NE|SW|SE))?)/gi;
+    const cueMatches = Array.from(normalizedWords.matchAll(cueRegex));
+    if (cueMatches.length > 0) {
+      const rawCue = cueMatches[cueMatches.length - 1][1]
+        .replace(/\b(?:in|for|on|phone|need|needs|want|wants|bedroom|bedrooms|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b.*$/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (rawCue.length >= 4) {
+        address = `${rawCue}, ${city}, AB`;
+      }
+    }
+  }
+
+  // Preferred Date / Day of the Week & Time Window extraction (Edmonton timezone)
+  const edmontonNowParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Edmonton",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const edYear = Number(edmontonNowParts.find((p) => p.type === "year")?.value || 2026);
+  const edMonth = Number(edmontonNowParts.find((p) => p.type === "month")?.value || 10);
+  const edDay = Number(edmontonNowParts.find((p) => p.type === "day")?.value || 19);
+  const baseDateUtc = new Date(Date.UTC(edYear, edMonth - 1, edDay, 12, 0, 0));
+
+  const formatYmd = (d: Date) => {
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+
+  let preferredDate = "";
+  let preferredDayLabel = "";
+  const normLower = normalizedWords.toLowerCase();
+
+  const monthMap: Record<string, number> = {
+    january: 1, jan: 1,
+    february: 2, feb: 2,
+    march: 3, mar: 3,
+    april: 4, apr: 4,
+    may: 5,
+    june: 6, jun: 6,
+    july: 7, jul: 7,
+    august: 8, aug: 8,
+    september: 9, sep: 9, sept: 9,
+    october: 10, oct: 10,
+    november: 11, nov: 11,
+    december: 12, dec: 12,
+  };
+  const monthNamesRegex = "(?:january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)";
+
+  // 1. Explicit ISO date YYYY-MM-DD
+  const isoMatches = Array.from(normalizedWords.matchAll(/\b(202\d-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))\b/g));
+  // 2. Month + Day (e.g., "October 24", "Oct 24th", "November 2nd 2026")
+  const monthDayMatches = Array.from(
+    normalizedWords.matchAll(new RegExp(`\\b(${monthNamesRegex})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:[,\\s]+(202\\d))?\\b`, "gi"))
+  );
+  // 3. Day + of + Month (e.g., "24th of October")
+  const dayMonthMatches = Array.from(
+    normalizedWords.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthNamesRegex})\\b`, "gi"))
+  );
+  // 4. Relative words ("day after tomorrow", "tomorrow", "today")
+  // 5. Day of the week ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+  const weekdayMap: Record<string, number> = {
+    sunday: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+  };
+  const weekdayMatches = Array.from(
+    normalizedWords.matchAll(/\b(?:(this|next|coming|on|for)\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)
+  );
+  // 6. Ordinal day alone ("on the 25th", "for the 28th", "date is the 23rd")
+  const ordinalOnlyMatches = Array.from(
+    normalizedWords.matchAll(/\b(?:on\s+the|for\s+the|date\s+is\s+the|the)\s+(\d{1,2})(?:st|nd|rd|th)\b/gi)
+  );
+
+  if (isoMatches.length > 0) {
+    preferredDate = isoMatches[isoMatches.length - 1][1];
+  } else if (monthDayMatches.length > 0) {
+    const last = monthDayMatches[monthDayMatches.length - 1];
+    const mNum = monthMap[last[1].toLowerCase()] || edMonth;
+    const dNum = Math.min(31, Math.max(1, parseInt(last[2], 10)));
+    let yNum = last[3] ? parseInt(last[3], 10) : edYear;
+    if (!last[3] && mNum < edMonth - 1) yNum += 1;
+    preferredDate = `${yNum}-${String(mNum).padStart(2, "0")}-${String(dNum).padStart(2, "0")}`;
+  } else if (dayMonthMatches.length > 0) {
+    const last = dayMonthMatches[dayMonthMatches.length - 1];
+    const dNum = Math.min(31, Math.max(1, parseInt(last[1], 10)));
+    const mNum = monthMap[last[2].toLowerCase()] || edMonth;
+    let yNum = edYear;
+    if (mNum < edMonth - 1) yNum += 1;
+    preferredDate = `${yNum}-${String(mNum).padStart(2, "0")}-${String(dNum).padStart(2, "0")}`;
+  } else if (/\bday\s+after\s+tomorrow\b/i.test(normLower)) {
+    const d = new Date(baseDateUtc.getTime() + 2 * 86400000);
+    preferredDate = formatYmd(d);
+  } else if (/\btomorrow\b/i.test(normLower)) {
+    const d = new Date(baseDateUtc.getTime() + 1 * 86400000);
+    preferredDate = formatYmd(d);
+  } else if (weekdayMatches.length > 0) {
+    const last = weekdayMatches[weekdayMatches.length - 1];
+    const modifier = (last[1] || "").toLowerCase();
+    const dayName = last[2].toLowerCase();
+    const targetDow = weekdayMap[dayName];
+    const currentDow = baseDateUtc.getUTCDay();
+    let diff = (targetDow - currentDow + 7) % 7;
+    if (diff === 0) {
+      diff = modifier === "next" ? 7 : 0;
+    } else if (modifier === "next" && diff <= 2) {
+      diff += 7;
+    }
+    const d = new Date(baseDateUtc.getTime() + diff * 86400000);
+    preferredDate = formatYmd(d);
+  } else if (ordinalOnlyMatches.length > 0) {
+    const last = ordinalOnlyMatches[ordinalOnlyMatches.length - 1];
+    const dNum = Math.min(31, Math.max(1, parseInt(last[1], 10)));
+    let mNum = edMonth;
+    let yNum = edYear;
+    if (dNum < edDay) {
+      mNum += 1;
+      if (mNum > 12) {
+        mNum = 1;
+        yNum += 1;
+      }
+    }
+    preferredDate = `${yNum}-${String(mNum).padStart(2, "0")}-${String(dNum).padStart(2, "0")}`;
+  } else if (/\b(?:today|tonight|same\s+day)\b/i.test(normLower)) {
+    preferredDate = formatYmd(baseDateUtc);
+  }
+
+  if (preferredDate) {
+    const [py, pm, pd] = preferredDate.split("-").map(Number);
+    if (py && pm && pd) {
+      const dtObj = new Date(Date.UTC(py, pm - 1, pd, 12, 0, 0));
+      preferredDayLabel = dtObj.toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+    }
+  }
+
+  // Time Window extraction
+  let timeWindow = "";
+  let scheduledTime = "";
+  if (/\b(?:morning|8\s*a\.?m\.?|9\s*a\.?m\.?|10\s*a\.?m\.?|11\s*a\.?m\.?)\b/i.test(normLower)) {
+    timeWindow = "Morning (8:00 AM - 12:00 PM)";
+    scheduledTime = "09:00";
+  } else if (/\b(?:afternoon|noon|12\s*p\.?m\.?|1\s*p\.?m\.?|2\s*p\.?m\.?|3\s*p\.?m\.?)\b/i.test(normLower)) {
+    timeWindow = "Afternoon (12:00 PM - 4:00 PM)";
+    scheduledTime = "13:00";
+  } else if (/\b(?:evening|4\s*p\.?m\.?|5\s*p\.?m\.?|6\s*p\.?m\.?|7\s*p\.?m\.?)\b/i.test(normLower)) {
+    timeWindow = "Evening (4:00 PM - 7:00 PM)";
+    scheduledTime = "16:30";
   }
 
   // Customer Name extraction (case-insensitive + conversational Q&A support + duplicate first-name dedupe)
@@ -1121,7 +1384,8 @@ function parseVoiceTicketHeuristic(transcript: string) {
   const stopWords = new Set([
     "calling", "from", "at", "phone", "number", "needs", "need", "wants", "want", "looking", "for",
     "okay", "ok", "and", "what", "whats", "is", "your", "address", "seven", "two", "one", "three",
-    "four", "five", "six", "eight", "nine", "bedroom", "bedrooms", "bathroom", "bathrooms", "clean", "cleaning"
+    "four", "five", "six", "eight", "nine", "bedroom", "bedrooms", "bathroom", "bathrooms", "clean", "cleaning",
+    "today", "tomorrow", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
   ]);
   const namePatterns = [
     /(?:my name is|caller'?s? name is|name is|caller is|client is|customer is|this is)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})/i,
@@ -1183,6 +1447,10 @@ function parseVoiceTicketHeuristic(transcript: string) {
     city,
     bedrooms,
     bathrooms,
+    preferredDate,
+    preferredDayLabel,
+    timeWindow,
+    scheduledTime,
     serviceCategory,
     recommendedHours,
     recommendedCleaners,
@@ -1219,9 +1487,24 @@ app.post("/api/dispatch/parse-voice-ticket", async (req, res) => {
       });
     }
 
+    const todayEdmontonStr = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Edmonton",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const todayWeekdayStr = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Edmonton",
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date());
+
     const promptText = `You are an expert Cleaning Service phone intake & quick quote assistant for TidyUps Cleaning in Edmonton, AB (YEG).
+Current Edmonton Date Today: ${todayEdmontonStr} (${todayWeekdayStr}).
 A dispatcher just recorded a live voice dictation / phone call.
-${audioBase64 ? "IMPORTANT: You have BOTH the recorded voice audio AND the browser live speech-to-text transcript below. Compare the audio recording and the text transcript carefully and merge them into ONE single, complete, accurate client & quote record (do NOT split into two records). If the transcript misheard a street name (e.g. 'child's Place' or 'Shrivers place' for 'Chivers Place SW') or wrote numbers as words ('Seven two two one' -> '7221') or missed the last digit of a phone number that is audible in the audio, use the combined truth from both sources!" : "Analyze the voice dictation transcript below and merge all details into ONE single, complete, accurate client & quote record."}
+${audioBase64 ? "IMPORTANT: You have BOTH the recorded voice audio AND the browser live speech-to-text transcript below. Compare the audio recording and the text transcript carefully and merge them into ONE single, complete, accurate client & quote record (do NOT split into two records). Pay extra attention to the PROPERTY ADDRESS and the PREFERRED DATE / PREFERRED DAY OF THE WEEK! If the speaker repeats or corrects the address or preferred date, always use the latest/most accurate address and date." : "Analyze the voice dictation transcript below and merge all details into ONE single, complete, accurate client & quote record. Pay extra attention to the PROPERTY ADDRESS and the PREFERRED DATE / PREFERRED DAY OF THE WEEK!"}
 
 Live Speech-to-Text Transcript:
 "${transcript}"
@@ -1231,6 +1514,8 @@ ${JSON.stringify({
   customerName: heuristic.customerName || currentForm.customerName || "",
   phone: heuristic.phone || currentForm.customerPhone || "",
   address: heuristic.address || currentForm.serviceAddress || "",
+  preferredDate: heuristic.preferredDate || currentForm.preferredDate || "",
+  timeWindow: heuristic.timeWindow || currentForm.timeWindow || "",
   bedrooms: heuristic.bedrooms,
   bathrooms: heuristic.bathrooms,
 })}
@@ -1239,8 +1524,10 @@ Extract and structure the combined Audio + Transcript into JSON with these field
 - customerName: Client's full name properly capitalized (e.g. "Rachel Macdonald", "Devon Clarke") or empty string if not stated
 - phone: Phone number formatted as (780) XXX-XXXX or empty string if not stated
 - email: Email address if stated or empty string
-- address: Full street address with digits and quadrant if stated (e.g. "7221 Chivers Place SW, Edmonton, AB") or empty string
+- address: Full street address with digits and quadrant if stated (e.g. "7221 Chivers Place SW, Edmonton, AB") or empty string. Convert any spoken numbers ("seventy two twenty one" -> "7221") into digits.
 - city: One of ["Edmonton", "St. Albert", "Sherwood Park", "Leduc", "Spruce Grove"]
+- preferredDate: Preferred service date in YYYY-MM-DD format resolved relative to Today (${todayEdmontonStr}, ${todayWeekdayStr}) if any date or day of the week ("Friday", "this Thursday", "next Monday", "tomorrow", "October 24th", etc.) was mentioned, or empty string if not stated
+- timeWindow: One of ["Morning (8:00 AM - 12:00 PM)", "Afternoon (12:00 PM - 4:00 PM)", "Evening (4:00 PM - 7:00 PM)", "Anytime Today (Urgent)"] if morning/afternoon/evening/time was mentioned, or empty string
 - bedrooms: One of ["1 Bedroom", "2 Bedrooms", "3 Bedrooms", "4 Bedrooms", "5+ Bedrooms"]
 - bathrooms: One of ["1 Bathroom", "1.5 Bathrooms", "2 Bathrooms", "2.5 Bathrooms", "3 Bathrooms", "4+ Bathrooms"]
 - serviceCategory: One of ["Residential Standard Cleaning", "Deep Cleaning & Baseboards", "Move-Out / Turnover Vacate Cleaning", "Move-In Detailed Sanitization", "Post-Renovation HEPA Vacuum & Scrub", "Commercial Office Cleaning"]
@@ -1276,7 +1563,7 @@ Extract and structure the combined Audio + Transcript into JSON with these field
 
     const response = await withTimeout(
       ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: contentsPayload,
         config: {
           responseMimeType: "application/json",
@@ -1288,6 +1575,8 @@ Extract and structure the combined Audio + Transcript into JSON with these field
               email: { type: Type.STRING },
               address: { type: Type.STRING },
               city: { type: Type.STRING },
+              preferredDate: { type: Type.STRING },
+              timeWindow: { type: Type.STRING },
               bedrooms: { type: Type.STRING },
               bathrooms: { type: Type.STRING },
               serviceCategory: { type: Type.STRING },
@@ -1307,6 +1596,8 @@ Extract and structure the combined Audio + Transcript into JSON with these field
             required: [
               "customerName",
               "phone",
+              "address",
+              "preferredDate",
               "bedrooms",
               "bathrooms",
               "serviceCategory",
@@ -1332,6 +1623,8 @@ Extract and structure the combined Audio + Transcript into JSON with these field
       customerName: parsed.customerName || heuristic.customerName,
       phone: parsed.phone || heuristic.phone,
       address: parsed.address || heuristic.address,
+      preferredDate: parsed.preferredDate || heuristic.preferredDate,
+      timeWindow: parsed.timeWindow || heuristic.timeWindow,
       bedrooms: parsed.bedrooms || heuristic.bedrooms,
       bathrooms: parsed.bathrooms || heuristic.bathrooms,
       specificInstructions: parsed.specificInstructions || heuristic.specificInstructions,

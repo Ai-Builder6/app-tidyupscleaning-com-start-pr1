@@ -116,16 +116,16 @@ const QUICK_ADDON_TAGS = [
 
 const SAMPLE_VOICE_PROMPTS = [
   {
-    label: 'Devon Clarke (3 Bed / 2 Bath St. Albert)',
-    text: 'Devon Clarke calling from 9620 144 Ave NW in St. Albert, phone 780-802-4918, email devonclarke@gmail.com. Needs Residential Standard Cleaning for a 3 bedroom 2 bathroom home, 3 hours with 1 cleaner. Please clean inside the oven and wipe baseboards.',
+    label: 'Devon Clarke (3 Bed / 2 Bath • Friday)',
+    text: 'Devon Clarke calling from 9620 144 Ave NW in St. Albert, phone 780-802-4918, email devonclarke@gmail.com. Needs Residential Standard Cleaning for a 3 bedroom 2 bathroom home on Friday morning, 3 hours with 1 cleaner. Please clean inside the oven and wipe baseboards.',
   },
   {
-    label: 'Move-Out Clean (4 Bed / 2.5 Bath Edmonton)',
-    text: 'Customer Sarah Jenkins at 10405 Jasper Ave NW Edmonton, phone 780-555-0144. Move-out cleaning for a 4 bedroom 2.5 bathroom house, 4 hours with 2 cleaners. Inside fridge, inside oven, and all cabinets. Lockbox code is 4482.',
+    label: 'Move-Out Clean (4 Bed / 2.5 Bath • Oct 24)',
+    text: 'Customer Sarah Jenkins, address is 7221 Chivers Place SW Edmonton, phone 780-555-0144. Move-out cleaning for a 4 bedroom 2.5 bathroom house on October 24th afternoon, 4 hours with 2 cleaners. Inside fridge, inside oven, and all cabinets. Lockbox code is 4482.',
   },
   {
-    label: 'Deep Clean (2 Bed / 2 Bath Sherwood Park)',
-    text: 'Client Marcus Vance at 2000 Premier Way Sherwood Park, phone 780-555-0188. Deep cleaning for a 2 bedroom 2 bathroom condo, 3 hours with 1 cleaner. Has one friendly dog, please focus on bathrooms and baseboards.',
+    label: 'Deep Clean (2 Bed / 2 Bath • Next Monday)',
+    text: 'Client Marcus Vance at 2000 Premier Way Sherwood Park, phone 780-555-0188. Deep cleaning for a 2 bedroom 2 bathroom condo for next Monday morning, 3 hours with 1 cleaner. Has one friendly dog, please focus on bathrooms and baseboards.',
   },
 ];
 
@@ -207,9 +207,23 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
   const [flashingFields, setFlashingFields] = useState<Record<string, boolean>>({});
   const [voiceCapturedFields, setVoiceCapturedFields] = useState<Record<string, string>>({});
   const recognitionRef = useRef<any>(null);
+  const shouldKeepRecordingRef = useRef<boolean>(false);
+  const latestTranscriptRef = useRef<string>('');
+  const latestInterimRef = useRef<string>('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const flashTimersRef = useRef<Record<string, any>>({});
+  const topDictationSectionRef = useRef<HTMLDivElement | null>(null);
+  const customerFormSectionRef = useRef<HTMLDivElement | null>(null);
+  const preferredDateSectionRef = useRef<HTMLDivElement | null>(null);
+  const quickMapSectionRef = useRef<HTMLDivElement | null>(null);
+  const [isDateCalendarOpen, setIsDateCalendarOpen] = useState<boolean>(false);
+  const [calendarViewMonth, setCalendarViewMonth] = useState<{ year: number; month: number }>(() => {
+    const todayStr = getEdmontonToday().dateString;
+    const [y, m] = todayStr.split('-').map(Number);
+    return { year: y || 2026, month: (m || 10) - 1 };
+  });
+  const datePickerContainerRef = useRef<HTMLDivElement | null>(null);
   const liveValuesRef = useRef<{
     name: string;
     phone: string;
@@ -218,6 +232,8 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     city: string;
     bedrooms: string;
     bathrooms: string;
+    preferredDate: string;
+    timeWindow: string;
     serviceType: string;
     hours: number;
     crew: string;
@@ -230,11 +246,27 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     city: 'Edmonton',
     bedrooms: '3 Bedrooms',
     bathrooms: '2 Bathrooms',
+    preferredDate: '',
+    timeWindow: 'Morning (8:00 AM - 12:00 PM)',
     serviceType: 'Residential Standard Cleaning',
     hours: 3,
     crew: '1_CLEANER',
     notes: '',
   });
+
+  useEffect(() => {
+    const handleClickOutside = (ev: MouseEvent) => {
+      if (
+        isDateCalendarOpen &&
+        datePickerContainerRef.current &&
+        !datePickerContainerRef.current.contains(ev.target as Node)
+      ) {
+        setIsDateCalendarOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isDateCalendarOpen]);
 
   const triggerFieldHighlight = useCallback((fieldKey: string, capturedLabel?: string) => {
     setFlashingFields((prev) => ({ ...prev, [fieldKey]: true }));
@@ -421,12 +453,93 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
         eight: '8',
         nine: '9',
       };
+      const teenAndTensMap: Record<string, number> = {
+        ten: 10,
+        eleven: 11,
+        twelve: 12,
+        thirteen: 13,
+        fourteen: 14,
+        fifteen: 15,
+        sixteen: 16,
+        seventeen: 17,
+        eighteen: 18,
+        nineteen: 19,
+        twenty: 20,
+        thirty: 30,
+        forty: 40,
+        fifty: 50,
+        sixty: 60,
+        seventy: 70,
+        eighty: 80,
+        ninety: 90,
+      };
+      const ordinalWordMap: Record<string, string> = {
+        first: '1st',
+        second: '2nd',
+        third: '3rd',
+        fourth: '4th',
+        fifth: '5th',
+        sixth: '6th',
+        seventh: '7th',
+        eighth: '8th',
+        ninth: '9th',
+        tenth: '10th',
+        eleventh: '11th',
+        twelfth: '12th',
+        thirteenth: '13th',
+        fourteenth: '14th',
+        fifteenth: '15th',
+        sixteenth: '16th',
+        seventeenth: '17th',
+        eighteenth: '18th',
+        nineteenth: '19th',
+        twentieth: '20th',
+        'twenty-first': '21st',
+        'twenty first': '21st',
+        'twenty-second': '22nd',
+        'twenty second': '22nd',
+        'twenty-third': '23rd',
+        'twenty third': '23rd',
+        'twenty-fourth': '24th',
+        'twenty fourth': '24th',
+        'twenty-fifth': '25th',
+        'twenty fifth': '25th',
+        'twenty-sixth': '26th',
+        'twenty sixth': '26th',
+        'twenty-seventh': '27th',
+        'twenty seventh': '27th',
+        'twenty-eighth': '28th',
+        'twenty eighth': '28th',
+        'twenty-ninth': '29th',
+        'twenty ninth': '29th',
+        thirtieth: '30th',
+        'thirty-first': '31st',
+        'thirty first': '31st',
+      };
 
-      const normalized = t
-        .replace(/\b(one|two|three|four|1|2|3|4)\s+and\s+a\s+half\b/gi, (_, d) => {
-          const base = singleDigitWordMap[String(d).toLowerCase()] || d;
-          return `${base}.5`;
-        })
+      let normalized = t.replace(/\b(one|two|three|four|1|2|3|4)\s+and\s+a\s+half\b/gi, (_, d) => {
+        const base = singleDigitWordMap[String(d).toLowerCase()] || d;
+        return `${base}.5`;
+      });
+
+      for (const [word, ord] of Object.entries(ordinalWordMap)) {
+        const rx = new RegExp(`\\b${word}\\b`, 'gi');
+        normalized = normalized.replace(rx, ord);
+      }
+
+      normalized = normalized
+        .replace(
+          /\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\s-]+(one|two|three|four|five|six|seven|eight|nine)\b/gi,
+          (_, tensW, unitW) => {
+            const tensVal = teenAndTensMap[String(tensW).toLowerCase()] || 0;
+            const unitVal = Number(singleDigitWordMap[String(unitW).toLowerCase()] || 0);
+            return String(tensVal + unitVal);
+          }
+        )
+        .replace(
+          /\b(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b/gi,
+          (m) => String(teenAndTensMap[m.toLowerCase()] ?? m)
+        )
         .replace(
           /\b(?:(zero|oh|one|two|three|four|five|six|seven|eight|nine)(?:[\s-]+|$)){2,10}/gi,
           (seq) => {
@@ -440,8 +553,10 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
           }
         )
         .replace(/\b(one|two|three|four|five|six|seven|eight|nine)\b/gi, (m) => singleDigitWordMap[m.toLowerCase()] || m)
+        .replace(/\b(\d{2})\s+(\d{2})\s+([A-Za-z]{3,})/g, '$1$2 $3')
         .replace(/\b(?:child'?s|shrivers?|shivers?)\s+place\b/gi, 'Chivers Place')
         .replace(/\b(?:child'?s|shrivers?|shivers?)\s+way\b/gi, 'Chivers Way')
+        .replace(/\bwhite\s+(ave|avenue)\b/gi, 'Whyte $1')
         .replace(/\bsouth\s*west\b/gi, 'SW')
         .replace(/\bnorth\s*west\b/gi, 'NW')
         .replace(/\bsouth\s*east\b/gi, 'SE')
@@ -455,6 +570,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
         'calling', 'from', 'at', 'phone', 'number', 'needs', 'need', 'wants', 'want', 'looking', 'for',
         'okay', 'ok', 'and', 'what', 'whats', 'is', 'your', 'address', 'seven', 'two', 'one', 'three',
         'four', 'five', 'six', 'eight', 'nine', 'bedroom', 'bedrooms', 'bathroom', 'bathrooms', 'clean', 'cleaning',
+        'today', 'tomorrow', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
       ]);
       const namePatterns = [
         /(?:my name is|caller'?s? name is|name is|caller is|client is|customer is|this is)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})/i,
@@ -512,7 +628,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
 
       // 4. Live City detection
       let detectedCity = liveValuesRef.current.city || 'Edmonton';
-      if (lower.includes('st albert') || lower.includes('st. albert') || lower.includes('boudreau')) {
+      if (lower.includes('st albert') || lower.includes('st. albert') || lower.includes('saint albert') || lower.includes('boudreau')) {
         detectedCity = 'St. Albert';
       } else if (lower.includes('sherwood park') || lower.includes('premier way')) {
         detectedCity = 'Sherwood Park';
@@ -527,12 +643,40 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
         triggerFieldHighlight('city', detectedCity);
       }
 
-      // 5. Live Street Address detection
-      const addrRegex =
-        /\b(\d{2,5}\s+[A-Za-z0-9.'\s]{2,28}?\b(?:Ave|Avenue|St|Street|Rd|Road|Dr|Drive|Blvd|Boulevard|Way|Pl|Place|Cres|Crescent|Trail|Tr|Ct|Court|Close|Lane|Ln)\b(?:\s*(?:NW|NE|SW|SE))?)/gi;
-      const addrMatches = Array.from(normalized.matchAll(addrRegex));
-      if (addrMatches.length > 0) {
-        const bestStreet = addrMatches[addrMatches.length - 1][1].replace(/\s+/g, ' ').trim();
+      // 5. Live Street Address detection (All Edmonton/Alberta street types + numbered streets/avenues + cue phrases)
+      const nonStreetWords =
+        /^(?:bed|beds|bedroom|bedrooms|bath|baths|bathroom|bathrooms|hour|hours|hr|hrs|cleaner|cleaners|dollar|dollars|deposit|discount|phone|number|call|calling|is|are|for|with|and|the|at|on|in)$/i;
+      const suffixPattern =
+        '(?:Ave|Avenue|St|Street|Rd|Road|Dr|Drive|Blvd|Boulevard|Way|Pl|Place|Cres|Crescent|Trail|Tr|Ct|Court|Close|Lane|Ln|Gate|Green|Grove|Gardens?|Gdns|Circle|Cir|Cove|Cv|Common|Crossing|Bend|Bay|Heights|Hts|Hill|Hills|Heath|Hollow|Link|Landing|Lndg|Loop|Lookout|Manor|Mews|Meadows?|Mount|Mt|Park|Parkway|Pkwy|Pass|Path|Peak|Point|Pointe|Pt|Promenade|Plateau|Ridge|Rise|Row|Run|Square|Sq|Terrace|Terr|Turn|Valley|View|Vista|Villages?|Villas|Walk|Wynd|Woods|Hwy|Highway)';
+      const addrRegex = new RegExp(
+        `\\b(\\d{1,6}[A-Za-z]?\\s+(?:\\d{1,3}(?:st|nd|rd|th)?|[A-Za-z][A-Za-z0-9.']*?)(?:\\s+(?:\\d{1,3}(?:st|nd|rd|th)?|[A-Za-z][A-Za-z0-9.']*?)){0,2}\\s+${suffixPattern}\\b(?:\\s*(?:NW|NE|SW|SE))?)`,
+        'gi'
+      );
+      const validAddrCandidates: string[] = [];
+      for (const m of normalized.matchAll(addrRegex)) {
+        const rawCandidate = m[1].replace(/\s+/g, ' ').trim();
+        const parts = rawCandidate.split(' ');
+        const middleTokens = parts.slice(1, -1);
+        if (middleTokens.length > 0 && middleTokens.every((w) => !nonStreetWords.test(w) && !/^\d{4,10}$/.test(w))) {
+          validAddrCandidates.push(rawCandidate);
+        }
+      }
+      if (validAddrCandidates.length === 0) {
+        const cueRegex =
+          /(?:address\s+is|street\s+address\s+is|my\s+address\s+is|property\s+is\s+at|located\s+at|live\s+at|lives\s+at|clean\s+at)\s+(\d{1,6}[A-Za-z]?\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,3}(?:\s*(?:NW|NE|SW|SE))?)/gi;
+        const cueMatches = Array.from(normalized.matchAll(cueRegex));
+        if (cueMatches.length > 0) {
+          const rawCue = cueMatches[cueMatches.length - 1][1]
+            .replace(/\b(?:in|for|on|phone|need|needs|want|wants|bedroom|bedrooms|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b.*$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (rawCue.length >= 4) {
+            validAddrCandidates.push(rawCue);
+          }
+        }
+      }
+      if (validAddrCandidates.length > 0) {
+        const bestStreet = validAddrCandidates[validAddrCandidates.length - 1];
         const fullAddr = `${bestStreet}, ${detectedCity}, AB`;
         if (fullAddr !== liveValuesRef.current.address) {
           liveValuesRef.current.address = fullAddr;
@@ -541,6 +685,145 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
           triggerFieldHighlight('address', bestStreet);
           newlyHighlighted.push(`Address: ${bestStreet}`);
         }
+      }
+
+      // 5B. Live Preferred Date / Preferred Day & Time Window detection
+      const todayYmd = liveToday.dateString || getEdmontonToday().dateString;
+      const [edYear, edMonth, edDay] = todayYmd.split('-').map(Number);
+      const baseDateUtc = new Date(Date.UTC(edYear || 2026, (edMonth || 10) - 1, edDay || 19, 12, 0, 0));
+      const formatYmd = (d: Date) => {
+        const y = d.getUTCFullYear();
+        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(d.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      };
+      const monthMap: Record<string, number> = {
+        january: 1, jan: 1,
+        february: 2, feb: 2,
+        march: 3, mar: 3,
+        april: 4, apr: 4,
+        may: 5,
+        june: 6, jun: 6,
+        july: 7, jul: 7,
+        august: 8, aug: 8,
+        september: 9, sep: 9, sept: 9,
+        october: 10, oct: 10,
+        november: 11, nov: 11,
+        december: 12, dec: 12,
+      };
+      const monthNamesRegex =
+        '(?:january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)';
+      const isoMatches = Array.from(normalized.matchAll(/\b(202\d-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))\b/g));
+      const monthDayMatches = Array.from(
+        normalized.matchAll(new RegExp(`\\b(${monthNamesRegex})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:[,\\s]+(202\\d))?\\b`, 'gi'))
+      );
+      const dayMonthMatches = Array.from(
+        normalized.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthNamesRegex})\\b`, 'gi'))
+      );
+      const weekdayMap: Record<string, number> = {
+        sunday: 0,
+        monday: 1,
+        tuesday: 2,
+        wednesday: 3,
+        thursday: 4,
+        friday: 5,
+        saturday: 6,
+      };
+      const weekdayMatches = Array.from(
+        normalized.matchAll(/\b(?:(this|next|coming|on|for)\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/gi)
+      );
+      const ordinalOnlyMatches = Array.from(
+        normalized.matchAll(/\b(?:on\s+the|for\s+the|date\s+is\s+the|preferred\s+date\s+is\s+the|the)\s+(\d{1,2})(?:st|nd|rd|th)\b/gi)
+      );
+
+      let detectedDate = '';
+      if (isoMatches.length > 0) {
+        detectedDate = isoMatches[isoMatches.length - 1][1];
+      } else if (monthDayMatches.length > 0) {
+        const last = monthDayMatches[monthDayMatches.length - 1];
+        const mNum = monthMap[last[1].toLowerCase()] || edMonth;
+        const dNum = Math.min(31, Math.max(1, parseInt(last[2], 10)));
+        let yNum = last[3] ? parseInt(last[3], 10) : edYear;
+        if (!last[3] && mNum < edMonth - 1) yNum += 1;
+        detectedDate = `${yNum}-${String(mNum).padStart(2, '0')}-${String(dNum).padStart(2, '0')}`;
+      } else if (dayMonthMatches.length > 0) {
+        const last = dayMonthMatches[dayMonthMatches.length - 1];
+        const dNum = Math.min(31, Math.max(1, parseInt(last[1], 10)));
+        const mNum = monthMap[last[2].toLowerCase()] || edMonth;
+        let yNum = edYear;
+        if (mNum < edMonth - 1) yNum += 1;
+        detectedDate = `${yNum}-${String(mNum).padStart(2, '0')}-${String(dNum).padStart(2, '0')}`;
+      } else if (/\bday\s+after\s+tomorrow\b/i.test(lower)) {
+        detectedDate = formatYmd(new Date(baseDateUtc.getTime() + 2 * 86400000));
+      } else if (/\btomorrow\b/i.test(lower)) {
+        detectedDate = formatYmd(new Date(baseDateUtc.getTime() + 1 * 86400000));
+      } else if (weekdayMatches.length > 0) {
+        const last = weekdayMatches[weekdayMatches.length - 1];
+        const modifier = (last[1] || '').toLowerCase();
+        const dayName = last[2].toLowerCase();
+        const targetDow = weekdayMap[dayName];
+        const currentDow = baseDateUtc.getUTCDay();
+        let diff = (targetDow - currentDow + 7) % 7;
+        if (diff === 0) {
+          diff = modifier === 'next' ? 7 : 0;
+        } else if (modifier === 'next' && diff <= 2) {
+          diff += 7;
+        }
+        detectedDate = formatYmd(new Date(baseDateUtc.getTime() + diff * 86400000));
+      } else if (ordinalOnlyMatches.length > 0) {
+        const last = ordinalOnlyMatches[ordinalOnlyMatches.length - 1];
+        const dNum = Math.min(31, Math.max(1, parseInt(last[1], 10)));
+        let mNum = edMonth;
+        let yNum = edYear;
+        if (dNum < edDay) {
+          mNum += 1;
+          if (mNum > 12) {
+            mNum = 1;
+            yNum += 1;
+          }
+        }
+        detectedDate = `${yNum}-${String(mNum).padStart(2, '0')}-${String(dNum).padStart(2, '0')}`;
+      } else if (/\b(?:today|tonight|same\s+day)\b/i.test(lower)) {
+        detectedDate = formatYmd(baseDateUtc);
+      }
+
+      if (detectedDate && detectedDate !== liveValuesRef.current.preferredDate) {
+        liveValuesRef.current.preferredDate = detectedDate;
+        setScheduledDate(detectedDate);
+        setSelectedQuickMapDate(detectedDate);
+        const [py, pm, pd] = detectedDate.split('-').map(Number);
+        const prettyDay =
+          py && pm && pd
+            ? new Date(Date.UTC(py, pm - 1, pd, 12, 0, 0)).toLocaleDateString('en-US', {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                timeZone: 'UTC',
+              })
+            : detectedDate;
+        triggerFieldHighlight('preferredDate', prettyDay);
+        newlyHighlighted.push(`Date: ${prettyDay}`);
+      }
+
+      // Live Time Window detection
+      let nextTimeWindow = '';
+      let nextScheduledTime = '';
+      if (/\b(?:morning|8\s*a\.?m\.?|9\s*a\.?m\.?|10\s*a\.?m\.?|11\s*a\.?m\.?)\b/i.test(lower)) {
+        nextTimeWindow = 'Morning (8:00 AM - 12:00 PM)';
+        nextScheduledTime = '09:00';
+      } else if (/\b(?:afternoon|noon|12\s*p\.?m\.?|1\s*p\.?m\.?|2\s*p\.?m\.?|3\s*p\.?m\.?)\b/i.test(lower)) {
+        nextTimeWindow = 'Afternoon (12:00 PM - 4:00 PM)';
+        nextScheduledTime = '13:00';
+      } else if (/\b(?:evening|4\s*p\.?m\.?|5\s*p\.?m\.?|6\s*p\.?m\.?|7\s*p\.?m\.?)\b/i.test(lower)) {
+        nextTimeWindow = 'Evening (4:00 PM - 7:00 PM)';
+        nextScheduledTime = '16:30';
+      }
+      if (nextTimeWindow && nextTimeWindow !== liveValuesRef.current.timeWindow) {
+        liveValuesRef.current.timeWindow = nextTimeWindow;
+        setTimeWindow(nextTimeWindow);
+        if (nextScheduledTime) setScheduledTime(nextScheduledTime);
+        triggerFieldHighlight('timeWindow', nextTimeWindow.split(' ')[0]);
+        newlyHighlighted.push(`Time: ${nextTimeWindow.split(' ')[0]}`);
       }
 
       // 6. Live Bedrooms & Bathrooms detection
@@ -677,7 +960,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
         setVoiceStatusMsg(`⚡ Live Filled: ${newlyHighlighted.join(' • ')}`);
       }
     },
-    [geocodeAddressOnQuickMap, localCatalog, triggerFieldHighlight]
+    [geocodeAddressOnQuickMap, liveToday.dateString, localCatalog, triggerFieldHighlight]
   );
 
   // Convert recorded audio Blob to base64 string for dual Audio + Transcript comparison
@@ -696,13 +979,14 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
   // Parse voice transcript + parallel recorded audio (Dual-Source Audio + Transcript Reconciliation)
   const handleExtractFromTranscript = useCallback(
     async (rawText?: string, recordedAudioBlob?: Blob | null) => {
-      const textToParse = (rawText ?? voiceTranscript).trim();
+      const combinedCurrent = `${latestTranscriptRef.current || voiceTranscript} ${latestInterimRef.current || interimTranscript}`.trim();
+      const textToParse = (rawText ?? combinedCurrent).trim();
       if (!textToParse && !recordedAudioBlob) {
         setVoiceStatusMsg('Please speak or type caller details first.');
         return;
       }
 
-      // Immediately run client-side live extraction so blocks light up right away
+      // Immediately run client-side live extraction so Address, Preferred Date, and all blocks light up right away
       if (textToParse) {
         applyLiveSpeechExtraction(textToParse, true);
       }
@@ -710,8 +994,8 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
       setIsParsingVoice(true);
       setVoiceStatusMsg(
         recordedAudioBlob
-          ? 'Comparing Recorded Audio + Live Transcript to merge into 1 complete client...'
-          : 'Extracting & verifying caller name, phone, address, bedrooms, bathrooms & cleaning details...'
+          ? 'Comparing Recorded Audio + Live Transcript to merge Address, Date & Client fields...'
+          : 'Comparing & filling Name, Phone, Address, Preferred Date, Bedrooms & Bathrooms...'
       );
 
       try {
@@ -733,6 +1017,8 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
               customerName: liveValuesRef.current.name || customerName,
               customerPhone: liveValuesRef.current.phone || customerPhone,
               serviceAddress: liveValuesRef.current.address || serviceAddress,
+              preferredDate: liveValuesRef.current.preferredDate || scheduledDate,
+              timeWindow: liveValuesRef.current.timeWindow || timeWindow,
               bedrooms: liveValuesRef.current.bedrooms || bedrooms,
               bathrooms: liveValuesRef.current.bathrooms || bathrooms,
             },
@@ -766,6 +1052,29 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
             setServiceAddress(data.address);
             geocodeAddressOnQuickMap(data.address);
             triggerFieldHighlight('address', data.address);
+          }
+          if (data.preferredDate) {
+            liveValuesRef.current.preferredDate = data.preferredDate;
+            setScheduledDate(data.preferredDate);
+            setSelectedQuickMapDate(data.preferredDate);
+            const [py, pm, pd] = String(data.preferredDate).split('-').map(Number);
+            const prettyLabel =
+              data.preferredDayLabel ||
+              (py && pm && pd
+                ? new Date(Date.UTC(py, pm - 1, pd, 12, 0, 0)).toLocaleDateString('en-US', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    timeZone: 'UTC',
+                  })
+                : data.preferredDate);
+            triggerFieldHighlight('preferredDate', prettyLabel);
+          }
+          if (data.timeWindow) {
+            liveValuesRef.current.timeWindow = data.timeWindow;
+            setTimeWindow(data.timeWindow);
+            if (data.scheduledTime) setScheduledTime(data.scheduledTime);
+            triggerFieldHighlight('timeWindow', String(data.timeWindow).split(' ')[0]);
           }
           if (data.bedrooms) {
             liveValuesRef.current.bedrooms = data.bedrooms;
@@ -868,9 +1177,9 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
             setReconciliationNote(data.reconciliationSummary);
           }
           setVoiceStatusMsg(
-            `✓ Reconciled into 1 Complete Client: ${data.customerName || liveValuesRef.current.name || 'Caller'} • ${
-              data.bedrooms || bedrooms
-            } / ${data.bathrooms || bathrooms} • ${data.address || liveValuesRef.current.address || city}`
+            `✓ Reconciled: ${data.customerName || liveValuesRef.current.name || 'Caller'} • ${
+              data.address || liveValuesRef.current.address || city
+            } • ${data.preferredDayLabel || data.preferredDate || liveValuesRef.current.preferredDate || scheduledDate}`
           );
         }
       } catch (err: any) {
@@ -881,9 +1190,12 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     },
     [
       voiceTranscript,
+      interimTranscript,
       customerName,
       customerPhone,
       serviceAddress,
+      scheduledDate,
+      timeWindow,
       bedrooms,
       bathrooms,
       serviceType,
@@ -898,6 +1210,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
   // Toggle Web Speech API live microphone dictation + Parallel MediaRecorder Audio Capture
   const handleToggleVoiceDictation = () => {
     if (isRecording) {
+      shouldKeepRecordingRef.current = false;
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
@@ -905,6 +1218,16 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
       }
       setIsRecording(false);
       playVoiceChime('stop');
+
+      // Merge any remaining interim speech into final transcript so the last words (address/date) are never lost
+      const fullFinalTranscript = `${latestTranscriptRef.current || voiceTranscript} ${latestInterimRef.current || interimTranscript}`.trim();
+      if (fullFinalTranscript) {
+        latestTranscriptRef.current = fullFinalTranscript;
+        latestInterimRef.current = '';
+        setVoiceTranscript(fullFinalTranscript);
+        setInterimTranscript('');
+        applyLiveSpeechExtraction(fullFinalTranscript, true);
+      }
 
       // Stop parallel MediaRecorder and compare recorded audio + live transcript together
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -918,17 +1241,17 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
             recorder.stream.getTracks().forEach((track) => track.stop());
           } catch {}
           setHasParallelAudio(Boolean(audioBlob && audioBlob.size > 0));
-          handleExtractFromTranscript(voiceTranscript, audioBlob);
+          handleExtractFromTranscript(fullFinalTranscript, audioBlob);
         };
         try {
           recorder.stop();
         } catch {
-          if (voiceTranscript.trim()) {
-            handleExtractFromTranscript(voiceTranscript, null);
+          if (fullFinalTranscript) {
+            handleExtractFromTranscript(fullFinalTranscript, null);
           }
         }
-      } else if (voiceTranscript.trim()) {
-        handleExtractFromTranscript(voiceTranscript, null);
+      } else if (fullFinalTranscript) {
+        handleExtractFromTranscript(fullFinalTranscript, null);
       }
       return;
     }
@@ -937,12 +1260,16 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) {
       setVoiceStatusMsg(
-        'Browser microphone API not detected — type or paste your dictation in the box below and click "AI Fill Form Blanks".'
+        'Browser microphone API not detected — type or paste your dictation in the box below and click "Compare & Fill Blanks".'
       );
       return;
     }
 
     try {
+      shouldKeepRecordingRef.current = true;
+      latestTranscriptRef.current = voiceTranscript;
+      latestInterimRef.current = '';
+
       // 1. Start parallel MediaRecorder audio stream so we can compare Audio + Transcript
       audioChunksRef.current = [];
       setHasParallelAudio(false);
@@ -966,18 +1293,18 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
           .catch(() => {});
       }
 
-      // 2. Start live Web Speech API recognition with real-time field extraction & green block highlighting
+      // 2. Start live Web Speech API recognition with auto-restart on pause & real-time green block highlighting
       const recognition = new SpeechRec();
       recognition.continuous = true;
       recognition.interimResults = true;
+      recognition.maxAlternatives = 3;
       recognition.lang = 'en-CA';
 
       recognition.onstart = () => {
         setIsRecording(true);
         setVoiceStatusMsg(
-          'Listening live (Audio + Transcript active)... Each field block will light up bright green as you speak!'
+          '🎙️ Listening live (Continuous Attention Active)... Speak Name, Phone, Address, Preferred Day/Date, Bedrooms & Bathrooms!'
         );
-        playVoiceChime('start');
       };
 
       recognition.onresult = (event: any) => {
@@ -991,29 +1318,43 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
             interimChunk += t;
           }
         }
-        setVoiceTranscript((prev) => {
-          const updated = finalChunk ? `${prev} ${finalChunk}`.trim() : prev;
-          const combinedLiveStream = `${updated} ${interimChunk}`.trim();
-          if (combinedLiveStream) {
-            applyLiveSpeechExtraction(combinedLiveStream, Boolean(finalChunk));
-          }
-          return updated;
-        });
+        const prevBase = latestTranscriptRef.current;
+        const updated = finalChunk ? `${prevBase} ${finalChunk}`.trim() : prevBase;
+        latestTranscriptRef.current = updated;
+        latestInterimRef.current = interimChunk;
+
+        const combinedLiveStream = `${updated} ${interimChunk}`.trim();
+        if (combinedLiveStream) {
+          applyLiveSpeechExtraction(combinedLiveStream, Boolean(finalChunk));
+        }
+        setVoiceTranscript(updated);
         setInterimTranscript(interimChunk);
       };
 
-      recognition.onerror = () => {
-        setIsRecording(false);
+      recognition.onerror = (ev: any) => {
+        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+          shouldKeepRecordingRef.current = false;
+          setIsRecording(false);
+        }
       };
 
       recognition.onend = () => {
+        // Automatically restart if the user hasn't clicked Stop so pauses never cut off dictation
+        if (shouldKeepRecordingRef.current) {
+          try {
+            recognition.start();
+            return;
+          } catch {}
+        }
         setIsRecording(false);
         setInterimTranscript('');
       };
 
       recognitionRef.current = recognition;
+      playVoiceChime('start');
       recognition.start();
     } catch {
+      shouldKeepRecordingRef.current = false;
       setIsRecording(false);
     }
   };
@@ -1542,6 +1883,8 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
     setSelectedAddons([]);
     setQuoteNotes('');
     setVoiceTranscript('');
+    latestTranscriptRef.current = '';
+    latestInterimRef.current = '';
     setDiscountAmount(0);
     setDepositAmount(50);
     setFeedbackNotice(null);
@@ -1557,6 +1900,8 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
       city: 'Edmonton',
       bedrooms: '3 Bedrooms',
       bathrooms: '2 Bathrooms',
+      preferredDate: '',
+      timeWindow: 'Morning (8:00 AM - 12:00 PM)',
       serviceType: 'Residential Standard Cleaning',
       hours: 3,
       crew: '1_CLEANER',
@@ -1574,9 +1919,9 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
   const secondPinPos = projectMapCoord(secondCoords.lat, secondCoords.lng);
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0d0f17] text-slate-100 font-sans p-4 sm:p-6 lg:p-8 space-y-6 animate-fadeIn min-h-[calc(100vh-4rem)]">
+    <div className="flex-1 overflow-y-auto bg-[#0d0f17] text-slate-100 font-sans p-4 sm:p-6 lg:p-8 pb-32 space-y-6 animate-fadeIn min-h-[calc(100vh-4rem)]">
       {/* Top Banner & Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-slate-800/80">
+      <div ref={topDictationSectionRef} className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-slate-800/80">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl bg-gradient-to-tr from-pink-600 via-fuchsia-600 to-purple-600 text-white shadow-lg">
             <Mic className="w-6 h-6" />
@@ -1823,12 +2168,12 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
       {/* ─────────────────────────────────────────────────────────────────────────────
           SECTION 2: MAIN 12-COLUMN WORKSPACE (REQUEST FORM + QUICK QUOTE + QUICK MAP)
          ───────────────────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div ref={customerFormSectionRef} className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT COLUMN (7 Cols): Customer Request & Intake Form (With Bedrooms, Bathrooms & Specific Info) */}
-        <div className="lg:col-span-7 bg-[#121520] border border-slate-800/90 rounded-3xl p-5 sm:p-6 space-y-5 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-pink-500 via-fuchsia-500 to-purple-600" />
+        <div className="lg:col-span-7 bg-[#121520] border border-slate-800/90 rounded-3xl p-5 sm:p-6 space-y-5 shadow-2xl relative">
+          <div className="absolute top-0 left-0 right-0 h-1.5 rounded-t-3xl bg-gradient-to-r from-pink-500 via-fuchsia-500 to-purple-600" />
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
             <div>
               <span className="text-[10px] font-bold text-pink-400 uppercase tracking-wider block">
                 Step 2 • Customer Request &amp; Property Intake Form
@@ -1838,9 +2183,33 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                 <span>Request Your Cleaning &amp; Property Details</span>
               </h2>
             </div>
-            <span className="text-xs text-slate-400">
-              1 Unified Client + Quote Synced to Jobber
-            </span>
+
+            {/* Inline Quick Voice Dictation & Compare Buttons right inside Step 2 so no scrolling is needed */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleToggleVoiceDictation}
+                className={`px-3 py-1.5 rounded-xl font-extrabold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 ${
+                  isRecording
+                    ? 'bg-rose-600 hover:bg-rose-700 text-white ring-2 ring-rose-400/50 animate-pulse'
+                    : 'bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-95 text-white'
+                }`}
+                title="Start or Stop Live Voice Dictation without scrolling to the top"
+              >
+                {isRecording ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                <span>{isRecording ? 'Stop & Reconcile' : '🎙️ Voice Dictate'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={isParsingVoice || (!voiceTranscript.trim() && !interimTranscript.trim())}
+                onClick={() => handleExtractFromTranscript()}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95"
+                title="Compare Audio & Transcript and Fill All Blanks"
+              >
+                <Wand2 className="w-3.5 h-3.5" />
+                <span>{isParsingVoice ? 'Comparing...' : 'Compare & Fill Blanks'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Caller Intelligence Banner */}
@@ -2283,36 +2652,269 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
             </div>
           )}
 
-          {/* Timing & Cleaner Assignment Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                Preferred Date
-              </label>
-              <div className="relative">
-                <Calendar className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="date"
-                  value={scheduledDate}
-                  onChange={(e) => setScheduledDate(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 bg-[#171b29] border border-slate-700/80 rounded-xl text-xs text-white focus:outline-none focus:border-pink-500"
-                />
+          {/* Timing & Cleaner Assignment Row (With Interactive Pop-Up Calendar & Voice Fill Highlight) */}
+          <div ref={preferredDateSectionRef} className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            {/* PREFERRED DATE BLOCK WITH POP-UP CALENDAR */}
+            <div
+              ref={datePickerContainerRef}
+              className={`relative p-2.5 rounded-2xl border transition-all duration-300 ${
+                flashingFields.preferredDate
+                  ? 'bg-[#00ff66]/25 border-[#00ff66] ring-4 ring-[#00ff66]/50 shadow-[0_0_28px_rgba(0,255,102,0.6)] scale-[1.02]'
+                  : voiceCapturedFields.preferredDate
+                  ? 'bg-emerald-950/40 border-[#00ff66]/70 shadow-[0_0_14px_rgba(0,255,102,0.22)]'
+                  : 'bg-[#151926]/60 border-slate-800/80'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-200">
+                  Preferred Date / Day <span className="text-pink-500">*</span>
+                </label>
+                {voiceCapturedFields.preferredDate ? (
+                  <span className="px-1.5 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase tracking-wider shadow-xs">
+                    {flashingFields.preferredDate ? '⚡ LIVE FILLING DATE' : `✓ ${voiceCapturedFields.preferredDate}`}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const [y, m] = (scheduledDate || liveToday.dateString).split('-').map(Number);
+                      if (y && m) setCalendarViewMonth({ year: y, month: m - 1 });
+                      setIsDateCalendarOpen((prev) => !prev);
+                    }}
+                    className="text-[10px] font-extrabold text-pink-400 hover:text-pink-300 underline cursor-pointer"
+                  >
+                    📅 Open Calendar
+                  </button>
+                )}
               </div>
+
+              {/* Clickable Calendar Trigger Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const [y, m] = (scheduledDate || liveToday.dateString).split('-').map(Number);
+                  if (y && m) setCalendarViewMonth({ year: y, month: m - 1 });
+                  setIsDateCalendarOpen((prev) => !prev);
+                }}
+                className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 transition-all cursor-pointer ${
+                  voiceCapturedFields.preferredDate
+                    ? 'bg-[#091f14] border-2 border-[#00ff66] text-[#6bffa3]'
+                    : isDateCalendarOpen
+                    ? 'bg-[#1e2336] border-2 border-pink-500 text-white shadow-lg'
+                    : 'bg-[#171b29] border border-slate-700/80 text-white hover:border-pink-500/70'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Calendar className={`w-4 h-4 shrink-0 ${voiceCapturedFields.preferredDate ? 'text-[#00ff66]' : 'text-pink-400'}`} />
+                  <span className="truncate">
+                    {(() => {
+                      const [y, m, d] = (scheduledDate || liveToday.dateString).split('-').map(Number);
+                      if (!y || !m || !d) return scheduledDate;
+                      const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+                      return dt.toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        timeZone: 'UTC',
+                      });
+                    })()}
+                  </span>
+                </div>
+                <span className="px-1.5 py-0.5 rounded bg-pink-500/20 border border-pink-500/40 text-[10px] font-extrabold text-pink-300 shrink-0">
+                  {isDateCalendarOpen ? 'Close ▲' : 'Pick ▼'}
+                </span>
+              </button>
+
+              {/* Interactive Pop-Up Calendar Picker */}
+              {isDateCalendarOpen && (
+                <div className="absolute left-0 top-full mt-2 z-50 w-[310px] sm:w-[335px] rounded-2xl bg-[#131724] border-2 border-pink-500/80 shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-3.5 space-y-3 animate-fadeIn">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="text-xs font-extrabold text-white flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-pink-400" />
+                      <span>Pick Preferred Cleaning Date</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsDateCalendarOpen(false)}
+                      className="text-xs font-black text-slate-400 hover:text-white px-1.5 py-0.5 rounded bg-slate-800 cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* Quick 1-Click Day Pills (Today, Tomorrow, Upcoming Weekdays) */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Quick Pick Day:
+                    </span>
+                    <div className="grid grid-cols-4 gap-1">
+                      {Array.from({ length: 8 }).map((_, offset) => {
+                        const [ty, tm, td] = (liveToday.dateString || '2026-10-19').split('-').map(Number);
+                        const dObj = new Date(Date.UTC(ty, tm - 1, td, 12, 0, 0) + offset * 86400000);
+                        const ymd = `${dObj.getUTCFullYear()}-${String(dObj.getUTCMonth() + 1).padStart(2, '0')}-${String(
+                          dObj.getUTCDate()
+                        ).padStart(2, '0')}`;
+                        const shortLabel =
+                          offset === 0
+                            ? 'Today'
+                            : offset === 1
+                            ? 'Tomorrow'
+                            : dObj.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
+                        const isSel = scheduledDate === ymd;
+                        return (
+                          <button
+                            key={ymd}
+                            type="button"
+                            onClick={() => {
+                              setScheduledDate(ymd);
+                              setSelectedQuickMapDate(ymd);
+                              liveValuesRef.current.preferredDate = ymd;
+                              setIsDateCalendarOpen(false);
+                            }}
+                            className={`px-1.5 py-1.5 rounded-lg text-[10px] font-extrabold border transition-all cursor-pointer text-center truncate ${
+                              isSel
+                                ? 'bg-pink-600 text-white border-pink-400 shadow-sm'
+                                : 'bg-[#1b2032] text-slate-200 border-slate-700 hover:border-pink-500/60'
+                            }`}
+                          >
+                            {shortLabel}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Month / Year Header & Prev / Next Controls */}
+                  <div className="flex items-center justify-between bg-[#1b2032] px-2.5 py-1.5 rounded-xl border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCalendarViewMonth((prev) =>
+                          prev.month === 0 ? { year: prev.year - 1, month: 11 } : { year: prev.year, month: prev.month - 1 }
+                        )
+                      }
+                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-black cursor-pointer"
+                    >
+                      &larr;
+                    </button>
+                    <span className="text-xs font-extrabold text-white">
+                      {new Date(Date.UTC(calendarViewMonth.year, calendarViewMonth.month, 1, 12, 0, 0)).toLocaleDateString(
+                        'en-US',
+                        { month: 'long', year: 'numeric', timeZone: 'UTC' }
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCalendarViewMonth((prev) =>
+                          prev.month === 11 ? { year: prev.year + 1, month: 0 } : { year: prev.year, month: prev.month + 1 }
+                        )
+                      }
+                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-black cursor-pointer"
+                    >
+                      &rarr;
+                    </button>
+                  </div>
+
+                  {/* Day-of-week headers */}
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((dName) => (
+                      <div key={dName} className="text-[10px] font-black text-slate-400 py-0.5">
+                        {dName}
+                      </div>
+                    ))}
+                    {(() => {
+                      const firstDayDow = new Date(
+                        Date.UTC(calendarViewMonth.year, calendarViewMonth.month, 1, 12, 0, 0)
+                      ).getUTCDay();
+                      const daysInMonth = new Date(
+                        Date.UTC(calendarViewMonth.year, calendarViewMonth.month + 1, 0, 12, 0, 0)
+                      ).getUTCDate();
+                      const cells: React.ReactNode[] = [];
+                      for (let i = 0; i < firstDayDow; i++) {
+                        cells.push(<div key={`empty-${i}`} className="h-8" />);
+                      }
+                      for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+                        const ymd = `${calendarViewMonth.year}-${String(calendarViewMonth.month + 1).padStart(2, '0')}-${String(
+                          dayNum
+                        ).padStart(2, '0')}`;
+                        const isSelected = scheduledDate === ymd;
+                        const isToday = liveToday.dateString === ymd;
+                        const dayVisitsCount = visits.filter(
+                          (v: any) => String(v.startAt || '').slice(0, 10) === ymd
+                        ).length;
+                        cells.push(
+                          <button
+                            key={ymd}
+                            type="button"
+                            onClick={() => {
+                              setScheduledDate(ymd);
+                              setSelectedQuickMapDate(ymd);
+                              liveValuesRef.current.preferredDate = ymd;
+                              setIsDateCalendarOpen(false);
+                            }}
+                            className={`h-8 rounded-lg text-xs font-extrabold flex flex-col items-center justify-center relative transition-all cursor-pointer border ${
+                              isSelected
+                                ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white border-pink-300 shadow-md scale-105'
+                                : isToday
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-400/70'
+                                : 'bg-[#171b29] text-slate-200 border-slate-800 hover:border-pink-500/60 hover:bg-[#22283c]'
+                            }`}
+                          >
+                            <span>{dayNum}</span>
+                            {dayVisitsCount > 0 && (
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full absolute bottom-0.5 ${
+                                  isSelected ? 'bg-white' : 'bg-emerald-400'
+                                }`}
+                                title={`${dayVisitsCount} scheduled visit(s)`}
+                              />
+                            )}
+                          </button>
+                        );
+                      }
+                      return cells;
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">
-                Time Window / Start
-              </label>
+            {/* TIME WINDOW BLOCK */}
+            <div
+              className={`p-2.5 rounded-2xl border transition-all duration-300 ${
+                flashingFields.timeWindow
+                  ? 'bg-[#00ff66]/25 border-[#00ff66] ring-4 ring-[#00ff66]/50 shadow-[0_0_28px_rgba(0,255,102,0.6)]'
+                  : voiceCapturedFields.timeWindow
+                  ? 'bg-emerald-950/40 border-[#00ff66]/70'
+                  : 'bg-[#151926]/60 border-slate-800/80'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-200">
+                  Time Window / Start
+                </label>
+                {voiceCapturedFields.timeWindow && (
+                  <span className="px-1.5 py-0.5 rounded bg-[#00ff66] text-slate-950 text-[9px] font-black uppercase">
+                    ✓ {voiceCapturedFields.timeWindow}
+                  </span>
+                )}
+              </div>
               <select
                 value={timeWindow}
                 onChange={(e) => {
                   setTimeWindow(e.target.value);
+                  liveValuesRef.current.timeWindow = e.target.value;
                   if (e.target.value.startsWith('Morning')) setScheduledTime('09:00');
                   else if (e.target.value.startsWith('Afternoon')) setScheduledTime('13:00');
                   else if (e.target.value.startsWith('Evening')) setScheduledTime('16:30');
                 }}
-                className="w-full px-3 py-2 bg-[#171b29] border border-slate-700/80 rounded-xl text-xs text-white focus:outline-none focus:border-pink-500 cursor-pointer"
+                className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold focus:outline-none cursor-pointer ${
+                  voiceCapturedFields.timeWindow
+                    ? 'bg-[#091f14] border-2 border-[#00ff66] text-[#6bffa3]'
+                    : 'bg-[#171b29] border border-slate-700/80 text-white focus:border-pink-500'
+                }`}
               >
                 <option value="Morning (8:00 AM - 12:00 PM)">Morning (8:00 AM - 12:00 PM)</option>
                 <option value="Afternoon (12:00 PM - 4:00 PM)">Afternoon (12:00 PM - 4:00 PM)</option>
@@ -2958,7 +3560,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
       {/* ─────────────────────────────────────────────────────────────────────────────
           SECTION 3: EMBEDDED QUICK MAP, 2-ADDRESS PICKER & WEEKLY/MONTHLY SCHEDULE
          ───────────────────────────────────────────────────────────────────────────── */}
-      <div className="bg-[#121520] border border-slate-800/90 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-5">
+      <div ref={quickMapSectionRef} className="bg-[#121520] border border-slate-800/90 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
             <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider block">
@@ -3650,6 +4252,99 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
         }}
         projectId={projectId}
       />
+
+      {/* ─────────────────────────────────────────────────────────────────────────────
+          FLOATING STICKY VOICE DICTATION & COMPARE QUICK BAR (No Need to Scroll Up!)
+         ───────────────────────────────────────────────────────────────────────────── */}
+      <div className="fixed bottom-3 left-3 right-3 lg:left-72 lg:right-6 z-40 pointer-events-none flex justify-center">
+        <div className="pointer-events-auto w-full max-w-5xl rounded-2xl bg-[#131022]/95 backdrop-blur-md border-2 border-pink-500/70 shadow-[0_12px_40px_rgba(0,0,0,0.85)] px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          {/* Left: Start/Stop Voice Dictation + Compare & Fill Blanks */}
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <button
+              type="button"
+              onClick={handleToggleVoiceDictation}
+              className={`px-4 py-2 rounded-xl font-extrabold text-xs flex items-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95 ${
+                isRecording
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white ring-2 ring-rose-400 animate-pulse'
+                  : 'bg-gradient-to-r from-pink-600 via-fuchsia-600 to-purple-600 hover:opacity-95 text-white'
+              }`}
+            >
+              {isRecording ? (
+                <>
+                  <MicOff className="w-4 h-4" />
+                  <span>Stop &amp; Reconcile</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-4 h-4" />
+                  <span>Start Voice Dictation</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              disabled={isParsingVoice || (!voiceTranscript.trim() && !interimTranscript.trim())}
+              onClick={() => handleExtractFromTranscript()}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-lg transition-all cursor-pointer active:scale-95"
+            >
+              <Wand2 className="w-3.5 h-3.5" />
+              <span>{isParsingVoice ? 'Comparing...' : 'Compare & Fill Blanks'}</span>
+            </button>
+          </div>
+
+          {/* Middle: Live Transcript Quick Input / Status Bar */}
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <input
+              type="text"
+              value={voiceTranscript + (interimTranscript ? ` ${interimTranscript}` : '')}
+              onChange={(e) => {
+                setVoiceTranscript(e.target.value);
+                latestTranscriptRef.current = e.target.value;
+                applyLiveSpeechExtraction(e.target.value);
+              }}
+              placeholder={
+                isRecording
+                  ? '🎙️ Listening live... Speak Address, Preferred Day/Date, Name, Phone, Beds & Baths!'
+                  : 'Quick dictate or type Address / Preferred Date here from anywhere on the page...'
+              }
+              className={`w-full px-3 py-1.5 rounded-xl text-xs text-white placeholder-slate-400 focus:outline-none transition-all ${
+                isRecording
+                  ? 'bg-[#091f14] border-2 border-[#00ff66] text-[#6bffa3]'
+                  : 'bg-[#1b1f30] border border-slate-700 focus:border-pink-500'
+              }`}
+            />
+          </div>
+
+          {/* Right: Quick Scroll Jump Buttons */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => topDictationSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-bold cursor-pointer"
+              title="Scroll to Top Dictation Box"
+            >
+              ↑ Top
+            </button>
+            <button
+              type="button"
+              onClick={() => preferredDateSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-pink-300 border border-pink-500/40 text-[11px] font-bold cursor-pointer"
+              title="Jump to Address & Preferred Date"
+            >
+              📅 Date/Form
+            </button>
+            <button
+              type="button"
+              onClick={() => quickMapSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 border border-purple-500/40 text-[11px] font-bold cursor-pointer"
+              title="Jump to Quick Map & Schedule"
+            >
+              🗺️ Map
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

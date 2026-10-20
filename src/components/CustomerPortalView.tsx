@@ -247,6 +247,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         if (data.email) setCustomerEmail(data.email);
         if (data.address) setAddress(data.address);
         if (data.city) setCity(data.city);
+        if (data.preferredDate) setPreferredDate(data.preferredDate);
+        if (data.timeWindow) setPreferredTime(data.timeWindow);
         if (data.bedrooms) setBedrooms(data.bedrooms);
         if (data.bathrooms) setBathrooms(data.bathrooms);
         if (data.specificInstructions) setSpecialInstructions(data.specificInstructions);
@@ -259,7 +261,11 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         else if (cat.includes('reno')) setSelectedService('post-renovation');
         else if (cat.includes('commercial')) setSelectedService('commercial');
 
-        setVoiceFillStatus(`✓ Filled blanks: ${data.customerName || 'Caller'} • ${data.bedrooms || bedrooms} / ${data.bathrooms || bathrooms}`);
+        setVoiceFillStatus(
+          `✓ Filled blanks: ${data.customerName || 'Caller'} • ${data.address || city} • ${
+            data.preferredDayLabel || data.preferredDate || 'Date Ready'
+          }`
+        );
       }
     } catch {
       setVoiceFillStatus('Filled form notes from dictation.');
