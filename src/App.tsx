@@ -1151,9 +1151,16 @@ export function App() {
     }
   }, [clientsList, scheduledJobsList, unscheduledJobsList, quotesList, invoicesList, technicians, serviceCatalog, spamShieldConfig, blockedCallsHistory, quoCallsList]);
 
-  // Toggle block/unblock on any screened call or phone number and persist across Backend Store + LocalStorage + Cloud Firestore
+  // Toggle block/unblock or mark as Good Lead on any screened call or phone number and persist across Backend Store + LocalStorage + Cloud Firestore
   const handleToggleBlockScreenedCall = useCallback(
-    async (params: { callId?: string; callerPhone: string; callerName?: string; reason?: string; block: boolean }) => {
+    async (params: {
+      callId?: string;
+      callerPhone: string;
+      callerName?: string;
+      reason?: string;
+      block: boolean;
+      markAsGoodLead?: boolean;
+    }) => {
       try {
         const res = await fetch(`/api/quo/calls/toggle-block?project=${activeProjectId}`, {
           method: 'POST',
@@ -1171,6 +1178,9 @@ export function App() {
               saveScreenedCallToFirestore(updatedCall).catch(() => {});
             }
           }
+          if (Array.isArray(data.adLeads)) {
+            setLeadsList(data.adLeads);
+          }
           if (data.spamShieldConfig) setSpamShieldConfig(data.spamShieldConfig);
           if (Array.isArray(data.blockedCallsHistory)) setBlockedCallsHistory(data.blockedCallsHistory);
 
@@ -1185,7 +1195,12 @@ export function App() {
           } else {
             deleteBlockedNumberFromFirestore(data.number || params.callerPhone).catch(() => {});
           }
-          setSyncAllStatusMessage(data.message || (params.block ? '🚫 Caller blocked & saved to database!' : '✅ Caller unblocked & saved to database!'));
+          setSyncAllStatusMessage(
+            data.message ||
+              (params.block
+                ? '🚫 Caller blocked & saved to database!'
+                : '✅ Caller marked as Good Lead & added to Voice & Quick Quotes!')
+          );
           setTimeout(() => setSyncAllStatusMessage(null), 4500);
         }
         return data;

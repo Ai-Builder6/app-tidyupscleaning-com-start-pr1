@@ -92,7 +92,16 @@ export const QuoModal: React.FC<QuoModalProps> = ({
   // Call Transcripts
   const [calls, setCalls] = useState<any[]>([]);
   const [isLoadingCalls, setIsLoadingCalls] = useState(false);
+  const [isSyncingLiveCalls, setIsSyncingLiveCalls] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [transcriptVerdictFilter, setTranscriptVerdictFilter] = useState<'ALL' | 'GOOD_LEAD' | 'POTENTIAL_JOB' | 'BAD_LEAD'>('ALL');
+  const [activeSecretInfo, setActiveSecretInfo] = useState<{
+    activeApiKeySecrets: string[];
+    activeWebhookSecrets: string[];
+  }>({
+    activeApiKeySecrets: ['QUO_API_TIDYUPS'],
+    activeWebhookSecrets: ['APP_TIDYUPSCLEANING_COM_WEBHOOK'],
+  });
 
   // Contacts
   const [contacts, setContacts] = useState<any[]>([]);
@@ -121,9 +130,64 @@ export const QuoModal: React.FC<QuoModalProps> = ({
           if (data.phoneNumbers) {
             setPhoneNumbers(data.phoneNumbers);
           }
+          if (data.activeApiKeySecrets || data.activeWebhookSecrets) {
+            setActiveSecretInfo({
+              activeApiKeySecrets: data.activeApiKeySecrets || ['QUO_API_TIDYUPS'],
+              activeWebhookSecrets: data.activeWebhookSecrets || ['APP_TIDYUPSCLEANING_COM_WEBHOOK'],
+            });
+          }
         }
       })
       .catch(() => {});
+  };
+
+  const handleSyncLiveQuoCalls = async () => {
+    setIsSyncingLiveCalls(true);
+    setSyncNotice('Syncing all 6 Quo phone lines, call summaries, and word-for-word Sona AI transcripts...');
+    try {
+      const res = await fetch(`/api/quo/sync-live-calls?project=${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-project-id': projectId },
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (Array.isArray(data.calls)) setCalls(data.calls);
+        setSyncNotice(
+          `✅ Synced ${data.totalCallsStored || data.calls?.length || 0} calls across all 6 Quo lines! (${data.goodLeadCount || 0} Good Leads, ${data.potentialJobCount || 0} Potential Jobs, ${data.badLeadCount || 0} Bad Leads)`
+        );
+        if (onDataUpdated) onDataUpdated();
+      } else {
+        setSyncNotice(data.error || 'Could not sync live Quo calls.');
+      }
+    } catch {
+      setSyncNotice('Network error syncing live Quo calls.');
+    } finally {
+      setIsSyncingLiveCalls(false);
+    }
+  };
+
+  const handleMarkCallAsGoodLead = async (call: any) => {
+    try {
+      const res = await fetch(`/api/quo/calls/toggle-block?project=${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-project-id': projectId },
+        body: JSON.stringify({
+          callId: call.id,
+          callerPhone: call.callerPhone,
+          callerName: call.callerName,
+          block: false,
+          markAsGoodLead: true,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (Array.isArray(data.calls)) setCalls(data.calls);
+        setSyncNotice(data.message || `✅ Marked ${call.callerName || call.callerPhone} as Good Lead & added to Voice & Quick Quotes!`);
+        if (onDataUpdated) onDataUpdated();
+      }
+    } catch {
+      setSyncNotice('Failed to update call lead status.');
+    }
   };
 
   const fetchCalls = () => {
@@ -289,12 +353,15 @@ export const QuoModal: React.FC<QuoModalProps> = ({
       call,
       clientName: call.callerName || 'Inbound Caller',
       clientPhone: call.callerPhone || '',
-      serviceAddress: 'Edmonton, AB',
-      serviceType: 'Residential Deep & Standard Cleaning',
+      serviceAddress: call.extractedAddress || 'Edmonton, AB',
+      serviceType: call.extractedService || 'Residential Deep & Standard Cleaning',
       scheduledDate: new Date().toISOString().slice(0, 10),
       scheduledTime: '10:00',
       assignedCleaners: ['Cindy Guay'],
-      basePrice: 280,
+      basePrice:
+        String(call.extractedService || '').includes('Move') || String(call.extractedService || '').includes('Deep')
+          ? 340
+          : 260,
       applyDiscount: intel.loyaltyDiscountEligible,
       discountPercent: intel.loyaltyDiscountPercent || 10,
       notes: call.summary ? `Customer called on ${call.lineName || 'Quo Line'}: ${call.summary}` : (call.transcriptText || ''),
@@ -491,33 +558,88 @@ export const QuoModal: React.FC<QuoModalProps> = ({
           {/* TAB 1: CALL TRANSCRIPTS & LEADS */}
           {activeTab === 'TRANSCRIPTS' && (
             <div className="space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white p-3.5 rounded-xl border border-slate-200">
-                <div>
-                  <h3 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                    <Headphones className="w-4 h-4 text-violet-600" />
-                    <span>Inbound Quo Transcripts Automatically Linked to Jobs</span>
-                  </h3>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    When callers phone any of your 5 Quo lines, Sona AI transcribes the call and matches it to scheduled visits.
-                  </p>
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-bold text-xs text-slate-900 flex items-center gap-1.5 flex-wrap">
+                      <Headphones className="w-4 h-4 text-violet-600" />
+                      <span>All 6 Quo Phone Lines — Call Transcripts &amp; Good Lead vs. Bad Lead Evaluator</span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-mono">
+                        🔑 {activeSecretInfo.activeApiKeySecrets[0] || 'QUO_API_TIDYUPS'} +{' '}
+                        {activeSecretInfo.activeWebhookSecrets[0] || 'APP_TIDYUPSCLEANING_COM_WEBHOOK'}
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Every call across all 6 TidyUps Quo lines is transcribed by Sona AI, evaluated as a{' '}
+                      <strong className="text-emerald-700">Good Lead</strong>,{' '}
+                      <strong className="text-amber-700">Potential Job</strong>, or{' '}
+                      <strong className="text-rose-700">Bad Lead</strong>, and synced to{' '}
+                      <strong>Voice &amp; Quick Quotes</strong> in your Master Leads table.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    <button
+                      onClick={handleSyncLiveQuoCalls}
+                      disabled={isSyncingLiveCalls}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-2xs"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingLiveCalls ? 'animate-spin' : ''}`} />
+                      <span>{isSyncingLiveCalls ? 'Syncing All 6 Lines...' : 'Sync All 6 Quo Lines & Transcripts'}</span>
+                    </button>
+                    <button
+                      onClick={handleSimulateCall}
+                      disabled={isSimulating}
+                      className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>{isSimulating ? 'Processing...' : 'Test Webhook'}</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={handleSimulateCall}
-                    disabled={isSimulating}
-                    className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>{isSimulating ? 'Processing...' : 'Simulate Inbound Call Webhook'}</span>
-                  </button>
-                  <button
-                    onClick={fetchCalls}
-                    disabled={isLoadingCalls}
-                    className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs cursor-pointer"
-                    title="Refresh call logs"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCalls ? 'animate-spin' : ''}`} />
-                  </button>
+
+                {/* Verdict Filter Pills */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100">
+                  {(
+                    [
+                      { id: 'ALL', label: `All Calls (${calls.length})` },
+                      {
+                        id: 'GOOD_LEAD',
+                        label: `✅ Good Leads (${
+                          calls.filter((c) => !c.isBlocked && (c.hasCleaningIntent || c.leadVerdict === 'GOOD_LEAD')).length
+                        })`,
+                      },
+                      {
+                        id: 'POTENTIAL_JOB',
+                        label: `🟡 Potential Jobs — Follow Up (${
+                          calls.filter(
+                            (c) =>
+                              !c.isBlocked &&
+                              !c.hasCleaningIntent &&
+                              (c.isPotentialOrGoodLead || c.leadVerdict === 'POTENTIAL_JOB')
+                          ).length
+                        })`,
+                      },
+                      {
+                        id: 'BAD_LEAD',
+                        label: `🚫 Bad Leads / Solicitors (${
+                          calls.filter((c) => c.isBlocked || c.status === 'SOLICITOR_BLOCKED' || c.leadVerdict === 'BAD_LEAD').length
+                        })`,
+                      },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setTranscriptVerdictFilter(tab.id)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all ${
+                        transcriptVerdictFilter === tab.id
+                          ? 'bg-violet-600 text-white shadow-2xs'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -527,147 +649,219 @@ export const QuoModal: React.FC<QuoModalProps> = ({
                     <PhoneCall className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-slate-800">No Inbound Calls Logged Yet</h4>
+                    <h4 className="text-xs font-bold text-slate-800">No Inbound Calls Loaded Yet</h4>
                     <p className="text-[11px] text-slate-500 max-w-md mx-auto mt-1">
-                      Click the button above to simulate a live customer call from Kati Luknowsky, or place a real call to your Primary line <strong>(587) 570-8005</strong>.
+                      Click <strong>Sync All 6 Quo Lines &amp; Transcripts</strong> above to pull all live phone calls and transcripts from Quo.
                     </p>
                   </div>
                   <button
-                    onClick={handleSimulateCall}
-                    className="px-4 py-2 bg-violet-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-violet-700"
+                    onClick={handleSyncLiveQuoCalls}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-emerald-700"
                   >
-                    Test Inbound Call With Transcript
+                    Sync All 6 Quo Lines Now
                   </button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {calls.map((call, idx) => (
-                    <div
-                      key={call.id || idx}
-                      className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2.5 transition-all hover:border-violet-300"
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-slate-900 text-sm">
-                            {call.callerName || 'Inbound Caller'}
-                          </span>
-                          <span className="font-mono text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                            {call.callerPhone}
-                          </span>
-                          <CustomerIntelligenceBadge
-                            intelligence={getCustomerIntelligence(call.callerPhone, call.callerName, { calls, visits, clients })}
-                            compact
-                          />
-                          <span className="text-[11px] text-slate-500">
-                            via {call.lineName || 'Primary Dispatch'}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {call.matchedJobTitle ? (
-                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-200 flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                              <span>Synced to {call.matchedJobTitle}</span>
-                            </span>
-                          ) : (
-                            <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold border border-blue-200">
-                              Auto-Created Lead Ticket
-                            </span>
-                          )}
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            {new Date(call.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      </div>
+                  {calls
+                    .filter((call) => {
+                      const isBad = Boolean(call.isBlocked || call.status === 'SOLICITOR_BLOCKED' || call.leadVerdict === 'BAD_LEAD');
+                      const isGood = !isBad && Boolean(call.hasCleaningIntent || call.leadVerdict === 'GOOD_LEAD');
+                      const isPotential = !isBad && !isGood && Boolean(call.isPotentialOrGoodLead || call.leadVerdict === 'POTENTIAL_JOB');
+                      if (transcriptVerdictFilter === 'GOOD_LEAD') return isGood;
+                      if (transcriptVerdictFilter === 'POTENTIAL_JOB') return isPotential;
+                      if (transcriptVerdictFilter === 'BAD_LEAD') return isBad;
+                      return true;
+                    })
+                    .map((call, idx) => {
+                      const isBad = Boolean(call.isBlocked || call.status === 'SOLICITOR_BLOCKED' || call.leadVerdict === 'BAD_LEAD');
+                      const isGood = !isBad && Boolean(call.hasCleaningIntent || call.leadVerdict === 'GOOD_LEAD');
+                      const isPotential = !isBad && !isGood && Boolean(call.isPotentialOrGoodLead || call.leadVerdict === 'POTENTIAL_JOB');
 
-                      {call.summary && (
-                        <div className="p-3 bg-violet-50/70 border border-violet-100 rounded-lg text-xs text-violet-950 space-y-1">
-                          <div className="font-bold flex items-center gap-1 text-violet-900">
-                            <Sparkles className="w-3.5 h-3.5 text-violet-600" />
-                            <span>Voice Call AI Summary:</span>
+                      return (
+                        <div
+                          key={call.id || idx}
+                          className={`bg-white p-4 rounded-xl border shadow-2xs space-y-2.5 transition-all ${
+                            isBad
+                              ? 'border-rose-200 bg-rose-50/20'
+                              : isGood
+                              ? 'border-emerald-300 hover:border-emerald-400'
+                              : isPotential
+                              ? 'border-amber-300 hover:border-amber-400'
+                              : 'border-slate-200 hover:border-violet-300'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-slate-900 text-sm">
+                                {call.callerName || 'Inbound Caller'}
+                              </span>
+                              <span className="font-mono text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                {call.callerPhone}
+                              </span>
+                              <CustomerIntelligenceBadge
+                                intelligence={getCustomerIntelligence(call.callerPhone, call.callerName, { calls, visits, clients })}
+                                compact
+                              />
+                              <span className="text-[11px] text-violet-700 font-semibold bg-violet-50 px-2 py-0.5 rounded border border-violet-200">
+                                📞 {call.lineName || 'Primary Dispatch'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`px-2.5 py-0.5 rounded-full text-[11px] font-black border ${
+                                  isBad
+                                    ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                    : isGood
+                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                    : isPotential
+                                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                    : 'bg-slate-100 text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                {isBad
+                                  ? '🚫 Bad Lead — Solicitor / Blocked'
+                                  : isGood
+                                  ? '✅ Good Lead — Potential Job'
+                                  : isPotential
+                                  ? '🟡 Potential Job — Follow-Up'
+                                  : call.leadVerdictLabel || 'Screened Call'}
+                              </span>
+                              {call.matchedJobTitle && (
+                                <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-200 flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>{call.matchedJobTitle}</span>
+                                </span>
+                              )}
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {String(call.timestamp || '').slice(0, 16).replace('T', ' ')}
+                              </span>
+                            </div>
                           </div>
-                          <p className="leading-relaxed text-[11px] text-violet-900">
-                            {call.summary}
-                          </p>
-                        </div>
-                      )}
 
-                      {call.transcriptText && (
-                        <details className="text-xs text-slate-600">
-                          <summary className="font-semibold text-violet-600 hover:text-violet-800 cursor-pointer text-[11px]">
-                            View Complete Voice Call Transcript
-                          </summary>
-                          <div className="mt-1.5 p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-700 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
-                            {call.transcriptText}
+                          {(call.extractedService || (call.extractedAddress && call.extractedAddress !== 'Edmonton, AB')) && (
+                            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                              {call.extractedService && (
+                                <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
+                                  🧹 {call.extractedService}
+                                </span>
+                              )}
+                              {call.extractedBedrooms && (
+                                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono">
+                                  🛏️ {call.extractedBedrooms} • 🛁 {call.extractedBathrooms || '2 Bathrooms'}
+                                </span>
+                              )}
+                              {call.extractedAddress && call.extractedAddress !== 'Edmonton, AB' && (
+                                <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 font-semibold">
+                                  📍 {call.extractedAddress}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {call.summary && (
+                            <div className="p-3 bg-violet-50/70 border border-violet-100 rounded-lg text-xs text-violet-950 space-y-1">
+                              <div className="font-bold flex items-center gap-1 text-violet-900">
+                                <Sparkles className="w-3.5 h-3.5 text-violet-600" />
+                                <span>Voice Call AI Summary:</span>
+                              </div>
+                              <p className="leading-relaxed text-[11px] text-violet-900">
+                                {call.summary}
+                              </p>
+                            </div>
+                          )}
+
+                          {call.transcriptText && (
+                            <details className="text-xs text-slate-600" open={isGood}>
+                              <summary className="font-semibold text-violet-600 hover:text-violet-800 cursor-pointer text-[11px]">
+                                📜 View Complete Word-for-Word Voice Call Transcript
+                              </summary>
+                              <div className="mt-1.5 p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-700 whitespace-pre-wrap leading-relaxed max-h-44 overflow-y-auto">
+                                {call.transcriptText}
+                              </div>
+                            </details>
+                          )}
+
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-100 text-[11px]">
+                            <div className="flex items-center gap-3 text-slate-500">
+                              <span>
+                                Duration: {call.duration ? `${Math.floor(call.duration / 60)}m ${call.duration % 60}s` : 'Logged'}
+                              </span>
+                              {call.recordingUrl && (
+                                <a
+                                  href={call.recordingUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-violet-600 font-semibold hover:underline flex items-center gap-1"
+                                >
+                                  <span>Audio Recording</span>
+                                  <ExternalLink className="w-2.5 h-2.5" />
+                                </a>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {call.matchedJobId && onJobSelected && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onJobSelected(call.matchedJobId);
+                                    onClose();
+                                  }}
+                                  className="text-violet-700 hover:text-violet-900 font-bold flex items-center gap-1 cursor-pointer mr-1"
+                                >
+                                  <span>Open Job Visit →</span>
+                                </button>
+                              )}
+
+                              {!isGood && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMarkCallAsGoodLead(call)}
+                                  className="px-2.5 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                                  title="Mark this call as a Good Lead and add to Voice & Quick Quotes"
+                                >
+                                  ✅ Mark Good Lead
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => handleOpenConvertCallModal(call, 'JOB')}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
+                                title="Convert inbound call into a scheduled cleaning job"
+                              >
+                                <Calendar className="w-3 h-3" />
+                                <span>Convert to Job</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleOpenConvertCallModal(call, 'QUOTE')}
+                                className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
+                                title="Create and stage Jobber quote from this call lead"
+                              >
+                                <FileText className="w-3 h-3" />
+                                <span>Create Quote</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSpamBlockNumber(call.callerPhone || '');
+                                  setIsSpamShieldModalOpen(true);
+                                }}
+                                className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
+                                title="Block caller or its rotating prefix in Twilio Spam Shield"
+                              >
+                                <ShieldAlert className="w-3 h-3 text-rose-600" />
+                                <span>Block Bad Lead</span>
+                              </button>
+                            </div>
                           </div>
-                        </details>
-                      )}
-
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-100 text-[11px]">
-                        <div className="flex items-center gap-3 text-slate-500">
-                          <span>Duration: {call.duration ? `${Math.floor(call.duration / 60)}m ${call.duration % 60}s` : 'Completed'}</span>
-                          {call.recordingUrl && (
-                            <a
-                              href={call.recordingUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-violet-600 font-semibold hover:underline flex items-center gap-1"
-                            >
-                              <span>Audio Recording</span>
-                              <ExternalLink className="w-2.5 h-2.5" />
-                            </a>
-                          )}
                         </div>
-
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {call.matchedJobId && onJobSelected && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onJobSelected(call.matchedJobId);
-                                onClose();
-                              }}
-                              className="text-violet-700 hover:text-violet-900 font-bold flex items-center gap-1 cursor-pointer mr-1"
-                            >
-                              <span>Open Job Visit →</span>
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenConvertCallModal(call, 'JOB')}
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
-                            title="Convert inbound call into a scheduled cleaning job"
-                          >
-                            <Calendar className="w-3 h-3" />
-                            <span>Convert to Job</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenConvertCallModal(call, 'QUOTE')}
-                            className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
-                            title="Create and stage Jobber quote from this call lead"
-                          >
-                            <FileText className="w-3 h-3" />
-                            <span>Create Quote</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSpamBlockNumber(call.callerPhone || '');
-                              setIsSpamShieldModalOpen(true);
-                            }}
-                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
-                            title="Block caller or its rotating prefix in Twilio Spam Shield"
-                          >
-                            <ShieldAlert className="w-3 h-3 text-rose-600" />
-                            <span>Block Spam</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })}
                 </div>
               )}
             </div>

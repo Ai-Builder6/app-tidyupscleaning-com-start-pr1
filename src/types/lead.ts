@@ -5,9 +5,11 @@ export type LeadSource =
   | 'From Google Sheet'
   | 'Pasted message'
   | 'Phone call'
+  | 'Quo Voice Call'
   | 'Facebook Ad'
   | 'Google Ad'
-  | 'Instagram';
+  | 'Instagram'
+  | string;
 
 export type LeadStatus = 'New' | 'Converted' | 'Dismissed' | 'All';
 
@@ -20,19 +22,32 @@ export interface AdLeadItem {
   email: string;
   address: string;
   city: string;
+  province?: string;
   postalCode?: string;
+  propertyType?: string;
+  sqft?: number;
   serviceRequested: string;
+  frequency?: string;
+  preferredDate?: string;
+  preferredTime?: string;
   bedrooms?: number | string;
   bathrooms?: number | string;
   dateOfServiceRequested?: string;
   source: LeadSource;
-  sourceTab?: string; // e.g. "FB Leads_V2", "Google Leads_V3", "Tidy FB Leads_V1"
+  sourceTab?: string; // e.g. "FB Leads_V2", "Google Leads_V3", "Tidy FB Leads_V1", "Voice & Quick Quotes"
   campaignName?: string;
   formId?: string;
   adId?: string;
-  dateReceived: string;
-  status: 'New' | 'Converted' | 'Dismissed';
+  createdAt?: string;
+  dateReceived?: string;
+  status: 'New' | 'Converted' | 'Dismissed' | string;
   verdict?: LeadVerdict;
+  leadVerdict?: 'GOOD_LEAD' | 'POTENTIAL_JOB' | 'BAD_LEAD' | string;
+  leadVerdictLabel?: string;
+  callTranscript?: string;
+  callSummary?: string;
+  callRecordingUrl?: string;
+  quoCallId?: string;
   isJobberSynced?: boolean;
   jobberClientId?: string;
   quoteId?: string;

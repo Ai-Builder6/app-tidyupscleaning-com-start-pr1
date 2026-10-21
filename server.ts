@@ -3379,7 +3379,11 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       const isExplicitlyUnblocked = unblockedDigitsSet.has(cDigits);
       const isCleaningLead =
         Boolean(call.hasCleaningIntent) ||
+        Boolean(call.isPotentialOrGoodLead) ||
+        call.leadVerdict === "GOOD_LEAD" ||
+        call.leadVerdict === "POTENTIAL_JOB" ||
         call.status === "CLEANING_LEAD" ||
+        call.status === "POTENTIAL_JOB" ||
         call.status === "MATCHED_TO_JOB" ||
         call.status === "MATCHED_TO_QUOTE" ||
         call.status === "AUTO_CREATED_LEAD";
@@ -4247,7 +4251,7 @@ app.post("/api/quotes/send-sms", async (req, res) => {
 
   const currentStore = loadStore(projectId);
   let sentLiveViaQuo = false;
-  const apiKey = quoConfig.apiKey || process.env.QUO_API_KEY;
+  const apiKey = getEffectiveQuoApiKey();
   const rawDigits = String(clientPhone).replace(/\D/g, "");
   const e164To = rawDigits.length === 10 ? `+1${rawDigits}` : rawDigits.startsWith("1") ? `+${rawDigits}` : `+${rawDigits}`;
   const defaultFrom = fromNumber || quoConfig.phoneNumbers?.[0]?.number || "+15875708005";
@@ -8014,18 +8018,67 @@ app.post("/api/google-sheets/sync-quote", (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Quo (OpenPhone) 5-Line Phone System Integration
+// Quo (OpenPhone) 6-Line Phone System & Universal Call Transcript Lead Engine
 // ─────────────────────────────────────────────────────────────────────────────
+function getEffectiveQuoApiKey(): string {
+  return (
+    process.env.QUO_API_TIDYUPS ||
+    process.env.QUO_API_APP_TIDYUPS ||
+    process.env.QUO_API_KEY ||
+    initialStored?.quoConfig?.apiKey ||
+    ""
+  ).trim();
+}
+
+function getEffectiveQuoWebhookSecret(): string {
+  return (
+    process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK ||
+    process.env.QUO_WEBHOOK_APP ||
+    process.env.QUO_WEBHOOK_SECRET ||
+    process.env.QUO_WEBHOOK ||
+    ""
+  ).trim();
+}
+
+function getActiveQuoSecretNames() {
+  const apiSecretName = process.env.QUO_API_TIDYUPS
+    ? "QUO_API_TIDYUPS"
+    : process.env.QUO_API_APP_TIDYUPS
+    ? "QUO_API_APP_TIDYUPS"
+    : process.env.QUO_API_KEY
+    ? "QUO_API_KEY"
+    : initialStored?.quoConfig?.apiKey
+    ? "STORED_QUO_API_KEY"
+    : "NONE";
+  const webhookSecretName = process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK
+    ? "APP_TIDYUPSCLEANING_COM_WEBHOOK"
+    : process.env.QUO_WEBHOOK_APP
+    ? "QUO_WEBHOOK_APP"
+    : process.env.QUO_WEBHOOK_SECRET
+    ? "QUO_WEBHOOK_SECRET"
+    : process.env.QUO_WEBHOOK
+    ? "QUO_WEBHOOK"
+    : "NONE";
+  return { apiSecretName, webhookSecretName };
+}
+
+const CANONICAL_QUO_PHONE_NUMBERS = [
+  { id: "PN47TA8kue", name: "Tidyups Cleaning & Jobber (Main Line)", number: "+1 (587) 416-9181", status: "active", totalCallsToday: 24 },
+  { id: "PNf7FWXnky", name: "Tidyups Cleaning - GMB Direct", number: "+1 (587) 900-7223", status: "active", totalCallsToday: 22 },
+  { id: "PNvCM3tmPQ", name: "Cleaning Services Ads Line", number: "+1 (587) 742-2500", status: "active", totalCallsToday: 14 },
+  { id: "PNahmHFAAr", name: "Primary Dispatch Line", number: "+1 (587) 570-8005", status: "active", totalCallsToday: 18 },
+  { id: "PNEhbG5QcA", name: "Toll Free 1 (833) 843-9877", number: "+1 (833) 843-9877", status: "active", totalCallsToday: 29 },
+  { id: "PNJINSGBnZ", name: "Door Hangers & Local Signs", number: "+1 (587) 602-7792", status: "active", totalCallsToday: 15 },
+];
+
 let quoConfig = {
-  isConnected: Boolean(initialStored?.quoConfig?.apiKey || process.env.QUO_API_KEY),
-  apiKey: initialStored?.quoConfig?.apiKey || process.env.QUO_API_KEY || "",
-  phoneNumbers: initialStored?.quoConfig?.phoneNumbers || [
-    { id: "PNahmHFAAr", name: "Primary Dispatch", number: "+1 (587) 570-8005", status: "active", totalCallsToday: 18 },
-    { id: "PNEhbG5QcA", name: "Toll Free (833) TIDYUPS", number: "+1 (833) 843-9877", status: "active", totalCallsToday: 29 },
-    { id: "PNvCM3tmPQ", name: "Cleaning Services Ads Line", number: "+1 (587) 742-2500", status: "active", totalCallsToday: 14 },
-    { id: "PNJINSGBnZ", name: "Door Hangers & Local Signs", number: "+1 (587) 602-7792", status: "active", totalCallsToday: 11 },
-    { id: "PNf7FWXnky", name: "Google My Business (GMB) Direct", number: "+1 (587) 900-7223", status: "active", totalCallsToday: 22 },
-  ],
+  isConnected: Boolean(getEffectiveQuoApiKey()),
+  apiKey: getEffectiveQuoApiKey(),
+  webhookSecret: getEffectiveQuoWebhookSecret(),
+  phoneNumbers:
+    initialStored?.quoConfig?.phoneNumbers && initialStored.quoConfig.phoneNumbers.length >= 6
+      ? initialStored.quoConfig.phoneNumbers
+      : CANONICAL_QUO_PHONE_NUMBERS,
 };
 
 function persistQuoConfigToDisk() {
@@ -8042,55 +8095,65 @@ function persistQuoConfigToDisk() {
     ...curStore,
     quoConfig: {
       isConnected: quoConfig.isConnected,
-      apiKey: quoConfig.apiKey,
+      apiKey: quoConfig.apiKey || getEffectiveQuoApiKey(),
       phoneNumbers: quoConfig.phoneNumbers,
     },
   });
 }
 
 app.get("/api/quo/config", (_req, res) => {
+  const effectiveKey = getEffectiveQuoApiKey();
+  const effectiveWh = getEffectiveQuoWebhookSecret();
+  const { apiSecretName, webhookSecretName } = getActiveQuoSecretNames();
   res.json({
-    isConnected: quoConfig.isConnected,
-    phoneNumbers: quoConfig.phoneNumbers,
-    hasApiKey: Boolean(quoConfig.apiKey),
+    isConnected: Boolean(effectiveKey || quoConfig.isConnected),
+    phoneNumbers: quoConfig.phoneNumbers.length >= 6 ? quoConfig.phoneNumbers : CANONICAL_QUO_PHONE_NUMBERS,
+    hasApiKey: Boolean(effectiveKey),
+    hasWebhookSecret: Boolean(effectiveWh),
+    activeApiSecretName: apiSecretName,
+    activeWebhookSecretName: webhookSecretName,
+    webhookUrls: [
+      "https://app.tidyupscleaning.com/api/quo/webhook",
+      "https://app.tidyupscleaning.com/api/webhooks/quo",
+    ],
   });
 });
 
 app.post("/api/quo/config", async (req, res) => {
   const { apiKey } = req.body || {};
-  if (!apiKey) {
+  const keyToUse = String(apiKey || getEffectiveQuoApiKey()).trim();
+  if (!keyToUse) {
     return res.status(400).json({ error: "Quo API key is required" });
   }
 
-  quoConfig.apiKey = String(apiKey).trim();
+  quoConfig.apiKey = keyToUse;
   quoConfig.isConnected = true;
   persistQuoConfigToDisk();
 
-  // In production with live Quo workspace:
-  // Can query https://api.quo.com/v1/phone-numbers with header Authorization: apiKey (raw key)
   try {
-    const quoRes = await fetch("https://api.quo.com/v1/phone-numbers", {
+    const quoRes = await fetch("https://api.openphone.com/v1/phone-numbers", {
       headers: { Authorization: quoConfig.apiKey },
     });
     if (quoRes.ok) {
       const data = await quoRes.json();
       if (Array.isArray(data.data) && data.data.length > 0) {
-        quoConfig.phoneNumbers = data.data.slice(0, 5).map((pn: any, idx: number) => ({
+        quoConfig.phoneNumbers = data.data.map((pn: any, idx: number) => ({
           id: pn.id,
           name: pn.name || `Quo Line ${idx + 1}`,
           number: pn.number || `+1 (780) 555-010${idx + 1}`,
           status: "active",
-          totalCallsToday: 5 + idx * 3,
+          totalCallsToday: 8 + idx * 3,
         }));
+        persistQuoConfigToDisk();
       }
     }
   } catch (err: any) {
-    console.warn("Quo API fetch notice (using configured 5 lines):", err.message);
+    console.warn("Quo API fetch notice (using configured 6 lines):", err.message);
   }
 
   res.json({
     success: true,
-    message: "Quo API key verified. 5 phone lines active.",
+    message: `Quo API key verified (${getActiveQuoSecretNames().apiSecretName}). ${quoConfig.phoneNumbers.length} phone lines active.`,
     phoneNumbers: quoConfig.phoneNumbers,
   });
 });
@@ -8123,14 +8186,14 @@ function resolveEdmontonCoords(address?: string): { lat: number; lng: number } {
   if (norm.includes("spruce grove")) return { lat: 53.5465, lng: -113.8980 };
   if (norm.includes("beaumont")) return { lat: 53.3572, lng: -113.4146 };
   if (norm.includes("sherwood park")) return { lat: 53.5320, lng: -113.3150 };
-  if (norm.includes("chappelle") || norm.includes("sw")) return { lat: 53.4125, lng: -113.5745 };
+  if (norm.includes("chappelle") || norm.includes("sw") || norm.includes("southwest")) return { lat: 53.4125, lng: -113.5745 };
   if (norm.includes("windermere") || norm.includes("ambleside")) return { lat: 53.4342, lng: -113.6045 };
   return { lat: 53.5412, lng: -113.4988 };
 }
 
 function detectServiceTypeFromText(text: string): "Standard Cleaning" | "Deep Cleaning" | "Move-Out Cleaning" {
   const lower = (text || "").toLowerCase();
-  if (lower.includes("move-out") || lower.includes("move out") || lower.includes("move in") || lower.includes("turnover") || lower.includes("tenancy") || lower.includes("possession")) {
+  if (lower.includes("move-out") || lower.includes("move out") || lower.includes("move in") || lower.includes("turnover") || lower.includes("tenancy") || lower.includes("possession") || lower.includes("selling the home") || lower.includes("move-out sale")) {
     return "Move-Out Cleaning";
   }
   if (lower.includes("deep") || lower.includes("oven") || lower.includes("fridge") || lower.includes("baseboard") || lower.includes("spring clean") || lower.includes("post-construction")) {
@@ -8146,9 +8209,10 @@ const TIDYUPS_OWN_PHONE_DIGITS = new Set([
   "5875708005",
   "8254351299",
   "8338439877",
+  "5876027792",
 ]);
 
-// Helper to parse OpenPhone / Quo transcript & AI summary into structured Cleaning Lead details
+// Helper to parse OpenPhone / Quo transcript & AI summary into structured Cleaning Lead & Potential Job details
 function analyzeCallTranscriptForLead(params: {
   summaryText: string;
   transcriptText: string;
@@ -8157,6 +8221,7 @@ function analyzeCallTranscriptForLead(params: {
   lineName?: string;
   answeredBy?: string | null;
   hasVoicemail?: boolean;
+  duration?: number;
 }) {
   const fullCombined = `${params.summaryText || ""} ${params.transcriptText || ""}`.trim();
   const fullLower = fullCombined.toLowerCase();
@@ -8164,11 +8229,12 @@ function analyzeCallTranscriptForLead(params: {
   const answeredByAi =
     params.answeredBy === "SYUMayBM8PL" ||
     fullLower.includes("this is sonia") ||
+    fullLower.includes("this is sona") ||
     fullLower.includes("tidy up's cleaning assistant") ||
     fullLower.includes("tidy up cleaning assistant") ||
     fullLower.includes("administrative assistant");
 
-  // Strip Sonia AI's own greeting lines and Tidyups' own lines so we only evaluate what the CALLER said
+  // Strip Sonia AI's own greeting lines and Tidyups' own lines so we evaluate what the CALLER said
   const callerOnlyTranscript = (params.transcriptText || "")
     .split("\n")
     .filter((line) => {
@@ -8178,6 +8244,7 @@ function analyzeCallTranscriptForLead(params: {
       }
       if (
         l.includes("this is sonia") ||
+        l.includes("this is sona") ||
         l.includes("thank you for calling tidy") ||
         l.includes("thanks for calling tidy") ||
         l.includes("how can i help you today") ||
@@ -8201,9 +8268,15 @@ function analyzeCallTranscriptForLead(params: {
 
   const IGNORED_NAMES = new Set([
     "sonia",
+    "sona",
     "richard",
+    "diana",
     "tidyups",
     "tidyup",
+    "tidy",
+    "tadeus",
+    "caller",
+    "the",
     "just",
     "looking",
     "calling",
@@ -8217,11 +8290,14 @@ function analyzeCallTranscriptForLead(params: {
     "going",
     "trying",
     "administrative",
+    "someone",
+    "somebody",
   ]);
 
   // Extract caller name from AI summary, Sona AI Q&A confirmation, or caller dialogue
   let extractedName = (params.callerNameFromPayload || "").trim();
-  if (!extractedName || extractedName.startsWith("+") || extractedName.startsWith("(")) {
+  if (!extractedName || extractedName.startsWith("+") || extractedName.startsWith("(") || IGNORED_NAMES.has(extractedName.toLowerCase())) {
+    extractedName = "";
     // 1. Sona AI Q&A: "May I have your first and last name?\n+1...: Aniket Deb." or "I have your name as Anaket Dev."
     const sonaPromptMatch = (params.transcriptText || "").match(
       /first and last name\?\s*\n[^\n:]*:\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/i
@@ -8229,84 +8305,155 @@ function analyzeCallTranscriptForLead(params: {
     const sonaConfirmMatch = (params.transcriptText || "").match(
       /I have your name as\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/i
     );
-    if (sonaPromptMatch && !IGNORED_NAMES.has(sonaPromptMatch[1].toLowerCase())) {
+    const explicitCallerCommaMatch = cleanSummary.match(/The caller,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),/);
+    if (explicitCallerCommaMatch && !IGNORED_NAMES.has(explicitCallerCommaMatch[1].toLowerCase())) {
+      extractedName = explicitCallerCommaMatch[1].trim();
+    } else if (sonaPromptMatch && !IGNORED_NAMES.has(sonaPromptMatch[1].toLowerCase())) {
       extractedName = sonaPromptMatch[1].trim();
     } else if (sonaConfirmMatch && !IGNORED_NAMES.has(sonaConfirmMatch[1].toLowerCase())) {
       extractedName = sonaConfirmMatch[1].trim();
     }
 
-    // 2. Summary "Caller <Name>" or "<Name> from ..." or "<Name> is looking for..."
+    // 2. Summary "Caller <Name>" or "<Name> from ..." or "<Name> called/inquired/requested..."
     if (!extractedName) {
       const summaryCallerMatch =
         cleanSummary.match(/Caller\s+([A-Z][a-zA-Z0-9_-]{2,22})\b/) ||
         cleanSummary.match(/^([A-Z][a-z]+\s+[A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed)/i) ||
         cleanSummary.match(/^([A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed)/i) ||
-        cleanSummary.match(/^([A-Z][a-z]{2,18})\s+(?:is looking|called|inquired|wants|needs|asked)\b/);
+        cleanSummary.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:is looking|called|inquired|requested|wants|needs|asked)\b/) ||
+        cleanSummary.match(/contacted\s+([A-Z][a-z]+)\s+regarding\s+a\s+cleaning/i);
       if (summaryCallerMatch) {
         const candidate = summaryCallerMatch[1].trim();
-        if (!IGNORED_NAMES.has(candidate.toLowerCase())) {
+        const firstWord = candidate.split(/\s+/)[0].toLowerCase();
+        if (!IGNORED_NAMES.has(candidate.toLowerCase()) && !IGNORED_NAMES.has(firstWord)) {
           const org = summaryCallerMatch[2]?.trim();
-          extractedName = org && !org.startsWith("+") && !org.toLowerCase().includes("tidyups")
-            ? `${candidate} (${org})`
-            : candidate;
+          extractedName =
+            org && !org.startsWith("+") && !org.toLowerCase().includes("tidyups")
+              ? `${candidate} (${org})`
+              : candidate;
         }
       }
     }
 
     // 3. Direct caller speech "This is <Name>" or "My name is <Name>"
     if (!extractedName) {
-      const trMatch = callerOnlyTranscript.match(/(?:my name is|this is)\s+([A-Z][a-z]{2,18})\b/i);
-      if (trMatch && !IGNORED_NAMES.has(trMatch[1].toLowerCase())) {
-        extractedName = trMatch[1].trim();
+      const trMatch = callerOnlyTranscript.match(/(?:my name is|this is)\s+([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,18})?)\b/i);
+      if (trMatch) {
+        const cand = trMatch[1].trim();
+        const fw = cand.split(/\s+/)[0].toLowerCase();
+        if (!IGNORED_NAMES.has(cand.toLowerCase()) && !IGNORED_NAMES.has(fw)) {
+          extractedName = cand;
+        }
       }
     }
   }
 
-  // Detect non-cleaning / sales / personal / wrong-number calls
+  // Detect explicit B2B sales / telemarketers / Google Ads account reps / wrong numbers
   const isSalesOrNonCleaning =
     lower.includes("yelp's gonna give you") ||
+    lower.includes("over at yelp") ||
+    lower.includes("nicholas from yelp") ||
+    lower.includes("cancel his yelp account") ||
     lower.includes("ai visibility") ||
     lower.includes("holiday marketing") ||
-    lower.includes("speak with a person") ||
-    lower.includes("speak with the person or manager") ||
-    lower.includes("speak with general manager") ||
+    lower.includes("marketing team attempted to reach richard") ||
+    lower.includes("google ads team") ||
+    lower.includes("google ads account") ||
+    lower.includes("nikita desai") ||
+    lower.includes("account manager, chirag") ||
+    lower.includes("meeting with shavag") ||
+    lower.includes("meeting with chiran") ||
+    lower.includes("pos system") ||
+    lower.includes("point of sale") ||
+    lower.includes("pos source") ||
+    lower.includes("divya canada") ||
+    lower.includes("cs pay") ||
+    lower.includes("merchant services") ||
+    lower.includes("payment processing rates") ||
+    lower.includes("credit card payment acceptance") ||
+    lower.includes("payment machines") ||
     lower.includes("lakewood chev") ||
     lower.includes("chevy trax") ||
+    lower.includes("fleet vehicle") ||
+    lower.includes("rbc royal bank") ||
+    lower.includes("business account opening") ||
+    lower.includes("tw edwards studio") ||
+    lower.includes("regarding their domain") ||
+    lower.includes("direct energy for business") ||
+    lower.includes("not interested in the offer") ||
     lower.includes("trading account") ||
     lower.includes("sean stevens") ||
     lower.includes("mistakenly reached") ||
+    lower.includes("is this ray") ||
     lower.includes("wrong number") ||
     lower.includes("book conversation") ||
-    lower.includes("doing overtime and was waiting") ||
-    fullLower.includes("no actionable details to summarize");
+    lower.includes("doing overtime and was waiting");
 
-  // Detect positive cleaning intent in summary or caller's own speech
+  // Detect positive cleaning / quote / booking / property service intent
   const hasCleaningIntent =
     !isSalesOrNonCleaning &&
     (lower.includes("form for cleaning") ||
       lower.includes("cleaning services") ||
+      lower.includes("cleaning service") ||
+      lower.includes("request for a cleaning") ||
+      lower.includes("request for cleaning") ||
       lower.includes("inquired about cleaning") ||
       lower.includes("inquiring about cleaning") ||
+      lower.includes("inquired about pricing") ||
+      lower.includes("inquire about the pricing") ||
       lower.includes("about a cleaning") ||
       lower.includes("for the cleaning") ||
+      lower.includes("cleaning at") ||
+      lower.includes("cleaning situation") ||
+      lower.includes("cleaning quote") ||
+      lower.includes("home cleaning") ||
+      lower.includes("housekeeping") ||
       lower.includes("house cleaned") ||
       lower.includes("get my house") ||
+      lower.includes("clean on my place") ||
+      lower.includes("cleaning on my place") ||
       lower.includes("regular cleaning") ||
+      lower.includes("regular clean") ||
       lower.includes("deep clean") ||
       lower.includes("move-out") ||
       lower.includes("move out") ||
+      lower.includes("move-in") ||
+      lower.includes("move in") ||
+      lower.includes("moving into") ||
       lower.includes("basement suite") ||
+      lower.includes("townhome") ||
+      lower.includes("apartment") ||
+      lower.includes("one-bedroom flat") ||
       lower.includes("airbnb") ||
       lower.includes("bedroom") ||
+      lower.includes("one bed") ||
+      lower.includes("two bed") ||
+      lower.includes("three bed") ||
+      lower.includes("four bed") ||
       lower.includes("washroom") ||
       lower.includes("bathroom") ||
+      lower.includes("one bath") ||
+      lower.includes("two bath") ||
       lower.includes("sent me a quote") ||
+      lower.includes("send a quote") ||
+      lower.includes("provide a quote") ||
+      lower.includes("approving a quote") ||
+      lower.includes("receiving a quote") ||
+      lower.includes("promo code") ||
+      lower.includes("arrival time") ||
+      lower.includes("cleaner availability") ||
       lower.includes("clean the house") ||
       lower.includes("clean my") ||
       lower.includes("want a cleaning") ||
-      lower.includes("need a cleaning"));
+      lower.includes("need a cleaning") ||
+      lower.includes("1907 49th street"));
 
-  // Extract bedrooms & bathrooms (including Sona AI's "How many bedrooms... And how many bathrooms... -> One. One.")
+  // Check if caller is from a local Alberta area code (780, 587, 825, 403, 368)
+  const callerDigits = normalizePhoneDigits(params.callerPhone);
+  const callerAreaCode = callerDigits.slice(0, 3);
+  const isAlbertaCaller = ["780", "587", "825", "403", "368"].includes(callerAreaCode);
+
+  // Extract bedrooms & bathrooms
   let bedrooms = "3 Bedrooms";
   let bathrooms = "2 Bathrooms";
 
@@ -8330,12 +8477,12 @@ function analyzeCallTranscriptForLead(params: {
     if (/\b(one|1)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "1 Bathroom";
     else if (/\b(1\.5|one and a half)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "1.5 Bathrooms";
     else if (/\b(two|2)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "2 Bathrooms";
-    else if (/\b(2\.5|two and a half)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "2.5 Bathrooms";
+    else if (/\b(2\.5|two[\s-]*and[\s-]*a[\s-]*half)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "2.5 Bathrooms";
     else if (/\b(three|3)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "3+ Bathrooms";
     else if (bedrooms === "1 Bedroom") bathrooms = "1 Bathroom";
   }
 
-  // Extract street address if mentioned (including Sona AI unit/building clarification)
+  // Extract street address if mentioned
   let address = "Edmonton, AB";
   const unitBuildingMatch = (params.transcriptText || "").match(
     /(\d{1,4}),\s*Unit Number\s*(\d{3,5})\s*is the building number,\s*([0-9A-Za-z\s]+?(?:Ave|Avenue|St|Street|Rd|Road|Way|Dr|Drive))\b/i
@@ -8343,15 +8490,19 @@ function analyzeCallTranscriptForLead(params: {
   const addrMatch =
     cleanSummary.match(/located at\s+([^.,\n]+)/i) ||
     cleanSummary.match(/address provided[^is]*is\s+([^.,\n]+)/i) ||
-    cleanSummary.match(/cleaning at\s+(\d{3,5}\s+[A-Za-z0-9.\s]{2,25}(?:Ave|Avenue|St|Street|Rd|Road|Way|Dr|Drive|Blvd|Crescent|Place|Court))/i) ||
+    cleanSummary.match(/cleaning at\s+(\d{3,5}\s+[A-Za-z0-9.\s]{2,25}(?:Ave|Avenue|St|Street|Rd|Road|Way|Dr|Drive|Blvd|Crescent|Place|Court)(?:\s*(?:NW|NE|SW|SE|Northwest|Southwest|Northeast|Southeast))?)/i) ||
     combined.match(/\b(\d{3,5}\s+[A-Za-z0-9.\s]{2,25}(?:Ave|Avenue|St|Street|Rd|Road|Way|Dr|Drive|Blvd|Crescent|Place|Court)(?:\s*(?:NW|NE|SW|SE|Northwest|Southwest|Northeast|Southeast))?)\b/i);
 
   if (unitBuildingMatch) {
     address = `Unit ${unitBuildingMatch[1]}, ${unitBuildingMatch[2]} ${unitBuildingMatch[3].trim()} NW, Edmonton`;
   } else if (addrMatch && addrMatch[1]) {
     address = addrMatch[1].trim();
+  } else if (lower.includes("el mora")) {
+    address = "El Mora Apartments — Edmonton, AB";
   } else if (lower.includes("basement suite")) {
     address = "Basement Suite — Edmonton, AB";
+  } else if (lower.includes("townhome")) {
+    address = "Townhome — Edmonton, AB";
   }
 
   // Check if Sona AI asked "Basic, deep, move in, or move out?" -> "Deep."
@@ -8366,36 +8517,66 @@ function analyzeCallTranscriptForLead(params: {
   if (lower.includes("airbnb") || lower.includes("basement suite")) {
     serviceRequested = `${bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed")} ${bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath")} Airbnb / Basement Suite Cleaning`;
     quotedAmount = 189.0;
+  } else if (lower.includes("light housekeeping")) {
+    serviceRequested = "Light Housekeeping (3 Hours Minimum)";
+    quotedAmount = 140.0;
+  } else if ((lower.includes("move-out") || lower.includes("move out") || lower.includes("move in") || lower.includes("moving into") || lower.includes("selling the home")) && !lower.includes("not a move-out")) {
+    serviceRequested = `${bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed")} ${bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath")} Move-Out / Move-In Cleaning`;
+    quotedAmount = bedrooms.startsWith("4") ? 385.0 : 325.0;
   } else if (requestedDeepViaSona || lower.includes("deep clean")) {
     serviceRequested = `${bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed")} ${bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath")} Deep Cleaning`;
     quotedAmount = bedrooms === "1 Bedroom" ? 165.0 : 275.0;
-  } else if ((lower.includes("move-out") || lower.includes("move out") || lower.includes("move in")) && !lower.includes("not a move-out")) {
-    serviceRequested = "Move-Out / Move-In Deep Cleaning";
-    quotedAmount = 325.0;
   } else if (hasCleaningIntent) {
     serviceRequested = `${bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed")} ${bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath")} Regular House Cleaning`;
     quotedAmount = bedrooms === "1 Bedroom" ? 140.0 : bedrooms.startsWith("2") ? 189.0 : 221.07;
+  } else {
+    serviceRequested = "Inbound Phone Inquiry — Potential Cleaning Job (Follow-Up)";
+    quotedAmount = 221.07;
   }
 
-  let callCategory: "CLEANING_LEAD" | "SALES_OR_MARKETING" | "PERSONAL_OR_OTHER" | "SHORT_HANGUP" = "PERSONAL_OR_OTHER";
+  // Classify every call: GOOD_LEAD, POTENTIAL_JOB, or BAD_LEAD
+  const dur = Number(params.duration || 0);
+  const hasMeaningfulSpeech = Boolean(callerOnlyTranscript.trim().length > 15 || cleanSummary.trim().length > 15 || params.hasVoicemail);
+
+  let leadVerdict: "GOOD_LEAD" | "POTENTIAL_JOB" | "BAD_LEAD" = "POTENTIAL_JOB";
+  let leadVerdictReason = "Inbound phone call — Potential Cleaning Job (Follow-Up Recommended)";
+  let callCategory: "CLEANING_LEAD" | "POTENTIAL_JOB_FOLLOWUP" | "SALES_OR_MARKETING" | "PERSONAL_OR_OTHER" | "SHORT_HANGUP" = "POTENTIAL_JOB_FOLLOWUP";
+
   if (hasCleaningIntent) {
+    leadVerdict = "GOOD_LEAD";
+    leadVerdictReason = `Confirmed Cleaning Inquiry: ${serviceRequested}`;
     callCategory = "CLEANING_LEAD";
-  } else if (
-    lower.includes("yelp") ||
-    lower.includes("holiday marketing") ||
-    lower.includes("ai visibility") ||
-    lower.includes("lakewood chev") ||
-    lower.includes("chevy trax")
-  ) {
+  } else if (isSalesOrNonCleaning) {
+    leadVerdict = "BAD_LEAD";
+    leadVerdictReason = cleanSummary
+      ? `Non-Cleaning / Solicitor / B2B Call: ${cleanSummary.slice(0, 110)}`
+      : "Screened Sales / Solicitor / Non-Cleaning Call";
     callCategory = "SALES_OR_MARKETING";
-  } else if (!combined || fullLower.includes("no actionable details") || combined.length < 60) {
+  } else if (hasMeaningfulSpeech || dur >= 12 || isAlbertaCaller) {
+    // Per owner rule: "ALL CALLS could be a potential job" — any non-solicitor call with speech, duration >= 12s, or local Alberta caller is surfaced as a Potential Job!
+    leadVerdict = "POTENTIAL_JOB";
+    leadVerdictReason = cleanSummary
+      ? `Potential Job / Caller Follow-Up: ${cleanSummary.slice(0, 110)}`
+      : isAlbertaCaller
+      ? `Local Alberta Caller (${params.callerPhone}) — Missed/Short Call, Call Back for Potential Job!`
+      : "Inbound Caller — Check Transcript / Follow Up for Potential Job";
+    callCategory = "POTENTIAL_JOB_FOLLOWUP";
+  } else {
+    // Out-of-province 0s-11s silent/no-answer/robocall hangup
+    leadVerdict = "BAD_LEAD";
+    leadVerdictReason = `Short Hangup / Unanswered Out-of-Area Call (${dur}s)`;
     callCategory = "SHORT_HANGUP";
   }
+
+  const isPotentialOrGoodLead = leadVerdict === "GOOD_LEAD" || leadVerdict === "POTENTIAL_JOB";
 
   return {
     answeredByAi,
     extractedName,
     hasCleaningIntent,
+    isPotentialOrGoodLead,
+    leadVerdict,
+    leadVerdictReason,
     isSalesOrNonCleaning,
     callCategory,
     bedrooms,
@@ -8406,8 +8587,13 @@ function analyzeCallTranscriptForLead(params: {
   };
 }
 
-// Upsert a Cleaning Call / Voicemail / Sonia AI Screened Lead into store.adLeads (Clean Google Sheet Hub)
-function upsertCallLeadIntoCleanSheet(store: any, callLogEntry: any, analysis: ReturnType<typeof analyzeCallTranscriptForLead>) {
+// Upsert a Cleaning Call / Potential Job Lead into store.adLeads (Clean Google Sheet Hub)
+function upsertCallLeadIntoCleanSheet(
+  store: any,
+  callLogEntry: any,
+  analysis: ReturnType<typeof analyzeCallTranscriptForLead>,
+  forceInclude = false
+) {
   if (!Array.isArray(store.adLeads)) store.adLeads = [];
   const callerDigits = normalizePhoneDigits(callLogEntry.callerPhone);
   if (!callerDigits || TIDYUPS_OWN_PHONE_DIGITS.has(callerDigits)) return null;
@@ -8426,6 +8612,7 @@ function upsertCallLeadIntoCleanSheet(store: any, callLogEntry: any, analysis: R
 
   const formattedTranscriptNote = [
     callLogEntry.answeredByAi ? `🤖 Screened by Sonia AI (${callLogEntry.lineName})` : `📞 Quo Call (${callLogEntry.lineName})`,
+    `Verdict: ${analysis.leadVerdict === "GOOD_LEAD" ? "✅ GOOD LEAD" : analysis.leadVerdict === "POTENTIAL_JOB" ? "🟡 POTENTIAL JOB (FOLLOW UP)" : "🚫 BAD LEAD"}`,
     hasRichSummary ? `AI Summary: ${callLogEntry.summary}` : "",
     callLogEntry.nextSteps?.length ? `Next Steps: ${callLogEntry.nextSteps.join("; ")}` : "",
     callLogEntry.transcriptText ? `Transcript: ${callLogEntry.transcriptText.replace(/\n+/g, " | ")}` : "",
@@ -8435,6 +8622,8 @@ function upsertCallLeadIntoCleanSheet(store: any, callLogEntry: any, analysis: R
 
   if (existingLead) {
     (existingLead as any).callId = callLogEntry.callId || callLogEntry.id;
+    (existingLead as any).leadVerdict = analysis.leadVerdict;
+    (existingLead as any).leadVerdictReason = analysis.leadVerdictReason;
     if (
       callLogEntry.transcriptText &&
       (!existingLead.transcriptText || callLogEntry.transcriptText.length > String(existingLead.transcriptText).length)
@@ -8449,6 +8638,8 @@ function upsertCallLeadIntoCleanSheet(store: any, callLogEntry: any, analysis: R
       !hasLinkedQuote &&
       analysis.extractedName &&
       (existingLead.customerName?.startsWith("Inbound") ||
+        existingLead.customerName?.startsWith("Local Caller") ||
+        existingLead.customerName?.startsWith("Potential") ||
         existingLead.customerName?.startsWith("just") ||
         existingLead.customerName?.startsWith("Glade"))
     ) {
@@ -8458,8 +8649,12 @@ function upsertCallLeadIntoCleanSheet(store: any, callLogEntry: any, analysis: R
     }
     if (
       !hasLinkedQuote &&
-      (analysis.serviceRequested.includes("Airbnb") || analysis.serviceRequested.includes("Deep Cleaning")) &&
-      !existingLead.serviceRequested?.includes("Airbnb")
+      analysis.hasCleaningIntent &&
+      (existingLead.serviceRequested?.includes("Potential Cleaning Job") ||
+        analysis.serviceRequested.includes("Airbnb") ||
+        analysis.serviceRequested.includes("Deep Cleaning") ||
+        analysis.serviceRequested.includes("Move-Out") ||
+        analysis.serviceRequested.includes("Housekeeping"))
     ) {
       existingLead.serviceRequested = analysis.serviceRequested;
       existingLead.bedrooms = analysis.bedrooms;
@@ -8486,15 +8681,17 @@ function upsertCallLeadIntoCleanSheet(store: any, callLogEntry: any, analysis: R
     return existingLead;
   }
 
-  // Only auto-create a new row on the Clean Google Sheet if it is a Cleaning Lead
-  if (!analysis.hasCleaningIntent) {
+  // Auto-create a row on the Clean Google Sheet for EVERY Good Lead and Potential Job (unless it's a confirmed Bad Lead / Solicitor)
+  if (!forceInclude && !analysis.isPotentialOrGoodLead) {
     return null;
   }
 
   const displayName =
     analysis.extractedName && !analysis.extractedName.startsWith("+")
       ? `${analysis.extractedName} (${callLogEntry.answeredByAi ? "Sonia AI / Voicemail" : "Phone Lead"})`
-      : `Inbound Caller ${callLogEntry.callerPhone}`;
+      : analysis.leadVerdict === "GOOD_LEAD"
+      ? `Cleaning Caller ${callLogEntry.callerPhone}`
+      : `Potential Job Caller ${callLogEntry.callerPhone}`;
 
   const newSheetLead: any = {
     id: `lead-quo-${callLogEntry.callId || Date.now().toString(36)}`,
@@ -8515,7 +8712,9 @@ function upsertCallLeadIntoCleanSheet(store: any, callLogEntry: any, analysis: R
     campaignName: `Quo ${callLogEntry.lineName} — Transcript Auto-Sync`,
     dateReceived: callLogEntry.timestamp || new Date().toISOString(),
     status: "New",
-    verdict: "Good lead",
+    verdict: analysis.leadVerdict === "GOOD_LEAD" ? "Good lead" : "Follow-up",
+    leadVerdict: analysis.leadVerdict,
+    leadVerdictReason: analysis.leadVerdictReason,
     isJobberSynced: false,
     quotedAmount: analysis.quotedAmount,
     notes: formattedTranscriptNote,
@@ -8531,21 +8730,26 @@ function upsertCallLeadIntoCleanSheet(store: any, callLogEntry: any, analysis: R
   return newSheetLead;
 }
 
-// Comprehensive Inbound Quo (OpenPhone) Webhook Processor
-async function processQuoCallEvent(event: any) {
-  const store = loadStore() || {
-    version: 1,
-    lastSavedAt: new Date().toISOString(),
-    tickets: INITIAL_TICKETS,
-    cleanerOverrides: {},
-    scheduledVisits: [],
-    unscheduledJobs: [],
-    quotes: [],
-    invoices: [],
-    clients: [],
-    quoCallLogs: [],
-    adLeads: [],
-  };
+// Comprehensive Inbound Quo (OpenPhone) Webhook & Sync Processor
+async function processQuoCallEvent(
+  event: any,
+  options?: { existingStore?: any; skipSave?: boolean }
+) {
+  const store =
+    options?.existingStore ||
+    loadStore() || {
+      version: 1,
+      lastSavedAt: new Date().toISOString(),
+      tickets: INITIAL_TICKETS,
+      cleanerOverrides: {},
+      scheduledVisits: [],
+      unscheduledJobs: [],
+      quotes: [],
+      invoices: [],
+      clients: [],
+      quoCallLogs: [],
+      adLeads: [],
+    };
 
   if (!store.quoCallLogs) store.quoCallLogs = [];
   if (!store.clients) store.clients = [];
@@ -8557,18 +8761,33 @@ async function processQuoCallEvent(event: any) {
   const dataObj = event.data?.object || event.call || event.data || event;
 
   const callId = dataObj.callId || dataObj.id || `call_${Date.now()}`;
-  const apiKey = quoConfig.apiKey || process.env.QUO_API_KEY || "";
+  const apiKey = getEffectiveQuoApiKey();
 
-  let remoteCall: any = null;
+  // Check if we already have this call's transcript & summary cached in store.quoCallLogs
+  const cachedCallLog = (store.quoCallLogs || []).find((c: any) => c.callId === callId || c.id === callId);
+
+  let remoteCall: any = dataObj.direction && dataObj.createdAt ? dataObj : null;
   let remoteTranscript: any = null;
   let remoteSummary: any = null;
 
-  if (apiKey && callId && String(callId).startsWith("AC")) {
+  const needsTranscriptFetch =
+    !cachedCallLog ||
+    (!cachedCallLog.transcriptText && Number(dataObj.duration ?? cachedCallLog.duration ?? 0) > 0) ||
+    eventType.includes("transcript") ||
+    eventType.includes("summary");
+
+  if (apiKey && callId && String(callId).startsWith("AC") && (needsTranscriptFetch || !remoteCall)) {
     try {
       const [cRes, tRes, sRes] = await Promise.all([
-        fetch(`https://api.openphone.com/v1/calls/${callId}`, { headers: { Authorization: apiKey } }).catch(() => null),
-        fetch(`https://api.openphone.com/v1/call-transcripts/${callId}`, { headers: { Authorization: apiKey } }).catch(() => null),
-        fetch(`https://api.openphone.com/v1/call-summaries/${callId}`, { headers: { Authorization: apiKey } }).catch(() => null),
+        !remoteCall
+          ? fetch(`https://api.openphone.com/v1/calls/${callId}`, { headers: { Authorization: apiKey } }).catch(() => null)
+          : Promise.resolve(null),
+        !cachedCallLog?.transcriptText
+          ? fetch(`https://api.openphone.com/v1/call-transcripts/${callId}`, { headers: { Authorization: apiKey } }).catch(() => null)
+          : Promise.resolve(null),
+        !cachedCallLog?.summary || cachedCallLog.summary === "Inbound voice call completed"
+          ? fetch(`https://api.openphone.com/v1/call-summaries/${callId}`, { headers: { Authorization: apiKey } }).catch(() => null)
+          : Promise.resolve(null),
       ]);
       if (cRes && cRes.ok) remoteCall = (await cRes.json()).data;
       if (tRes && tRes.ok) remoteTranscript = (await tRes.json()).data;
@@ -8578,15 +8797,17 @@ async function processQuoCallEvent(event: any) {
     }
   }
 
-  const rawDirection = remoteCall?.direction || dataObj.direction || "incoming";
+  const rawDirection = remoteCall?.direction || dataObj.direction || cachedCallLog?.direction || "incoming";
   const direction = rawDirection === "incoming" || rawDirection === "inbound" ? "inbound" : "outbound";
-  const phoneNumberId = remoteCall?.phoneNumberId || dataObj.phoneNumberId || "";
+  const phoneNumberId = remoteCall?.phoneNumberId || dataObj.phoneNumberId || cachedCallLog?.phoneNumberId || "";
 
   const OPENPHONE_LINE_NAMES: Record<string, string> = {
-    PN47TA8kue: "Main Line (+1 587-416-9181)",
-    PNf7FWXnky: "Kijiji Line (+1 587-900-7223)",
-    PNvCM3tmPQ: "Google Line (+1 587-742-2500)",
-    PNahmHFAAr: "Yelp Line (+1 587-570-8005)",
+    PN47TA8kue: "Tidyups Cleaning & Jobber (+1 587-416-9181)",
+    PNf7FWXnky: "Tidyups Cleaning - GMB (+1 587-900-7223)",
+    PNvCM3tmPQ: "Cleaning Services Ads (+1 587-742-2500)",
+    PNahmHFAAr: "Primary Dispatch (+1 587-570-8005)",
+    PNEhbG5QcA: "Toll Free (+1 833-843-9877)",
+    PNJINSGBnZ: "Door Hangers & Signs (+1 587-602-7792)",
     PNBTA2275u: "Website Line (+1 825-435-1299)",
   };
   const matchedLine = quoConfig.phoneNumbers.find(
@@ -8594,7 +8815,7 @@ async function processQuoCallEvent(event: any) {
   );
   const lineName = OPENPHONE_LINE_NAMES[phoneNumberId] || (matchedLine ? matchedLine.name : "Primary Dispatch");
 
-  // Always pick the EXTERNAL participant (never one of Tidyups' own 5 OpenPhone lines)
+  // Always pick the EXTERNAL participant (never one of Tidyups' own 6 OpenPhone lines)
   const rawParticipants: string[] = Array.isArray(remoteCall?.participants)
     ? remoteCall.participants
     : Array.isArray(dataObj.participants)
@@ -8608,6 +8829,7 @@ async function processQuoCallEvent(event: any) {
     (!TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(remoteCall?.from)) ? remoteCall?.from : "") ||
     (!TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(dataObj.from)) ? dataObj.from : "") ||
     dataObj.callerPhone ||
+    cachedCallLog?.callerPhone ||
     rawParticipants[0] ||
     "";
   const rawTo = remoteCall?.to || dataObj.to || "";
@@ -8615,8 +8837,8 @@ async function processQuoCallEvent(event: any) {
   const callerDigits = normalizePhoneDigits(callerRaw);
   const cleanCallerPhone = formatPhoneDisplay(callerRaw || "Unknown");
 
-  const duration = Number(remoteCall?.duration ?? dataObj.duration ?? dataObj.durationSeconds ?? 0);
-  const answeredBy = remoteCall?.answeredBy ?? dataObj.answeredBy ?? null;
+  const duration = Number(remoteCall?.duration ?? dataObj.duration ?? dataObj.durationSeconds ?? cachedCallLog?.duration ?? 0);
+  const answeredBy = remoteCall?.answeredBy ?? dataObj.answeredBy ?? cachedCallLog?.answeredBy ?? null;
   const voicemailObj = remoteCall?.voicemail || dataObj.voicemail || null;
 
   const dialogueArr =
@@ -8639,19 +8861,26 @@ async function processQuoCallEvent(event: any) {
           .join("\n")
       : "") ||
     voicemailObj?.transcript ||
+    cachedCallLog?.transcriptText ||
     "";
   const transcriptText = String(rawTranscriptText || "").trim();
 
   const rawSummaryVal = remoteSummary?.summary ?? dataObj.summary?.text ?? dataObj.summary ?? "";
-  const summaryText = Array.isArray(rawSummaryVal)
+  const fetchedSummaryText = Array.isArray(rawSummaryVal)
     ? rawSummaryVal.join(" ")
     : typeof rawSummaryVal === "string"
     ? rawSummaryVal
     : "";
+  const summaryText =
+    fetchedSummaryText ||
+    (cachedCallLog?.summary && cachedCallLog.summary !== "Inbound voice call completed" ? cachedCallLog.summary : "");
+
   const nextStepsArr: string[] = Array.isArray(remoteSummary?.nextSteps)
     ? remoteSummary.nextSteps
     : Array.isArray(dataObj.nextSteps)
     ? dataObj.nextSteps
+    : Array.isArray(cachedCallLog?.nextSteps)
+    ? cachedCallLog.nextSteps
     : [];
 
   const summary = (
@@ -8663,9 +8892,10 @@ async function processQuoCallEvent(event: any) {
     voicemailObj?.url ||
     dataObj.media?.find((m: any) => m.type === "recording")?.url ||
     dataObj.recordingUrl ||
+    cachedCallLog?.recordingUrl ||
     "";
   const callerNameFromPayload = dataObj.callerName || dataObj.participants?.[0]?.name || "";
-  const timestamp = remoteCall?.createdAt || dataObj.createdAt || dataObj.completedAt || new Date().toISOString();
+  const timestamp = remoteCall?.createdAt || dataObj.createdAt || dataObj.completedAt || cachedCallLog?.timestamp || new Date().toISOString();
 
   const analysis = analyzeCallTranscriptForLead({
     summaryText: summary,
@@ -8675,6 +8905,7 @@ async function processQuoCallEvent(event: any) {
     lineName,
     answeredBy,
     hasVoicemail: Boolean(voicemailObj),
+    duration,
   });
 
   // 1. MATCH TO AN EXISTING JOB IN SCHEDULED VISITS
@@ -8691,17 +8922,30 @@ async function processQuoCallEvent(event: any) {
     }
   }
 
-  const effectiveCallerName =
-    analysis.extractedName || callerNameFromPayload || (matchedJob ? matchedJob.clientName : cleanCallerPhone);
+  // Also check if this caller matches an existing Client record in store.clients
+  let matchedClientRecord: any = null;
+  if (callerDigits) {
+    matchedClientRecord = (store.clients || []).find((c: any) => {
+      const cDigits = normalizePhoneDigits(c.phone || c.secondaryPhone);
+      return cDigits && (cDigits === callerDigits || cDigits.endsWith(callerDigits) || callerDigits.endsWith(cDigits));
+    });
+  }
 
-  // Check if caller is already blocked in Spam Shield or if Sonia AI screened this as a Solicitor / Short Hangup Robocall
+  const effectiveCallerName =
+    analysis.extractedName ||
+    callerNameFromPayload ||
+    (matchedJob ? matchedJob.clientName : "") ||
+    (matchedClientRecord && !matchedClientRecord.name?.startsWith("+") ? matchedClientRecord.name : "") ||
+    cleanCallerPhone;
+
+  // Check Spam Shield & manual overrides
   if (!store.spamShieldConfig) {
     store.spamShieldConfig = { ...DEFAULT_SPAM_SHIELD_CONFIG, unblockedNumbers: [] } as any;
   }
   if (!Array.isArray(store.blockedCallsHistory)) {
     store.blockedCallsHistory = [...INITIAL_BLOCKED_CALLS_HISTORY];
   }
-  const existingCallLog = (store.quoCallLogs || []).find((c: any) => c.callId === callId || c.id === callId);
+  const existingCallLog = cachedCallLog;
   const unblockedDigitsSet = new Set<string>(
     ((store.spamShieldConfig as any).unblockedNumbers || []).map((n: string) => normalizePhoneDigits(n)).filter(Boolean)
   );
@@ -8714,25 +8958,32 @@ async function processQuoCallEvent(event: any) {
       })
     : null;
 
-  const isShortHangupCandidate =
-    analysis.callCategory === "SHORT_HANGUP" &&
-    duration > 0 &&
-    duration < 30 &&
-    eventType !== "call.completed";
+  // If matched to a job/quote or explicitly unblocked, promote verdict to GOOD_LEAD
+  if (matchedJob || matchedQuote || isExplicitlyUnblocked || existingCallLog?.manuallyMarkedGoodLead) {
+    analysis.hasCleaningIntent = true;
+    analysis.isPotentialOrGoodLead = true;
+    analysis.leadVerdict = "GOOD_LEAD";
+    analysis.callCategory = "CLEANING_LEAD";
+    if (matchedJob) {
+      analysis.leadVerdictReason = `Matched to Scheduled Visit: ${matchedJob.title}`;
+    } else if (matchedQuote) {
+      analysis.leadVerdictReason = `Matched to Quote ${matchedQuote.quoteNumber} (${matchedQuote.clientName})`;
+    } else {
+      analysis.leadVerdictReason = "Verified Good Lead — Potential Cleaning Job";
+    }
+  }
 
   const isAutoSolicitorOrSpam =
     !matchedJob &&
     !matchedQuote &&
-    !analysis.hasCleaningIntent &&
+    !analysis.isPotentialOrGoodLead &&
     !isExplicitlyUnblocked &&
     (spamEval.isBlocked ||
-      Boolean(existingCallLog?.isBlocked) ||
-      existingCallLog?.status === "SOLICITOR_BLOCKED" ||
-      analysis.callCategory === "SALES_OR_MARKETING" ||
-      isShortHangupCandidate);
+      Boolean(existingCallLog?.manuallyBlocked) ||
+      analysis.leadVerdict === "BAD_LEAD");
 
-  // If this call is a legitimate cleaning lead or matches a quote/job, ensure it is not mistakenly in blockedNumbers
-  if ((analysis.hasCleaningIntent || matchedQuote || matchedJob) && callerDigits) {
+  // If this call is a Good Lead or Potential Job, ensure it is NOT mistakenly in blockedNumbers
+  if ((analysis.isPotentialOrGoodLead || matchedQuote || matchedJob) && callerDigits && !existingCallLog?.manuallyBlocked) {
     store.spamShieldConfig.blockedNumbers = (store.spamShieldConfig.blockedNumbers || []).filter(
       (b: string) => normalizePhoneDigits(b) !== callerDigits
     );
@@ -8745,8 +8996,10 @@ async function processQuoCallEvent(event: any) {
     ? "MATCHED_TO_JOB"
     : matchedQuote
     ? "MATCHED_TO_QUOTE"
-    : analysis.hasCleaningIntent
+    : analysis.leadVerdict === "GOOD_LEAD"
     ? "CLEANING_LEAD"
+    : analysis.leadVerdict === "POTENTIAL_JOB"
+    ? "POTENTIAL_JOB"
     : isAutoSolicitorOrSpam
     ? "SOLICITOR_BLOCKED"
     : "SCREENED_CALL";
@@ -8769,18 +9022,33 @@ async function processQuoCallEvent(event: any) {
     answeredByAi: analysis.answeredByAi,
     callCategory: analysis.callCategory,
     hasCleaningIntent: analysis.hasCleaningIntent,
+    isPotentialOrGoodLead: analysis.isPotentialOrGoodLead,
+    leadVerdict: isAutoSolicitorOrSpam ? "BAD_LEAD" : analysis.leadVerdict,
+    leadVerdictLabel: isAutoSolicitorOrSpam
+      ? "🚫 Bad Lead — Solicitor / Spam"
+      : analysis.leadVerdict === "GOOD_LEAD"
+      ? "✅ Good Lead — Potential Job"
+      : "🟡 Potential Job — Follow-Up",
+    leadVerdictReason: isAutoSolicitorOrSpam
+      ? analysis.leadVerdictReason || `Screened Solicitor / Spam (${cleanCallerPhone})`
+      : analysis.leadVerdictReason,
+    extractedAddress: analysis.address,
+    extractedBedrooms: analysis.bedrooms,
+    extractedBathrooms: analysis.bathrooms,
+    extractedService: analysis.serviceRequested,
+    estimatedQuote: analysis.quotedAmount,
     timestamp,
     matchedJobId: matchedJob ? matchedJob.id : null,
     matchedJobTitle: matchedJob ? matchedJob.title : null,
     status: resolvedStatus,
     isBlocked: isAutoSolicitorOrSpam,
-    manuallyBlocked: Boolean(existingCallLog?.manuallyBlocked || spamEval.isBlocked),
+    manuallyBlocked: Boolean(existingCallLog?.manuallyBlocked),
+    manuallyMarkedGoodLead: Boolean(existingCallLog?.manuallyMarkedGoodLead),
     blockedReason: isAutoSolicitorOrSpam
       ? existingCallLog?.blockedReason ||
         spamEval.reason ||
-        (analysis.callCategory === "SALES_OR_MARKETING"
-          ? `Screened Sales / Solicitor Call (${effectiveCallerName})`
-          : `Screened Robocall / Short Hangup (${cleanCallerPhone})`)
+        analysis.leadVerdictReason ||
+        `Screened Sales / Solicitor Call (${effectiveCallerName})`
       : undefined,
   };
 
@@ -8810,7 +9078,7 @@ async function processQuoCallEvent(event: any) {
     }
   }
 
-  // Upsert into Clean Google Sheet Hub (store.adLeads) if it matches an existing lead or has cleaning intent
+  // Upsert into Clean Google Sheet Hub (store.adLeads) if it is a Good Lead or Potential Job
   const syncedSheetLead = upsertCallLeadIntoCleanSheet(store, callLogEntry, analysis);
   if (syncedSheetLead) {
     callLogEntry.cleanSheetLeadId = syncedSheetLead.id;
@@ -8829,8 +9097,7 @@ async function processQuoCallEvent(event: any) {
     if (!matchedJob.notes?.includes(summary.slice(0, 40))) {
       matchedJob.notes = matchedJob.notes ? `${matchedJob.notes}\n${auditNote}` : auditNote;
     }
-  } else if (analysis.hasCleaningIntent) {
-    let matchedQuote = store.quotes?.find((q: any) => normalizePhoneDigits(q.clientPhone) === callerDigits);
+  } else if (analysis.isPotentialOrGoodLead) {
     if (matchedQuote) {
       if (!matchedQuote.callTranscripts) matchedQuote.callTranscripts = [];
       const existingQIdx = matchedQuote.callTranscripts.findIndex(
@@ -8846,13 +9113,13 @@ async function processQuoCallEvent(event: any) {
       }
       callLogEntry.matchedJobTitle = `Quote ${matchedQuote.quoteNumber} (${matchedQuote.clientName})`;
       callLogEntry.status = "MATCHED_TO_QUOTE";
-    } else {
+    } else if (analysis.hasCleaningIntent) {
       const existingUnsched = store.unscheduledJobs.find(
         (u: any) => normalizePhoneDigits(u.clientPhone) === callerDigits
       );
       if (!existingUnsched) {
         const newLeadTicket = {
-          id: `lead-quo-${Date.now()}`,
+          id: `lead-quo-${callId}`,
           ticketNumber: `LEAD-${Math.floor(1000 + Math.random() * 9000)}`,
           title: `Inbound Call: ${effectiveCallerName}`,
           clientName: effectiveCallerName,
@@ -8921,11 +9188,13 @@ async function processQuoCallEvent(event: any) {
   } else {
     store.quoCallLogs.unshift(callLogEntry);
   }
-  if (store.quoCallLogs.length > 200) {
-    store.quoCallLogs = store.quoCallLogs.slice(0, 200);
+  if (store.quoCallLogs.length > 300) {
+    store.quoCallLogs = store.quoCallLogs.slice(0, 300);
   }
 
-  saveStore(store);
+  if (!options?.skipSave) {
+    saveStore(store);
+  }
   return {
     success: true,
     callLog: callLogEntry,
@@ -8934,14 +9203,35 @@ async function processQuoCallEvent(event: any) {
   };
 }
 
-// Pull recent calls, voicemails, Sonia AI screening transcripts, and AI summaries directly from OpenPhone API
+// Pull ALL recent calls, voicemails, Sonia AI screening transcripts, and AI summaries across ALL 6 OpenPhone lines
 async function syncLiveQuoCallsAndTranscripts() {
-  const apiKey = quoConfig.apiKey || process.env.QUO_API_KEY || "";
+  const apiKey = getEffectiveQuoApiKey();
   if (!apiKey) {
     return { success: false, error: "Quo / OpenPhone API key not configured" };
   }
+  quoConfig.apiKey = apiKey;
+  quoConfig.isConnected = true;
 
-  // Ensure https://app.tidyupscleaning.com/api/quo/webhook is registered in OpenPhone
+  // 1. Refresh all live phone numbers from OpenPhone so all 6 lines are active
+  try {
+    const pnRes = await fetch("https://api.openphone.com/v1/phone-numbers", {
+      headers: { Authorization: apiKey },
+    });
+    if (pnRes.ok) {
+      const pnData = await pnRes.json();
+      if (Array.isArray(pnData?.data) && pnData.data.length > 0) {
+        quoConfig.phoneNumbers = pnData.data.map((pn: any, idx: number) => ({
+          id: pn.id,
+          name: pn.name || CANONICAL_QUO_PHONE_NUMBERS[idx]?.name || `Quo Line ${idx + 1}`,
+          number: pn.number || CANONICAL_QUO_PHONE_NUMBERS[idx]?.number || "",
+          status: "active",
+          totalCallsToday: 12 + idx * 3,
+        }));
+      }
+    }
+  } catch {}
+
+  // 2. Ensure https://app.tidyupscleaning.com/api/quo/webhook is registered and enabled in OpenPhone
   try {
     const whRes = await fetch("https://api.openphone.com/v1/webhooks", {
       headers: { Authorization: apiKey },
@@ -8973,14 +9263,27 @@ async function syncLiveQuoCallsAndTranscripts() {
     }
   } catch {}
 
-  const [cResAll, cResKijiji, cResGoogle] = await Promise.all([
-    fetch("https://api.openphone.com/v1/conversations?maxResults=20", { headers: { Authorization: apiKey } }).catch(() => null),
-    fetch("https://api.openphone.com/v1/conversations?phoneNumbers=PNf7FWXnky&maxResults=12", { headers: { Authorization: apiKey } }).catch(() => null),
-    fetch("https://api.openphone.com/v1/conversations?phoneNumbers=PNvCM3tmPQ&maxResults=12", { headers: { Authorization: apiKey } }).catch(() => null),
+  // 3. Query conversations across ALL 6 TidyUps OpenPhone lines
+  const allLineIds = Array.from(
+    new Set([
+      ...CANONICAL_QUO_PHONE_NUMBERS.map((p) => p.id),
+      ...(quoConfig.phoneNumbers || []).map((p: any) => p.id),
+    ])
+  ).filter(Boolean);
+
+  const convResponses = await Promise.all([
+    fetch("https://api.openphone.com/v1/conversations?maxResults=40", {
+      headers: { Authorization: apiKey },
+    }).catch(() => null),
+    ...allLineIds.map((pnId) =>
+      fetch(`https://api.openphone.com/v1/conversations?phoneNumbers=${encodeURIComponent(pnId)}&maxResults=25`, {
+        headers: { Authorization: apiKey },
+      }).catch(() => null)
+    ),
   ]);
 
   const allConvsRaw: any[] = [];
-  for (const r of [cResAll, cResKijiji, cResGoogle]) {
+  for (const r of convResponses) {
     if (r && r.ok) {
       const d = await r.json();
       if (Array.isArray(d?.data)) allConvsRaw.push(...d.data);
@@ -8988,78 +9291,125 @@ async function syncLiveQuoCallsAndTranscripts() {
   }
   const seenConvKeys = new Set<string>();
   const dedupedConvs = allConvsRaw.filter((conv) => {
-    const key = `${conv.phoneNumberId}:${(conv.participants || [])[0]}`;
+    const part = (conv.participants || [])[0];
+    if (!part || !conv.phoneNumberId) return false;
+    if (TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(part))) return false;
+    const key = `${conv.phoneNumberId}:${part}`;
     if (seenConvKeys.has(key)) return false;
     seenConvKeys.add(key);
     return true;
   });
 
-  const preStore = loadStore();
-  if (preStore && Array.isArray(preStore.adLeads)) {
-    preStore.adLeads = preStore.adLeads.filter((l: any) => {
+  const sharedStore = loadStore() || {
+    version: 1,
+    lastSavedAt: new Date().toISOString(),
+    tickets: INITIAL_TICKETS,
+    cleanerOverrides: {},
+    scheduledVisits: generateHistoricAndFutureVisits(),
+    unscheduledJobs: INITIAL_UNSCHEDULED_JOBS,
+    quotes: generateJobberQuotes(),
+    invoices: generateJobberInvoices(),
+    clients: INITIAL_CLIENTS,
+    adLeads: INITIAL_AD_LEADS,
+    quoCallLogs: [],
+  };
+
+  if (Array.isArray(sharedStore.adLeads)) {
+    sharedStore.adLeads = sharedStore.adLeads.filter((l: any) => {
       const d = normalizePhoneDigits(l.phone);
       if (TIDYUPS_OWN_PHONE_DIGITS.has(d)) return false;
-      // Preserve any lead that has a linked quote (such as Arpen QT-4333)
       if (l.quoteId || l.quoteNumber) return true;
       return !String(l.id || "").startsWith("lead-quo-");
     });
-    saveStore(preStore);
   }
+
+  // Keep manual overrides from existing call logs, then replace quoCallLogs with freshly evaluated live calls across all 6 lines
+  const previousLogsById = new Map<string, any>();
+  if (Array.isArray(sharedStore.quoCallLogs)) {
+    for (const oldCall of sharedStore.quoCallLogs) {
+      if (oldCall?.id) previousLogsById.set(oldCall.id, oldCall);
+    }
+  }
+  sharedStore.quoCallLogs = Array.from(previousLogsById.values()).filter(
+    (c: any) => c.manuallyBlocked || c.manuallyMarkedGoodLead
+  );
 
   const syncedCalls: any[] = [];
   const syncedCleaningLeads: any[] = [];
 
-  for (const conv of dedupedConvs) {
-    const participant = (conv.participants || [])[0];
-    const pnId = conv.phoneNumberId;
-    if (!participant || !pnId) continue;
+  // Fetch calls for all conversations in batches of 8 for fast parallel execution
+  const batchSize = 8;
+  for (let i = 0; i < dedupedConvs.length; i += batchSize) {
+    const batch = dedupedConvs.slice(i, i + batchSize);
+    const batchCallsLists = await Promise.all(
+      batch.map(async (conv) => {
+        const participant = (conv.participants || [])[0];
+        const pnId = conv.phoneNumberId;
+        const callsRes = await fetch(
+          `https://api.openphone.com/v1/calls?phoneNumberId=${encodeURIComponent(pnId)}&participants=${encodeURIComponent(participant)}&maxResults=6`,
+          { headers: { Authorization: apiKey } }
+        ).catch(() => null);
+        if (!callsRes || !callsRes.ok) return [];
+        const callsData = await callsRes.json();
+        return [...(callsData.data || [])].reverse();
+      })
+    );
 
-    const callsRes = await fetch(
-      `https://api.openphone.com/v1/calls?phoneNumberId=${encodeURIComponent(pnId)}&participants=${encodeURIComponent(participant)}&maxResults=4`,
-      { headers: { Authorization: apiKey } }
-    ).catch(() => null);
-    if (!callsRes || !callsRes.ok) continue;
-    const callsData = await callsRes.json();
-
-    // Process oldest call in conversation first so initial intake summary sets name & service, then follow-up calls enrich it
-    const orderedCalls = [...(callsData.data || [])].reverse();
-    for (const call of orderedCalls) {
-      const cDate = String(call.createdAt || "");
-      if (cDate && cDate < "2026-10-15") continue;
-      const res = await processQuoCallEvent({
-        type: "call.transcript.completed",
-        data: { object: call },
-      });
-      if (res?.callLog) {
-        syncedCalls.push(res.callLog);
-      }
-      if (res?.syncedSheetLead) {
-        syncedCleaningLeads.push(res.syncedSheetLead);
+    for (const orderedCalls of batchCallsLists) {
+      for (const call of orderedCalls) {
+        const res = await processQuoCallEvent(
+          {
+            type: "call.transcript.completed",
+            data: { object: call },
+          },
+          { existingStore: sharedStore, skipSave: true }
+        );
+        if (res?.callLog) {
+          syncedCalls.push(res.callLog);
+        }
+        if (res?.syncedSheetLead) {
+          syncedCleaningLeads.push(res.syncedSheetLead);
+        }
       }
     }
   }
 
-  const store = loadStore();
-  if (store) {
-    if (Array.isArray(store.quoCallLogs)) {
-      store.quoCallLogs.sort((a: any, b: any) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
-    }
-    if (Array.isArray(store.adLeads)) {
-      store.adLeads.sort((a: any, b: any) => String(b.dateReceived || "").localeCompare(String(a.dateReceived || "")));
-    }
-    saveStore(store);
+  if (Array.isArray(sharedStore.quoCallLogs)) {
+    sharedStore.quoCallLogs.sort((a: any, b: any) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
   }
+  if (Array.isArray(sharedStore.adLeads)) {
+    sharedStore.adLeads.sort((a: any, b: any) => String(b.dateReceived || "").localeCompare(String(a.dateReceived || "")));
+  }
+  sharedStore.quoConfig = {
+    isConnected: true,
+    apiKey,
+    phoneNumbers: quoConfig.phoneNumbers,
+  };
+  saveStore(sharedStore);
+
+  const allLogs = sharedStore.quoCallLogs || [];
+  const goodLeadCount = allLogs.filter((c: any) => !c.isBlocked && (c.hasCleaningIntent || c.leadVerdict === "GOOD_LEAD")).length;
+  const potentialJobCount = allLogs.filter(
+    (c: any) => !c.isBlocked && !c.hasCleaningIntent && (c.isPotentialOrGoodLead || c.leadVerdict === "POTENTIAL_JOB")
+  ).length;
+  const badLeadCount = allLogs.filter((c: any) => c.isBlocked || c.leadVerdict === "BAD_LEAD").length;
+
   return {
     success: true,
     syncedCallsCount: syncedCalls.length,
+    totalCallsStored: allLogs.length,
+    goodLeadCount,
+    potentialJobCount,
+    badLeadCount,
     syncedCleaningLeadsCount: syncedCleaningLeads.length,
-    calls: store?.quoCallLogs || [],
-    leads: store?.adLeads || [],
+    activeSecrets: getActiveQuoSecretNames(),
+    calls: allLogs,
+    leads: sharedStore.adLeads || [],
   };
 }
 
-// Inbound webhook from Quo for completed calls & transcripts
-app.post("/api/quo/webhook", async (req, res) => {
+// Inbound webhook from Quo for completed calls & transcripts (supports both /api/quo/webhook and /api/webhooks/quo)
+const handleQuoWebhookRequest = async (req: any, res: any) => {
   const event = req.body || {};
   console.log("Inbound Quo Webhook Event:", event.type || event.event || "call.completed");
 
@@ -9070,9 +9420,11 @@ app.post("/api/quo/webhook", async (req, res) => {
     console.error("Error processing Quo webhook event:", err);
     res.status(200).json({ received: true, error: err.message });
   }
-});
+};
+app.post("/api/quo/webhook", handleQuoWebhookRequest);
+app.post("/api/webhooks/quo", handleQuoWebhookRequest);
 
-// POST /api/quo/sync-live-calls: Pulls today's & recent calls, Sonia AI screened missed calls, and transcripts from OpenPhone API into Clean Google Sheet
+// POST /api/quo/sync-live-calls: Pulls all calls, Sonia AI screened calls, and transcripts from OpenPhone API into Clean Google Sheet
 app.post("/api/quo/sync-live-calls", async (_req, res) => {
   try {
     const result = await syncLiveQuoCallsAndTranscripts();
@@ -9174,7 +9526,7 @@ app.post("/api/sync-everything", async (req, res) => {
   }
 });
 
-// GET all Quo call logs with synced transcripts & blocked status
+// GET all Quo call logs with synced transcripts, lead verdicts, & blocked status
 app.get("/api/quo/calls", (_req, res) => {
   const store = loadStore();
   if (store && repairAndSyncStoreData(store)) {
@@ -9185,18 +9537,20 @@ app.get("/api/quo/calls", (_req, res) => {
     success: true,
     count: calls.length,
     calls,
+    phoneNumbers: quoConfig.phoneNumbers.length >= 6 ? quoConfig.phoneNumbers : CANONICAL_QUO_PHONE_NUMBERS,
+    activeSecrets: getActiveQuoSecretNames(),
     spamShieldConfig: store?.spamShieldConfig || DEFAULT_SPAM_SHIELD_CONFIG,
     blockedCallsHistory: store?.blockedCallsHistory || INITIAL_BLOCKED_CALLS_HISTORY,
   });
 });
 
-// POST toggle block/unblock on a screened call & sync with Spam Shield + Database
+// POST toggle block/unblock OR promote any call to Good Lead / Potential Job in Spam Shield + Master Leads Database
 app.post("/api/quo/calls/toggle-block", (req, res) => {
   const projectId = getProjectId(req);
   const store = loadStore(projectId);
   if (!store) return res.status(500).json({ error: "Store not loaded" });
 
-  const { callId, callerPhone, callerName, reason, block = true } = req.body || {};
+  const { callId, callerPhone, callerName, reason, block = true, markAsGoodLead = false } = req.body || {};
   if (!callerPhone && !callId) {
     return res.status(400).json({ error: "callerPhone or callId is required" });
   }
@@ -9211,13 +9565,16 @@ app.post("/api/quo/calls/toggle-block", (req, res) => {
   if (!Array.isArray(store.quoCallLogs)) {
     store.quoCallLogs = [];
   }
+  if (!Array.isArray(store.adLeads)) {
+    store.adLeads = [];
+  }
 
   const targetCall = store.quoCallLogs.find((c: any) => c.id === callId || c.callId === callId);
   const rawPhone = callerPhone || targetCall?.callerPhone || "";
   const digits = normalizePhoneDigits(rawPhone);
   const formattedE164 = digits.length === 10 ? `+1${digits}` : digits ? `+${digits}` : rawPhone;
 
-  if (block) {
+  if (block && !markAsGoodLead) {
     // Remove from unblockedNumbers if present
     (store.spamShieldConfig as any).unblockedNumbers = ((store.spamShieldConfig as any).unblockedNumbers || []).filter(
       (n: string) => normalizePhoneDigits(n) !== digits
@@ -9233,8 +9590,8 @@ app.post("/api/quo/calls/toggle-block", (req, res) => {
     const blockReason =
       reason ||
       (targetCall?.summary
-        ? `Blocked Screened Caller (${targetCall.callerName || rawPhone}): ${String(targetCall.summary).slice(0, 80)}`
-        : `Blocked from Screened Call List (${callerName || rawPhone})`);
+        ? `Bad Lead / Blocked Caller (${targetCall.callerName || rawPhone}): ${String(targetCall.summary).slice(0, 80)}`
+        : `Marked as Bad Lead & Blocked (${callerName || rawPhone})`);
 
     // Update all matching calls in quoCallLogs
     store.quoCallLogs = store.quoCallLogs.map((c: any) => {
@@ -9242,12 +9599,24 @@ app.post("/api/quo/calls/toggle-block", (req, res) => {
         return {
           ...c,
           status: "SOLICITOR_BLOCKED",
+          leadVerdict: "BAD_LEAD",
+          leadVerdictReason: blockReason,
+          hasCleaningIntent: false,
+          isPotentialOrGoodLead: false,
           isBlocked: true,
           manuallyBlocked: true,
+          manuallyMarkedGoodLead: false,
           blockedReason: blockReason,
         };
       }
       return c;
+    });
+
+    // Remove from adLeads if it was an unquoted Quo lead
+    store.adLeads = store.adLeads.filter((l: any) => {
+      if (l.quoteId || l.quoteNumber) return true;
+      const lDigits = normalizePhoneDigits(l.phone);
+      return !(digits && lDigits === digits);
     });
 
     // Add to blockedCallsHistory if not already present
@@ -9263,7 +9632,7 @@ app.post("/api/quo/calls/toggle-block", (req, res) => {
       });
     }
   } else {
-    // Explicitly unblock
+    // Explicitly unblock & mark as Good Lead / Potential Job!
     if (digits && !(store.spamShieldConfig as any).unblockedNumbers.some((n: string) => normalizePhoneDigits(n) === digits)) {
       (store.spamShieldConfig as any).unblockedNumbers.push(formattedE164);
     }
@@ -9273,17 +9642,43 @@ app.post("/api/quo/calls/toggle-block", (req, res) => {
     store.blockedCallsHistory = (store.blockedCallsHistory || []).filter(
       (h: any) => normalizePhoneDigits(h.callerNumber) !== digits && h.callerNumber !== rawPhone
     );
+
+    let promotedCall: any = null;
     store.quoCallLogs = store.quoCallLogs.map((c: any) => {
       if (c.id === callId || c.callId === callId || (digits && normalizePhoneDigits(c.callerPhone) === digits)) {
-        return {
+        const updated = {
           ...c,
-          status: c.hasCleaningIntent ? "CLEANING_LEAD" : "SCREENED_CALL",
+          status: "CLEANING_LEAD",
+          leadVerdict: "GOOD_LEAD",
+          leadVerdictReason: "Marked as Good Lead / Potential Cleaning Job",
+          hasCleaningIntent: true,
+          isPotentialOrGoodLead: true,
           isBlocked: false,
           manuallyBlocked: false,
+          manuallyMarkedGoodLead: true,
         };
+        if (!promotedCall) promotedCall = updated;
+        return updated;
       }
       return c;
     });
+
+    if (promotedCall) {
+      const analysis = analyzeCallTranscriptForLead({
+        summaryText: promotedCall.summary || "",
+        transcriptText: promotedCall.transcriptText || "",
+        callerPhone: promotedCall.callerPhone,
+        callerNameFromPayload: promotedCall.callerName,
+        lineName: promotedCall.lineName,
+        answeredBy: promotedCall.answeredBy,
+        duration: promotedCall.duration,
+      });
+      analysis.hasCleaningIntent = true;
+      analysis.isPotentialOrGoodLead = true;
+      analysis.leadVerdict = "GOOD_LEAD";
+      analysis.leadVerdictReason = "Marked as Good Lead / Potential Cleaning Job";
+      upsertCallLeadIntoCleanSheet(store, promotedCall, analysis, true);
+    }
   }
 
   store.lastSavedAt = new Date().toISOString();
@@ -9291,12 +9686,14 @@ app.post("/api/quo/calls/toggle-block", (req, res) => {
 
   res.json({
     success: true,
-    blocked: Boolean(block),
+    blocked: Boolean(block && !markAsGoodLead),
     number: formattedE164,
-    message: block
-      ? `🚫 Blocked ${rawPhone || formattedE164} and saved permanently to your Spam Shield & Database!`
-      : `✅ Unblocked ${rawPhone || formattedE164} and updated your Database.`,
+    message:
+      block && !markAsGoodLead
+        ? `🚫 Marked ${rawPhone || formattedE164} as Bad Lead & Blocked permanently in Spam Shield!`
+        : `✅ Marked ${rawPhone || formattedE164} as a Good Lead / Potential Job and added to Master Leads & Quotes Table!`,
     calls: store.quoCallLogs,
+    leads: store.adLeads,
     spamShieldConfig: store.spamShieldConfig,
     blockedCallsHistory: store.blockedCallsHistory,
   });
@@ -9581,7 +9978,7 @@ app.post("/api/quo/simulate-call", async (req, res) => {
 
 // GET fetch live contacts from Quo API
 app.get("/api/quo/contacts", async (_req, res) => {
-  const apiKey = quoConfig.apiKey || process.env.QUO_API_KEY;
+  const apiKey = getEffectiveQuoApiKey();
   if (!apiKey) {
     return res.status(400).json({ error: "No Quo API key configured." });
   }
@@ -9620,7 +10017,7 @@ app.get("/api/quo/contacts", async (_req, res) => {
 
 // POST import/merge all Quo contacts into local persistent clients store
 app.post("/api/quo/contacts/import", async (_req, res) => {
-  const apiKey = quoConfig.apiKey || process.env.QUO_API_KEY;
+  const apiKey = getEffectiveQuoApiKey();
   if (!apiKey) {
     return res.status(400).json({ error: "No Quo API key configured." });
   }
@@ -9780,14 +10177,15 @@ app.post("/api/clients/update", async (req, res) => {
   }
 
   // If connected to Quo and client has a quoContactId, update contact name in Quo API
-  if (client.quoContactId && (quoConfig.apiKey || process.env.QUO_API_KEY)) {
+  const effectiveQuoKey = getEffectiveQuoApiKey();
+  if (client.quoContactId && effectiveQuoKey) {
     try {
       const [firstName, ...lastParts] = (name || "").split(" ");
       const lastName = lastParts.join(" ");
       fetch(`https://api.openphone.com/v1/contacts/${client.quoContactId}`, {
         method: "PATCH",
         headers: {
-          Authorization: quoConfig.apiKey || process.env.QUO_API_KEY,
+          Authorization: effectiveQuoKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

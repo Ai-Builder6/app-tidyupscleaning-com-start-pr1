@@ -68,6 +68,7 @@ interface MasterLeadsAndQuotesHubViewProps {
     callerName?: string;
     reason?: string;
     block: boolean;
+    markAsGoodLead?: boolean;
   }) => Promise<any>;
   technicians: Technician[];
   tickets: ServiceTicket[];
@@ -307,8 +308,9 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
   const [activeCategory, setActiveCategory] = useState<MasterCategoryFilter>('ALL');
   const [masterSearchQuery, setMasterSearchQuery] = useState('');
   const [expandedTranscriptRowId, setExpandedTranscriptRowId] = useState<string | null>(null);
+  const [expandedCallCardTranscriptId, setExpandedCallCardTranscriptId] = useState<string | null>(null);
   const [showScreenedCallsList, setShowScreenedCallsList] = useState<boolean>(true);
-  const [screenedCallFilter, setScreenedCallFilter] = useState<'ALL' | 'BLOCKED' | 'CLEANING'>('ALL');
+  const [screenedCallFilter, setScreenedCallFilter] = useState<'ALL' | 'CLEANING' | 'POTENTIAL' | 'BLOCKED'>('ALL');
   const [togglingCallId, setTogglingCallId] = useState<string | null>(null);
   const [sheetUrl, setSheetUrl] = useState(`https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`);
   const [spreadsheetId, setSpreadsheetId] = useState(LEADS_SPREADSHEET_ID);
@@ -1802,27 +1804,45 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
             </table>
           </div>
 
-          {/* SAVED BLOCKED & SCREENED CALL LIST (SONIA AI SCREENER + SPAM SHIELD DATABASE) */}
+          {/* ALL QUO PHONE CALLS & TRANSCRIPTS — GOOD LEAD vs. BAD LEAD EVALUATOR (ALL 6 LINES + SONA AI) */}
           <div className="border-t-2 border-slate-200 bg-slate-900 text-slate-100 p-4 sm:p-5 space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-lg shrink-0">
-                  🛡️
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-lg shrink-0">
+                  📞
                 </div>
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-sm sm:text-base font-black text-white">
-                      Saved Blocked &amp; Screened Call List (Sonia AI Screener + Database Sync)
+                      All Quo Phone Calls &amp; Transcripts — Good Lead vs. Bad Lead Evaluator
                     </h3>
-                    <span className="px-2.5 py-0.5 rounded-full bg-rose-500/25 border border-rose-400/40 text-rose-200 text-[11px] font-mono font-black">
-                      {(spamShieldConfig?.blockedNumbers || []).length} Blocked Numbers Saved in DB
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/25 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono font-black">
+                      ✅ {
+                        calls.filter(
+                          (c) =>
+                            !isCallerPhoneBlocked(c.callerPhone, c) &&
+                            (c.hasCleaningIntent || c.isPotentialOrGoodLead || c.leadVerdict === 'GOOD_LEAD' || c.leadVerdict === 'POTENTIAL_JOB')
+                        ).length
+                      }{' '}
+                      Good Leads &amp; Potential Jobs
                     </span>
-                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black">
-                      ✓ Synced with Cloud Firestore &amp; Local Store
+                    <span className="px-2.5 py-0.5 rounded-full bg-rose-500/25 border border-rose-400/40 text-rose-200 text-[11px] font-mono font-black">
+                      🚫 {(spamShieldConfig?.blockedNumbers || []).length} Bad Leads / Blocked in DB
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-violet-500/25 border border-violet-400/40 text-violet-200 text-[10px] font-mono font-black">
+                      🔑 QUO_API_TIDYUPS + APP_TIDYUPSCLEANING_COM_WEBHOOK Active
                     </span>
                   </div>
-                  <p className="text-xs text-slate-300 mt-0.5">
-                    Every screened call and blocked number from yesterday &amp; today is permanently saved in your database. Soliciting/robocall numbers stay blocked across refreshes, logins, and live call syncs.
+                  <p className="text-xs text-slate-300 mt-1">
+                    <strong>Where All Phone Calls Go:</strong> Every call across all <strong>6 TidyUps Quo Lines</strong> (
+                    <span className="font-mono text-emerald-300">587-416-9181 Jobber</span>,{' '}
+                    <span className="font-mono text-emerald-300">587-900-7223 Google Ads</span>,{' '}
+                    <span className="font-mono text-emerald-300">587-742-2500 FB Ads</span>,{' '}
+                    <span className="font-mono text-emerald-300">587-570-8005 Primary</span>,{' '}
+                    <span className="font-mono text-emerald-300">833-843-9877 Toll-Free</span>,{' '}
+                    <span className="font-mono text-emerald-300">587-602-7792 Door Hangers</span>) is transcribed by Sona AI, evaluated as a{' '}
+                    <strong className="text-emerald-300">Good Lead</strong>, <strong className="text-amber-300">Potential Job</strong>, or{' '}
+                    <strong className="text-rose-300">Bad Lead</strong>, and automatically added to <strong>Voice &amp; Quick Quotes</strong> above.
                   </p>
                 </div>
               </div>
@@ -1830,16 +1850,32 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
               <div className="flex flex-wrap items-center gap-2">
                 {(
                   [
-                    { id: 'ALL', label: `All Screened Calls (${calls.length})` },
+                    { id: 'ALL', label: `All Calls (${calls.length})` },
                     {
-                      id: 'BLOCKED',
-                      label: `🚫 Blocked Solicitors & Spam (${
-                        calls.filter((c) => isCallerPhoneBlocked(c.callerPhone, c)).length
+                      id: 'CLEANING',
+                      label: `✅ Good Leads & Potential Jobs (${
+                        calls.filter(
+                          (c) =>
+                            !isCallerPhoneBlocked(c.callerPhone, c) &&
+                            (c.hasCleaningIntent || c.isPotentialOrGoodLead || c.leadVerdict === 'GOOD_LEAD' || c.leadVerdict === 'POTENTIAL_JOB')
+                        ).length
                       })`,
                     },
                     {
-                      id: 'CLEANING',
-                      label: `✅ Cleaning Leads (${calls.filter((c) => c.hasCleaningIntent).length})`,
+                      id: 'POTENTIAL',
+                      label: `🟡 Follow-Up Potential Jobs (${
+                        calls.filter(
+                          (c) =>
+                            !isCallerPhoneBlocked(c.callerPhone, c) &&
+                            (c.leadVerdict === 'POTENTIAL_JOB' || (!c.hasCleaningIntent && c.isPotentialOrGoodLead))
+                        ).length
+                      })`,
+                    },
+                    {
+                      id: 'BLOCKED',
+                      label: `🚫 Bad Leads / Solicitors (${
+                        calls.filter((c) => isCallerPhoneBlocked(c.callerPhone, c) || c.leadVerdict === 'BAD_LEAD').length
+                      })`,
                     },
                   ] as const
                 ).map((pill) => (
@@ -1849,7 +1885,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                     onClick={() => setScreenedCallFilter(pill.id)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer transition-all ${
                       screenedCallFilter === pill.id
-                        ? 'bg-rose-600 text-white shadow-sm'
+                        ? 'bg-emerald-600 text-white shadow-sm'
                         : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
                     }`}
                   >
@@ -1870,25 +1906,39 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                   onClick={() => setShowScreenedCallsList((v) => !v)}
                   className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer border border-slate-700"
                 >
-                  {showScreenedCallsList ? 'Hide List ▲' : 'Show List ▼'}
+                  {showScreenedCallsList ? 'Hide Call Evaluator ▲' : 'Show Call Evaluator ▼'}
                 </button>
               </div>
             </div>
 
             {showScreenedCallsList && (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 max-h-[340px] overflow-y-auto pr-1 pt-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 max-h-[520px] overflow-y-auto pr-1 pt-1">
                 {calls
                   .filter((call) => {
-                    const blocked = isCallerPhoneBlocked(call.callerPhone, call);
+                    const blocked = isCallerPhoneBlocked(call.callerPhone, call) || call.leadVerdict === 'BAD_LEAD';
+                    const isGoodOrPotential =
+                      !blocked &&
+                      (Boolean(call.hasCleaningIntent) ||
+                        Boolean(call.isPotentialOrGoodLead) ||
+                        call.leadVerdict === 'GOOD_LEAD' ||
+                        call.leadVerdict === 'POTENTIAL_JOB');
+                    const isPotentialFollowUp =
+                      !blocked && (call.leadVerdict === 'POTENTIAL_JOB' || (!call.hasCleaningIntent && call.isPotentialOrGoodLead));
                     if (screenedCallFilter === 'BLOCKED') return blocked;
-                    if (screenedCallFilter === 'CLEANING') return Boolean(call.hasCleaningIntent);
+                    if (screenedCallFilter === 'CLEANING') return isGoodOrPotential;
+                    if (screenedCallFilter === 'POTENTIAL') return isPotentialFollowUp;
                     return true;
                   })
-                  .slice(0, 18)
+                  .slice(0, 60)
                   .map((call) => {
                     const blocked = isCallerPhoneBlocked(call.callerPhone, call);
-                    const isCleaning = Boolean(call.hasCleaningIntent);
+                    const isConfirmedCleaning = !blocked && (Boolean(call.hasCleaningIntent) || call.leadVerdict === 'GOOD_LEAD');
+                    const isPotentialJob =
+                      !blocked &&
+                      !isConfirmedCleaning &&
+                      (Boolean(call.isPotentialOrGoodLead) || call.leadVerdict === 'POTENTIAL_JOB');
                     const isBusy = togglingCallId === call.id;
+                    const isExpandedTranscript = expandedCallCardTranscriptId === call.id;
                     const rawCallDigits = String(call.callerPhone || '').replace(/\D/g, '');
                     const norm10 = rawCallDigits.length === 11 && rawCallDigits.startsWith('1') ? rawCallDigits.slice(1) : rawCallDigits;
                     const callAreaCode = norm10.length >= 3 ? norm10.slice(0, 3) : '';
@@ -1899,14 +1949,57 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                           (p: string) => p === `1${callAreaCode}*` || p === `${callAreaCode}*`
                         )
                     );
+
+                    const buildAdLeadFromCall = (): AdLeadItem => ({
+                      id: `lead-quo-${call.id || Date.now()}`,
+                      createdAt: String(call.timestamp || new Date().toISOString()).slice(0, 10),
+                      source: call.lineName ? `Quo (${call.lineName})` : 'Quo Voice Call',
+                      sourceTab: 'Voice & Quick Quotes',
+                      campaignName: call.lineName || 'Inbound Phone Lead',
+                      customerName: call.callerName || `Caller ${call.callerPhone}`,
+                      phone: call.callerPhone || '',
+                      email: '',
+                      address: call.extractedAddress || 'Edmonton, AB',
+                      city: 'Edmonton',
+                      province: 'AB',
+                      postalCode: 'T5J 0N3',
+                      propertyType: 'Single Family Home',
+                      bedrooms: call.extractedBedrooms || '3 Bedrooms',
+                      bathrooms: call.extractedBathrooms || '2.5 Bathrooms',
+                      sqft: 1850,
+                      serviceRequested: call.extractedService || 'Residential Standard Cleaning',
+                      frequency: 'One-Time',
+                      preferredDate: new Date().toISOString().slice(0, 10),
+                      preferredTime: '10:00 AM',
+                      quotedAmount:
+                        String(call.extractedService || '').includes('Move') || String(call.extractedService || '').includes('Deep')
+                          ? 340
+                          : 240,
+                      status: 'New Lead',
+                      leadVerdict: isConfirmedCleaning ? 'GOOD_LEAD' : 'POTENTIAL_JOB',
+                      leadVerdictLabel:
+                        call.leadVerdictLabel ||
+                        (isConfirmedCleaning ? '✅ Good Lead — Potential Job' : '🟡 Potential Job — Follow-Up'),
+                      callTranscript: call.transcriptText || '',
+                      callSummary: call.summary || '',
+                      notes: [
+                        call.summary ? `Sona AI Summary: ${call.summary}` : '',
+                        call.transcriptText ? `Transcript: ${call.transcriptText}` : '',
+                      ]
+                        .filter(Boolean)
+                        .join('\n\n'),
+                    });
+
                     return (
                       <div
                         key={call.id}
                         className={`p-3 rounded-2xl border text-xs flex flex-col justify-between gap-2 transition-all ${
                           blocked
                             ? 'bg-rose-950/40 border-rose-500/50'
-                            : isCleaning
-                            ? 'bg-emerald-950/35 border-emerald-500/50'
+                            : isConfirmedCleaning
+                            ? 'bg-emerald-950/40 border-emerald-500/60'
+                            : isPotentialJob
+                            ? 'bg-amber-950/35 border-amber-500/50'
                             : 'bg-slate-800/80 border-slate-700'
                         }`}
                       >
@@ -1924,35 +2017,112 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                               <div className="font-mono text-emerald-300 text-[11px] font-bold">
                                 {call.callerPhone} • {String(call.timestamp || '').slice(0, 16).replace('T', ' ')}
                               </div>
+                              {call.lineName && (
+                                <div className="text-[10px] text-slate-300 font-semibold mt-0.5">
+                                  📍 Line: <span className="text-violet-300 font-bold">{call.lineName}</span>
+                                  {call.extractedService ? ` • ${call.extractedService}` : ''}
+                                  {call.extractedAddress && call.extractedAddress !== 'Edmonton, AB'
+                                    ? ` • 📍 ${call.extractedAddress}`
+                                    : ''}
+                                </div>
+                              )}
                             </div>
                             <span
                               className={`px-2 py-0.5 rounded-md text-[10px] font-black shrink-0 ${
                                 blocked
                                   ? 'bg-rose-600 text-white shadow-2xs'
-                                  : isCleaning
+                                  : isConfirmedCleaning
                                   ? 'bg-emerald-600 text-white'
+                                  : isPotentialJob
+                                  ? 'bg-amber-500 text-slate-950'
                                   : 'bg-slate-700 text-slate-300'
                               }`}
                             >
                               {blocked
-                                ? '🚫 BLOCKED IN DB'
-                                : isCleaning
-                                ? '✅ CLEANING LEAD'
+                                ? '🚫 BAD LEAD / BLOCKED'
+                                : isConfirmedCleaning
+                                ? '✅ GOOD LEAD'
+                                : isPotentialJob
+                                ? '🟡 POTENTIAL JOB'
                                 : '🛡️ SCREENED'}
                             </span>
                           </div>
 
-                          <p className="text-[11px] text-slate-200 bg-black/30 p-2 rounded-xl border border-white/10 line-clamp-2">
-                            {call.summary || call.blockedReason || 'Screened inbound call'}
-                          </p>
+                          <div className="text-[11px] text-slate-200 bg-black/30 p-2 rounded-xl border border-white/10 space-y-1">
+                            <p className={isExpandedTranscript ? '' : 'line-clamp-2'}>
+                              <strong className="text-violet-300">Summary:</strong>{' '}
+                              {call.summary || call.blockedReason || 'Inbound call logged'}
+                            </p>
+                            {call.transcriptText && (
+                              <div>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedCallCardTranscriptId(isExpandedTranscript ? null : call.id)
+                                  }
+                                  className="text-[10px] font-black text-emerald-300 hover:text-emerald-200 underline cursor-pointer mt-0.5"
+                                >
+                                  {isExpandedTranscript
+                                    ? '▲ Hide Word-for-Word Transcript'
+                                    : '📜 View Full Word-for-Word Call Transcript'}
+                                </button>
+                                {isExpandedTranscript && (
+                                  <div className="mt-1.5 p-2 rounded-lg bg-slate-950/90 border border-emerald-500/30 text-[11px] text-slate-100 whitespace-pre-wrap max-h-44 overflow-y-auto leading-relaxed">
+                                    {call.transcriptText}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-white/10 flex-wrap">
-                          <span className="text-[10px] font-mono text-slate-400 truncate">
-                            {call.callCategory || (blocked ? 'SOLICITOR_BLOCKED' : 'SCREENED')}
-                          </span>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {!blocked && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenQuickQuote(buildAdLeadFromCall())}
+                                  className="px-2 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-black cursor-pointer shadow-2xs"
+                                  title="Open Quick Quote Calculator with this caller's transcript & details"
+                                >
+                                  💲 Quote
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onConvertLeadToJob(buildAdLeadFromCall())}
+                                  className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black cursor-pointer shadow-2xs"
+                                  title="Convert this phone call directly into a Scheduled Cleaning Job"
+                                >
+                                  📅 Book Job
+                                </button>
+                              </>
+                            )}
+                          </div>
+
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            {callAreaCode && !isLocalAlberta && !isCleaning && (
+                            {onToggleBlockScreenedCall && !isConfirmedCleaning && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={async () => {
+                                  setTogglingCallId(call.id);
+                                  await onToggleBlockScreenedCall({
+                                    callId: call.id,
+                                    callerPhone: call.callerPhone,
+                                    callerName: call.callerName,
+                                    block: false,
+                                    markAsGoodLead: true,
+                                  });
+                                  setTogglingCallId(null);
+                                }}
+                                className="px-2 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-black cursor-pointer transition-all disabled:opacity-50"
+                                title="Promote to Good Lead & add to Voice & Quick Quotes table"
+                              >
+                                ✅ Good Lead
+                              </button>
+                            )}
+                            {callAreaCode && !isLocalAlberta && !isConfirmedCleaning && (
                               <button
                                 type="button"
                                 disabled={isBusy}
@@ -1979,7 +2149,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                                 }`}
                                 title={`1-Click Block ALL rotating numbers from area code (${callAreaCode})`}
                               >
-                                {isAreaCodeBlocked ? `✓ Area (${callAreaCode}) Blocked` : `🚫 Block Area (${callAreaCode})`}
+                                {isAreaCodeBlocked ? `✓ Area (${callAreaCode}) Blocked` : `🚫 Area (${callAreaCode})`}
                               </button>
                             )}
                             {onToggleBlockScreenedCall && (
@@ -1999,7 +2169,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                                   });
                                   setTogglingCallId(null);
                                 }}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer transition-all disabled:opacity-50 ${
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all disabled:opacity-50 ${
                                   blocked
                                     ? 'bg-slate-800 hover:bg-emerald-700 text-slate-200 border border-slate-600'
                                     : 'bg-rose-600 hover:bg-rose-500 text-white shadow-2xs'
@@ -2008,8 +2178,8 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                                 {isBusy
                                   ? 'Saving...'
                                   : blocked
-                                  ? '✓ Blocked (Unblock)'
-                                  : '🚫 Block Number'}
+                                  ? '✓ Unblock'
+                                  : '🚫 Bad Lead'}
                               </button>
                             )}
                           </div>
