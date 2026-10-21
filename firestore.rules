@@ -29,6 +29,7 @@ service cloud.firestore {
     // Bootstrapped Admin check with fallback to trusted admin collection
     function isAdmin() {
       return isVerified() && (
+        request.auth.token.email == 'booking@tidyupscleaning.com' ||
         request.auth.token.email == 'cleaningserviceyeg@gmail.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );

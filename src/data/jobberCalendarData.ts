@@ -248,8 +248,8 @@ export interface JobberTeamMember {
 }
 
 export const JOBBER_TEAM_MEMBERS: JobberTeamMember[] = [
-  { id: 'tm-1', name: 'Boss iPad Pro 《iPhone》', jobberLinkedName: 'Boss iPad Pro 《iPhone》', isLinked: true, role: 'Dispatcher', color: '#EC4899', vanUnit: 'Executive HQ', phone: '(780) 718-5092', email: 'cleaningserviceyeg@gmail.com', address: '8306 Chappelle Way Southwest, Edmonton, AB' },
-  { id: 'tm-2', name: 'Richard "Owner Account"', jobberLinkedName: 'Richard "Owner Account"', isLinked: true, role: 'Owner', color: '#7C3AED', vanUnit: 'Executive HQ', phone: '(780) 718-5092', email: 'support@bookmycleaning.net', address: '8306 Chappelle Way Southwest, Edmonton, AB' },
+  { id: 'tm-1', name: 'Boss iPad Pro 《iPhone》', jobberLinkedName: 'Boss iPad Pro 《iPhone》', isLinked: true, role: 'Dispatcher', color: '#EC4899', vanUnit: 'Executive HQ', phone: '(780) 718-5092', email: 'booking@tidyupscleaning.com', address: '8306 Chappelle Way Southwest, Edmonton, AB' },
+  { id: 'tm-2', name: 'Richard "Owner Account"', jobberLinkedName: 'Richard "Owner Account"', isLinked: true, role: 'Owner', color: '#7C3AED', vanUnit: 'Executive HQ', phone: '(780) 718-5092', email: 'booking@tidyupscleaning.com', address: '8306 Chappelle Way Southwest, Edmonton, AB' },
   { id: 'tm-3', name: '1 Joseph Juma', jobberLinkedName: '1 Joseph Juma', isLinked: true, role: 'Cleaner', color: '#0891B2', vanUnit: 'Unit 5', phone: '(780) 267-3472', email: 'baraka.cleaningservices95@gmail.com', address: '3751 139 Ave NW, Edmonton, AB' },
   { id: 'tm-4', name: 'Adison Haugland', jobberLinkedName: 'Adison Haugland', isLinked: true, role: 'Cleaner', color: '#D97706', vanUnit: 'Unit 4', phone: '(780) 554-2851', email: 'hauglandadison@gmail.com', address: '10231 120 St NW, Edmonton, AB' },
   { id: 'tm-5', name: 'Cindy Guay', jobberLinkedName: 'Cindy Guay', isLinked: true, role: 'Cleaner', color: '#10B981', vanUnit: 'Unit 7', phone: '(780) 863-0896', email: 'cindybg@live.ca', address: '740 Knottwood Rd S NW, Edmonton, AB' },

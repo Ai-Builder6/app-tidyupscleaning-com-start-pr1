@@ -50,7 +50,7 @@ export const INITIAL_TECHNICIANS: Technician[] = [
     name: 'Richard "Owner Account"',
     vanNumber: 'Executive HQ',
     phone: '(780) 718-5092',
-    email: 'support@bookmycleaning.net',
+    email: 'booking@tidyupscleaning.com',
     role: 'Owner',
     homeAddress: '8306 Chappelle Way Southwest, Edmonton, AB T6W 4L3',
     color: '#7C3AED', // Royal Violet
@@ -174,7 +174,7 @@ export const INITIAL_TECHNICIANS: Technician[] = [
     name: 'Boss iPad Pro 《iPhone》',
     vanNumber: 'Executive HQ',
     phone: '(780) 718-5092',
-    email: 'cleaningserviceyeg@gmail.com',
+    email: 'booking@tidyupscleaning.com',
     role: 'Dispatcher',
     homeAddress: '8306 Chappelle Way Southwest, Edmonton, AB T6W 4L3',
     color: '#EC4899', // Hot Pink

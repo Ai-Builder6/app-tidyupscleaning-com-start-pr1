@@ -5372,7 +5372,7 @@ app.get("/api/domain-status", (req, res) => {
       projectId: "gtm-kvj5cp62-zty5m",
       projectNumber: 230358145142,
       firestoreDatabaseId: "ai-studio-cleaningserviced-8a2493ab-cb9d-4c28-a60b-c28e7d08d30e",
-      billingEmail: "cleaningserviceyeg@gmail.com",
+      billingEmail: "booking@tidyupscleaning.com",
       appletId: "8a2493ab-cb9d-4c28-a60b-c28e7d08d30e",
       runContainerUrl: "https://ais-dev-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app",
     },
@@ -5386,7 +5386,7 @@ app.get("/api/domain-status", (req, res) => {
         ssl: "ACTIVE_TLS",
         jobberRedirectUri: "https://app.tidyupscleaning.com/api/jobber/oauth/callback",
         downloadArchive: "/api/project/export-zip?increment=true",
-        supportEmail: "cleaningserviceyeg@gmail.com",
+        supportEmail: "booking@tidyupscleaning.com",
       },
     ],
   });

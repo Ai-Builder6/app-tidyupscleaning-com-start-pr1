@@ -54,7 +54,7 @@ export const APP_USERS: AppUser[] = [
     id: 'user-owner',
     name: 'Richard "Owner Account"',
     role: 'OWNER',
-    email: 'support@bookmycleaning.net',
+    email: 'booking@tidyupscleaning.com',
     phone: '(780) 718-5092',
     title: 'Owner & Executive Director',
     pin: '1001',
@@ -65,7 +65,7 @@ export const APP_USERS: AppUser[] = [
     id: 'user-dispatcher-admin',
     name: 'Boss iPad Pro 《iPhone》',
     role: 'OWNER',
-    email: 'cleaningserviceyeg@gmail.com',
+    email: 'booking@tidyupscleaning.com',
     phone: '(780) 718-5092',
     assignedVan: 'Executive HQ',
     title: 'Executive Admin & Owner',
@@ -379,9 +379,15 @@ export function mergeUsersWithCanonical(savedUsers?: AppUser[] | null): AppUser[
     const existing = savedById.get(canon.id);
     if (!existing) return canon;
     savedById.delete(canon.id);
+    const updatedEmail =
+      existing.email === 'cleaningserviceyeg@gmail.com' ||
+      existing.email === 'support@bookmycleaning.net'
+        ? 'booking@tidyupscleaning.com'
+        : existing.email || canon.email;
     return {
       ...canon,
       ...existing,
+      email: updatedEmail,
       password: existing.password || canon.password,
       pin: existing.pin || canon.pin,
       customPermissions: existing.customPermissions || canon.customPermissions,

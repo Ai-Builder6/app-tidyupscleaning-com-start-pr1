@@ -62,7 +62,7 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
   {
     id: 'staff-1',
     name: 'Boss iPad Pro 《iPhone》',
-    email: 'cleaningserviceyeg@gmail.com',
+    email: 'booking@tidyupscleaning.com',
     phone: '(780) 718-5092',
     role: 'Dispatcher',
     lead: false,
@@ -76,7 +76,7 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
   {
     id: 'staff-2',
     name: 'Richard "Owner Account"',
-    email: 'support@bookmycleaning.net',
+    email: 'booking@tidyupscleaning.com',
     phone: '(780) 718-5092',
     role: 'Owner',
     lead: false,

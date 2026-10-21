@@ -166,8 +166,8 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
                 <h3 className="font-bold text-xs text-slate-800">Operations Email</h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">Booking confirmation &amp; support</p>
                 <div className="mt-2 space-y-0.5 text-xs font-semibold text-slate-800">
-                  <a href="mailto:cleaningserviceyeg@gmail.com" className="hover:underline text-emerald-700 font-bold block">
-                    cleaningserviceyeg@gmail.com
+                  <a href="mailto:booking@tidyupscleaning.com" className="hover:underline text-emerald-700 font-bold block">
+                    booking@tidyupscleaning.com
                   </a>
                 </div>
               </div>
@@ -199,7 +199,7 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
                   <div>
                     <h4 className="font-bold text-xs">Support Request Dispatched!</h4>
                     <p className="text-[11px] text-emerald-800 mt-0.5">
-                      Your inquiry has been routed to TidyUps Cleaning Operations at <code>cleaningserviceyeg@gmail.com</code>. We typically reply within 15–30 minutes during business hours.
+                      Your inquiry has been routed to TidyUps Cleaning Operations at <code>booking@tidyupscleaning.com</code>. We typically reply within 15–30 minutes during business hours.
                     </p>
                   </div>
                 </div>
@@ -363,7 +363,7 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
               <section>
                 <h3 className="font-bold text-slate-900 text-sm mb-1">6. Payment Terms</h3>
                 <p>
-                  Invoices are issued digitally via Jobber and are due upon completion of the service. We accept major credit cards, Interac e-Transfer to <code>cleaningserviceyeg@gmail.com</code>, and corporate accounts.
+                  Invoices are issued digitally via Jobber and are due upon completion of the service. We accept major credit cards, Interac e-Transfer to <code>booking@tidyupscleaning.com</code>, and corporate accounts.
                 </p>
               </section>
 
@@ -447,7 +447,7 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
                   <div><strong>TidyUps Cleaning Service Inc — Privacy &amp; Operations Office</strong></div>
                   <div>8306 Chappelle Way SW, Edmonton, AB T6W 4L3</div>
                   <div>Website: <a href="https://app.tidyupscleaning.com" target="_blank" rel="noopener noreferrer" className="text-emerald-600 underline font-semibold">https://app.tidyupscleaning.com</a></div>
-                  <div>Email: <a href="mailto:cleaningserviceyeg@gmail.com" className="text-blue-600 underline font-semibold">cleaningserviceyeg@gmail.com</a></div>
+                  <div>Email: <a href="mailto:booking@tidyupscleaning.com" className="text-blue-600 underline font-semibold">booking@tidyupscleaning.com</a></div>
                   <div>Toll-Free Vanity Line: <a href="tel:18338439877" className="font-bold text-purple-700">1-833-TIDYUPS (833-843-9877)</a></div>
                   <div>Direct Dispatch: (587) 900-7223 / (587) 742-2500</div>
                 </div>

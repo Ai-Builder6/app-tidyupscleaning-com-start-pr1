@@ -936,6 +936,15 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <span>(780) 718-5092</span>
             </a>
 
+            <a
+              href="mailto:booking@tidyupscleaning.com"
+              className="hidden xl:flex px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-400 text-emerald-950 font-black text-xs items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+              title="Email Booking & Customer Support: booking@tidyupscleaning.com"
+            >
+              <Mail className="w-3.5 h-3.5 text-emerald-600" />
+              <span>booking@tidyupscleaning.com</span>
+            </a>
+
             <button
               type="button"
               onClick={() => handleOpenLegalModal('PRIVACY')}
@@ -1959,6 +1968,9 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <a href="tel:7807185092" className="text-amber-300 hover:text-amber-200 font-mono">
                 (780) 718-5092
               </a>
+              <a href="mailto:booking@tidyupscleaning.com" className="text-emerald-400 hover:text-emerald-300 font-mono">
+                booking@tidyupscleaning.com
+              </a>
             </div>
           </div>
 
@@ -2160,7 +2172,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       <div className="font-black text-slate-900">833 TidyUps Cleaning Service Inc. — Privacy &amp; Customer Care</div>
                       <div>Address: 8306 Chappelle Way SW, Edmonton, AB T6W 4L3</div>
                       <div>Toll-Free Phone: <a href="tel:18338439877" className="text-pink-600 font-bold underline">1-833-TIDYUPS (833-843-9877)</a> • Local: <a href="tel:7807185092" className="text-cyan-700 font-bold underline">(780) 718-5092</a></div>
-                      <div>Email: <a href="mailto:cleaningserviceyeg@gmail.com" className="text-pink-600 font-bold underline">cleaningserviceyeg@gmail.com</a></div>
+                      <div>Email: <a href="mailto:booking@tidyupscleaning.com" className="text-pink-600 font-bold underline">booking@tidyupscleaning.com</a></div>
                     </div>
                   </section>
                 </div>
@@ -2194,7 +2206,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       2. Booking Confirmation, $50 Deposit &amp; Payment Terms
                     </h4>
                     <p>
-                      Submitting a booking request on this page does not charge your card upfront. Once our dispatch team confirms your preferred date and arrival window in Jobber, a <strong>$50 CAD booking deposit</strong> holds your reserved crew slot (applied directly toward your total). The remaining balance is due upon completion of your clean via credit/debit card through Jobber or Interac e-Transfer to <code>cleaningserviceyeg@gmail.com</code>.
+                      Submitting a booking request on this page does not charge your card upfront. Once our dispatch team confirms your preferred date and arrival window in Jobber, a <strong>$50 CAD booking deposit</strong> holds your reserved crew slot (applied directly toward your total). The remaining balance is due upon completion of your clean via credit/debit card through Jobber or Interac e-Transfer to <code>booking@tidyupscleaning.com</code>.
                     </p>
                   </section>
 
@@ -2270,11 +2282,11 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                     </a>
 
                     <a
-                      href="mailto:cleaningserviceyeg@gmail.com"
+                      href="mailto:booking@tidyupscleaning.com"
                       className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 hover:border-amber-500 transition-all block"
                     >
                       <div className="text-[10px] font-black uppercase text-amber-900">Customer Care Email</div>
-                      <div className="text-xs font-black text-slate-950 mt-1 break-all">cleaningserviceyeg@gmail.com</div>
+                      <div className="text-xs font-black text-slate-950 mt-1 break-all">booking@tidyupscleaning.com</div>
                       <div className="text-xs font-bold text-slate-600 mt-0.5">Fast Replies &amp; Quotes</div>
                     </a>
                   </div>

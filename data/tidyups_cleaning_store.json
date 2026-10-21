@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastSavedAt": "2026-10-21T03:36:44.370Z",
+  "lastSavedAt": "2026-10-21T04:17:13.849Z",
   "tickets": [
     {
       "id": "Z2lkOi8vSm9iYmVyL1Zpc2l0LzIzNTc2MjY0NTI=",
@@ -13991,7 +13991,7 @@
     "clientSecret": "65534ce762fe3ec20a5c1447794dabee0ac03f2caf1048c8686377d4e754a36a",
     "accessToken": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjE1ODAxNzYsImlzcyI6Imh0dHBzOi8vYXBpLmdldGpvYmJlci5jb20iLCJjbGllbnRfaWQiOiIyNzk2NjEzNS1lMzNlLTRjMmUtOGRjMy1hZDdiYTA2ZGFiYjgiLCJzY29wZSI6InJlYWRfY2xpZW50cyB3cml0ZV9jbGllbnRzIHJlYWRfcmVxdWVzdHMgd3JpdGVfcmVxdWVzdHMgcmVhZF9xdW90ZXMgd3JpdGVfcXVvdGVzIHJlYWRfam9icyB3cml0ZV9qb2JzIHJlYWRfc2NoZWR1bGVkX2l0ZW1zIHdyaXRlX3NjaGVkdWxlZF9pdGVtcyByZWFkX2ludm9pY2VzIHdyaXRlX2ludm9pY2VzIHJlYWRfam9iYmVyX3BheW1lbnRzIHJlYWRfdXNlcnMgd3JpdGVfdXNlcnMgd3JpdGVfdGF4X3JhdGVzIHJlYWRfZXhwZW5zZXMgd3JpdGVfZXhwZW5zZXMgcmVhZF9jdXN0b21fZmllbGRfY29uZmlndXJhdGlvbnMgd3JpdGVfY3VzdG9tX2ZpZWxkX2NvbmZpZ3VyYXRpb25zIHJlYWRfdGltZV9zaGVldHMgcmVhZF9lcXVpcG1lbnQgd3JpdGVfZXF1aXBtZW50IHJlYWRfbWFya2V0aW5nIHdyaXRlX21hcmtldGluZyIsImFwcF9pZCI6IjI3OTY2MTM1LWUzM2UtNGMyZS04ZGMzLWFkN2JhMDZkYWJiOCIsInVzZXJfaWQiOjE1ODAxNzYsImFjY291bnRfaWQiOjcxODU3NiwiYXVkIjpbImh0dHBzOi8vZ2V0am9iYmVyLmNvbS9ncmFwaHFsIl0sImV4cCI6MTc5MjU1NzIxM30.9mBrRdahPeafKt4OXHWP6NWAtx5A7Pntmwtz4c8rinA",
     "refreshToken": "872e027576e0973e31605ce6309ffaec",
-    "lastSyncedAt": "2026-10-21T03:33:33.731Z"
+    "lastSyncedAt": "2026-10-21T04:17:13.806Z"
   },
   "chatMessages": [
     {
@@ -14328,7 +14328,7 @@
     {
       "id": "staff-1",
       "name": "Boss iPad Pro 《iPhone》",
-      "email": "cleaningserviceyeg@gmail.com",
+      "email": "booking@tidyupscleaning.com",
       "phone": "(780) 718-5092",
       "role": "Dispatcher",
       "lead": false,
@@ -14342,7 +14342,7 @@
     {
       "id": "staff-2",
       "name": "Richard \"Owner Account\"",
-      "email": "support@bookmycleaning.net",
+      "email": "booking@tidyupscleaning.com",
       "phone": "(780) 718-5092",
       "role": "Owner",
       "lead": false,
@@ -25594,15 +25594,15 @@
       "reason": "Blocked rotating numbers matching pattern 406*"
     }
   ],
-  "zipPrCounter": 7,
+  "zipPrCounter": 8,
   "lastZipFilename": "app.tidyups.cleaning-PR2-2026-10-18-Afternoon-02-47PM.zip",
   "lastZipCreatedAt": "2026-10-18T20:47:39.719Z",
   "explicitReplaceSpamShield": true,
   "githubConfig": {
     "owner": "Ai-Builder6",
     "repo": "APP.TIDYUPSCLEANING.COM-START-PR1",
-    "lastPushedAt": "2026-10-21T01:19:21.545Z",
-    "lastPushedPr": "PR7",
+    "lastPushedAt": "2026-10-21T03:51:07.545Z",
+    "lastPushedPr": "PR8",
     "lastPushedUrl": "https://github.com/Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR1"
   },
   "headerNavOrder": [

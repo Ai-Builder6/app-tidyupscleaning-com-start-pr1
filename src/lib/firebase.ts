@@ -155,7 +155,7 @@ export const googleSignIn = (): Promise<{ user: User; accessToken: string } | nu
                     const info = await infoRes.json();
                     resolvedUser = {
                       uid: info.sub || 'google-drive-user',
-                      email: info.email || 'cleaningserviceyeg@gmail.com',
+                      email: info.email || 'booking@tidyupscleaning.com',
                       displayName: info.name || info.email || 'TidyUps Admin',
                       photoURL: info.picture || null,
                     } as unknown as User;
@@ -166,7 +166,7 @@ export const googleSignIn = (): Promise<{ user: User; accessToken: string } | nu
               if (!resolvedUser) {
                 resolvedUser = {
                   uid: 'google-drive-user',
-                  email: 'cleaningserviceyeg@gmail.com',
+                  email: 'booking@tidyupscleaning.com',
                   displayName: 'TidyUps Admin',
                 } as unknown as User;
               }
