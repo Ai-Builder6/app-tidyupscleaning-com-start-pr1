@@ -151,16 +151,39 @@ function TechInfoWindowContent({
         </span>
       </div>
 
+      {/* Live Cell Phone GPS Active Telemetry Banner */}
+      {tech.isLiveGps && (
+        <div className="p-2 bg-emerald-50 border border-emerald-400 rounded-lg mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping shrink-0" />
+            <div className="text-[10px] leading-tight">
+              <strong className="font-black text-emerald-950 block">
+                📡 LIVE CELL PHONE GPS ACTIVE
+              </strong>
+              <span className="text-emerald-800 font-mono">
+                {tech.gpsDeviceType || 'Cell Phone'} • ±{tech.gpsAccuracyMeters || 10}m
+                {tech.gpsSpeedKmh ? ` • ${tech.gpsSpeedKmh} km/h` : ''}
+              </span>
+            </div>
+          </div>
+          {tech.lastGpsPingAt && (
+            <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0">
+              {new Date(tech.lastGpsPingAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Vehicle Location Card: Google Geocoding API on Google Map, Fleet GPS on Fallback */}
       {allowGeocoding ? (
         <div className="p-2 bg-blue-50/80 rounded-lg border border-blue-200 mb-2">
           <div className="flex items-center justify-between text-[10px] font-bold text-blue-900 mb-1">
             <span className="flex items-center gap-1">
               <MapPin className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
-              <span>Current Vehicle Address</span>
+              <span>{tech.isLiveGps ? 'Live Phone Street Address' : 'Current Vehicle Address'}</span>
             </span>
             <span className="text-[8px] px-1 bg-blue-200/80 text-blue-900 rounded font-bold uppercase">
-              Geocoding API
+              {tech.isLiveGps ? 'Live GPS' : 'Geocoding API'}
             </span>
           </div>
 

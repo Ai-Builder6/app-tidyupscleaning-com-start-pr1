@@ -33,7 +33,28 @@ export interface AppUser {
   title: string;
   pin?: string;
   password?: string;
+  noPasswordRequired?: boolean; // True for cleaningserviceyeg@gmail.com Owner login
+  requireLiveLocation?: boolean; // True when staff must share live cell phone GPS location
   customPermissions?: Partial<UserRolePermissions>;
+}
+
+export interface LiveStaffLocationPing {
+  userId: string;
+  cleanerId?: string;
+  name: string;
+  role: AppUserRole;
+  email: string;
+  phone: string;
+  assignedVan?: string;
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  speedKmh?: number | null;
+  heading?: number | null;
+  deviceType?: string;
+  batteryLevel?: number | null;
+  timestamp: string;
+  permissionState?: 'granted' | 'prompt' | 'denied';
 }
 
 export interface ChatMessage {
@@ -54,11 +75,13 @@ export const APP_USERS: AppUser[] = [
     id: 'user-owner',
     name: 'Richard "Owner Account"',
     role: 'OWNER',
-    email: 'booking@tidyupscleaning.com',
+    email: 'cleaningserviceyeg@gmail.com',
     phone: '(780) 718-5092',
-    title: 'Owner & Executive Director',
+    title: 'Owner & Executive Director (No Password Required)',
+    noPasswordRequired: true,
+    requireLiveLocation: false,
     pin: '1001',
-    password: 'tidyups2026',
+    password: '',
     customPermissions: { hasFullAccess: true },
   },
   {
@@ -69,8 +92,10 @@ export const APP_USERS: AppUser[] = [
     phone: '(780) 718-5092',
     assignedVan: 'Executive HQ',
     title: 'Executive Admin & Owner',
+    noPasswordRequired: true,
+    requireLiveLocation: false,
     pin: '1002',
-    password: 'tidyups2026',
+    password: '',
     customPermissions: { hasFullAccess: true },
   },
   {
@@ -84,6 +109,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Lead Dispatcher & Operations Manager',
     pin: '2002',
     password: 'dispatch2026',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-1',
@@ -96,6 +122,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Senior Cleaner',
     pin: '3001',
     password: 'cleaner3001',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-3',
@@ -108,6 +135,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Deep Clean & Sanitization Specialist',
     pin: '3003',
     password: 'cleaner3003',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-4',
@@ -120,6 +148,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Condo & High-Rise Turnover Lead',
     pin: '3004',
     password: 'cleaner3004',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-5',
@@ -132,6 +161,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Master Move-Out & Commercial Cleaner',
     pin: '3005',
     password: 'cleaner3005',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-7',
@@ -144,6 +174,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Eco-Sanitization & Turnover Cleaner',
     pin: '3007',
     password: 'cleaner3007',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-8',
@@ -156,6 +187,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Residential & Move-Out Cleaner',
     pin: '3008',
     password: 'cleaner3008',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-9',
@@ -168,6 +200,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Large Home & Tandem Move-Out Crew',
     pin: '3009',
     password: 'cleaner3009',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-10',
@@ -180,6 +213,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Deep Cleaning Specialist',
     pin: '3010',
     password: 'cleaner3010',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-11',
@@ -192,6 +226,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Turnover & Floor Care Cleaner',
     pin: '3011',
     password: 'cleaner3011',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-12',
@@ -204,6 +239,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Commercial & Office Specialist',
     pin: '3012',
     password: 'cleaner3012',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-13',
@@ -216,6 +252,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Move-Out & Cabinet Specialist',
     pin: '3013',
     password: 'cleaner3013',
+    requireLiveLocation: true,
   },
   {
     id: 'cleaner-14',
@@ -228,6 +265,7 @@ export const APP_USERS: AppUser[] = [
     title: 'Two-Person Tandem Crew',
     pin: '3014',
     password: 'cleaner3014',
+    requireLiveLocation: true,
   },
 ];
 
@@ -324,7 +362,6 @@ export function getRolePermissions(
     ...customPermissions,
   };
 
-  // If the owner granted any broader dispatch/hub access to a cleaner, unlock assigned-only restriction
   if (
     merged.canAccessMasterHub ||
     merged.canAccessQuickQuote ||
@@ -365,7 +402,7 @@ export function hasExpandedConsoleAccess(permissions: UserRolePermissions): bool
   );
 }
 
-const APP_USERS_STORAGE_KEY = 'tidyups_app_users_v1';
+const APP_USERS_STORAGE_KEY = 'tidyups_app_users_v2';
 
 export function mergeUsersWithCanonical(savedUsers?: AppUser[] | null): AppUser[] {
   if (!Array.isArray(savedUsers) || savedUsers.length === 0) {
@@ -379,23 +416,48 @@ export function mergeUsersWithCanonical(savedUsers?: AppUser[] | null): AppUser[
     const existing = savedById.get(canon.id);
     if (!existing) return canon;
     savedById.delete(canon.id);
-    const updatedEmail =
-      existing.email === 'cleaningserviceyeg@gmail.com' ||
-      existing.email === 'support@bookmycleaning.net'
-        ? 'booking@tidyupscleaning.com'
-        : existing.email || canon.email;
+
+    // Ensure primary Owner account always uses cleaningserviceyeg@gmail.com with no password required by default
+    if (canon.id === 'user-owner') {
+      return {
+        ...canon,
+        ...existing,
+        email: 'cleaningserviceyeg@gmail.com',
+        noPasswordRequired: existing.noPasswordRequired !== undefined ? existing.noPasswordRequired : true,
+        customPermissions: { hasFullAccess: true },
+      };
+    }
+
+    if (canon.id === 'user-dispatcher-admin') {
+      return {
+        ...canon,
+        ...existing,
+        noPasswordRequired: existing.noPasswordRequired !== undefined ? existing.noPasswordRequired : true,
+        customPermissions: { hasFullAccess: true },
+      };
+    }
+
     return {
       ...canon,
       ...existing,
-      email: updatedEmail,
-      password: existing.password || canon.password,
-      pin: existing.pin || canon.pin,
+      email: existing.email || canon.email,
+      password: existing.password !== undefined ? existing.password : canon.password,
+      pin: existing.pin !== undefined ? existing.pin : canon.pin,
+      noPasswordRequired:
+        existing.noPasswordRequired !== undefined ? existing.noPasswordRequired : canon.noPasswordRequired,
+      requireLiveLocation:
+        existing.requireLiveLocation !== undefined
+          ? existing.requireLiveLocation
+          : canon.requireLiveLocation ?? true,
       customPermissions: existing.customPermissions || canon.customPermissions,
     };
   });
   // Append any custom users added by the Owner
   for (const extra of savedById.values()) {
-    merged.push(extra);
+    merged.push({
+      ...extra,
+      requireLiveLocation: extra.requireLiveLocation !== undefined ? extra.requireLiveLocation : true,
+    });
   }
   return merged;
 }
@@ -425,4 +487,3 @@ export function saveAppUsers(users: AppUser[]): void {
     body: JSON.stringify({ users }),
   }).catch((err) => console.warn('Could not sync app users to server:', err));
 }
-

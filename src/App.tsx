@@ -84,6 +84,7 @@ import { JobberQuote, JobberInvoice } from './services/jobberSyncModules';
 import {
   AppUser,
   APP_USERS,
+  LiveStaffLocationPing,
   getUserPermissions,
   hasExpandedConsoleAccess,
   loadAppUsers,
@@ -327,14 +328,12 @@ export function App() {
   const [chatRecipient, setChatRecipient] = useState<AppUser | null>(null);
   const [cleanerShowMap, setCleanerShowMap] = useState<boolean>(false);
 
-  // Detect if visitor is on the dedicated customer booking domain (book.tidyupscleaning.com) or /book URL
+  // Detect if visitor is on the dedicated customer-only /book path
   const [isStandaloneBookingDomain] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const host = window.location.hostname.toLowerCase();
       const path = window.location.pathname.toLowerCase();
       const search = window.location.search.toLowerCase();
       if (
-        host.startsWith('book.') ||
         path === '/book' ||
         path.startsWith('/book/') ||
         search.includes('mode=customer') ||
@@ -349,14 +348,12 @@ export function App() {
   // Allows the owner inside the staff app to test the locked 1-page customer view
   const [isCustomerLockPreview, setIsCustomerLockPreview] = useState<boolean>(false);
 
-  // Mandatory Password Authentication: false until an Owner, Dispatcher, or Cleaner verifies their login & password
+  // Staff & Owner Authentication state
   const [isStaffAuthenticated, setIsStaffAuthenticated] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const host = window.location.hostname.toLowerCase();
       const path = window.location.pathname.toLowerCase();
       const search = window.location.search.toLowerCase();
       if (
-        host.startsWith('book.') ||
         path === '/book' ||
         path.startsWith('/book/') ||
         search.includes('mode=customer') ||
@@ -372,6 +369,19 @@ export function App() {
     }
     return false;
   });
+
+  // Automatically open the Login & Password modal on website load when not signed in (unless on /book)
+  useEffect(() => {
+    if (!isStaffAuthenticated && !isStandaloneBookingDomain) {
+      setRoleModalInitialTab('LOGIN');
+      setIsRoleModalOpen(true);
+    }
+  }, [isStaffAuthenticated, isStandaloneBookingDomain]);
+
+  // Real-Time Cell Phone Live GPS Location Tracking State
+  const [liveLocationsMap, setLiveLocationsMap] = useState<Record<string, LiveStaffLocationPing>>({});
+  const [myGpsStatus, setMyGpsStatus] = useState<'IDLE' | 'REQUESTING' | 'ACTIVE' | 'DENIED'>('IDLE');
+  const [myLiveCoords, setMyLiveCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
 
   const permissions = getUserPermissions(currentUser);
   const isCleanerRestrictedMode = currentUser.role === 'CLEANER' && !hasExpandedConsoleAccess(permissions);
@@ -779,6 +789,295 @@ export function App() {
         }
       })
       .catch((err) => console.warn('Could not load auth users from server:', err));
+  }, []);
+
+  // Detect mobile device label for live cell phone GPS telemetry
+  const detectDeviceLabel = useCallback((): string => {
+    if (typeof navigator === 'undefined') return 'Cell Phone GPS';
+    const ua = navigator.userAgent || '';
+    if (/iPhone/i.test(ua)) return 'iPhone GPS';
+    if (/iPad/i.test(ua)) return 'iPad GPS';
+    if (/Android/i.test(ua)) return 'Android Phone GPS';
+    if (/Mobile/i.test(ua)) return 'Mobile Phone GPS';
+    return 'Device GPS';
+  }, []);
+
+  // Push a single live GPS ping from this staff member's cell phone to the backend & update local map immediately
+  const sendLiveLocationPing = useCallback(
+    (user: AppUser, pos: GeolocationPosition) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const accuracy = pos.coords.accuracy ? Math.round(pos.coords.accuracy) : 10;
+      const speedKmh =
+        typeof pos.coords.speed === 'number' && !isNaN(pos.coords.speed)
+          ? Math.round(pos.coords.speed * 3.6)
+          : null;
+      const heading =
+        typeof pos.coords.heading === 'number' && !isNaN(pos.coords.heading)
+          ? Math.round(pos.coords.heading)
+          : null;
+      const deviceType = detectDeviceLabel();
+      const nowIso = new Date().toISOString();
+
+      setMyGpsStatus('ACTIVE');
+      setMyLiveCoords({ lat, lng, accuracy });
+
+      const payload: LiveStaffLocationPing = {
+        userId: user.id,
+        cleanerId: user.cleanerId || user.id,
+        name: user.name,
+        role: user.role,
+        email: user.email,
+        phone: user.phone,
+        assignedVan: user.assignedVan || 'Mobile Unit',
+        lat,
+        lng,
+        accuracy,
+        speedKmh,
+        heading,
+        deviceType,
+        timestamp: nowIso,
+        permissionState: 'granted',
+      };
+
+      setLiveLocationsMap((prev) => ({
+        ...prev,
+        [user.id]: payload,
+        ...(user.cleanerId ? { [user.cleanerId]: payload } : {}),
+      }));
+
+      setTechnicians((prev) =>
+        prev.map((t) => {
+          if (
+            t.id === user.cleanerId ||
+            t.id === user.id ||
+            (user.email && t.email?.toLowerCase() === user.email.toLowerCase()) ||
+            t.name.toLowerCase() === user.name.toLowerCase()
+          ) {
+            return {
+              ...t,
+              currentLocation: {
+                ...t.currentLocation,
+                lat,
+                lng,
+              },
+              isLiveGps: true,
+              lastGpsPingAt: nowIso,
+              gpsAccuracyMeters: accuracy,
+              gpsSpeedKmh: speedKmh,
+              gpsDeviceType: deviceType,
+              lastUpdated: nowIso,
+            };
+          }
+          return t;
+        })
+      );
+
+      fetch('/api/staff/live-locations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch((err) => console.warn('Live GPS ping error:', err));
+    },
+    [detectDeviceLabel]
+  );
+
+  // Trigger native cell phone GPS location prompt & continuous tracking
+  const handleRequestDeviceLocation = useCallback(
+    (targetUser?: AppUser) => {
+      const activeU = targetUser || currentUser;
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        return;
+      }
+      setMyGpsStatus('REQUESTING');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          sendLiveLocationPing(activeU, pos);
+        },
+        (err) => {
+          console.warn('Geolocation permission warning:', err);
+          if (err.code === 1) {
+            setMyGpsStatus('DENIED');
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+      );
+    },
+    [currentUser, sendLiveLocationPing]
+  );
+
+  // Continuous background/foreground cell phone GPS watcher (watchPosition + WakeLock + 12s heartbeat) for logged-in staff
+  useEffect(() => {
+    if (!isStaffAuthenticated || isStandaloneBookingDomain) return;
+    if (currentUser.requireLiveLocation === false) return;
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+
+    let watchId: number | null = null;
+    let wakeLockSentinel: any = null;
+    let lastPosition: GeolocationPosition | null = null;
+
+    // Request Screen WakeLock on mobile so phone keeps reporting live GPS while driving/working
+    if ('wakeLock' in navigator && (navigator as any).wakeLock?.request) {
+      (navigator as any).wakeLock
+        .request('screen')
+        .then((sentinel: any) => {
+          wakeLockSentinel = sentinel;
+        })
+        .catch(() => {});
+    }
+
+    setMyGpsStatus('REQUESTING');
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        lastPosition = pos;
+        sendLiveLocationPing(currentUser, pos);
+      },
+      (err) => {
+        if (err.code === 1) {
+          setMyGpsStatus('DENIED');
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 20000,
+      }
+    );
+
+    // Heartbeat every 12 seconds so Owner sees live timestamp continuously
+    const heartbeatTimer = setInterval(() => {
+      if (lastPosition) {
+        sendLiveLocationPing(currentUser, lastPosition);
+      } else {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            lastPosition = pos;
+            sendLiveLocationPing(currentUser, pos);
+          },
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+        );
+      }
+    }, 12000);
+
+    return () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      clearInterval(heartbeatTimer);
+      if (wakeLockSentinel && typeof wakeLockSentinel.release === 'function') {
+        wakeLockSentinel.release().catch(() => {});
+      }
+    };
+  }, [isStaffAuthenticated, isStandaloneBookingDomain, currentUser, sendLiveLocationPing]);
+
+  // Poll /api/staff/live-locations every 8 seconds so Owner & Dispatch see all staff members' live cell phone locations at all times
+  useEffect(() => {
+    const fetchLiveLocations = () => {
+      fetch('/api/staff/live-locations')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.locations && typeof data.locations === 'object') {
+            const locMap: Record<string, LiveStaffLocationPing> = data.locations;
+            setLiveLocationsMap(locMap);
+
+            const pings = Object.values(locMap);
+            if (pings.length > 0) {
+              setTechnicians((prev) => {
+                let nextTechs = prev.map((t) => {
+                  const match =
+                    locMap[t.id] ||
+                    pings.find(
+                      (p) =>
+                        p.cleanerId === t.id ||
+                        p.userId === t.id ||
+                        (p.email && t.email && p.email.toLowerCase() === t.email.toLowerCase()) ||
+                        (p.name && t.name.toLowerCase() === p.name.toLowerCase())
+                    );
+                  if (!match || typeof match.lat !== 'number' || typeof match.lng !== 'number') {
+                    return t;
+                  }
+                  return {
+                    ...t,
+                    currentLocation: {
+                      ...t.currentLocation,
+                      lat: match.lat,
+                      lng: match.lng,
+                    },
+                    isLiveGps: true,
+                    lastGpsPingAt: match.timestamp,
+                    gpsAccuracyMeters: match.accuracy,
+                    gpsSpeedKmh: match.speedKmh,
+                    gpsDeviceType: match.deviceType,
+                    lastUpdated: match.timestamp,
+                  };
+                });
+
+                // Also add any newly created custom staff member who is actively sharing cell phone GPS so Owner sees them on the map too!
+                for (const ping of pings) {
+                  if (!ping || typeof ping.lat !== 'number' || typeof ping.lng !== 'number') continue;
+                  const alreadyInTechs = nextTechs.some(
+                    (t) =>
+                      t.id === ping.cleanerId ||
+                      t.id === ping.userId ||
+                      (ping.email && t.email?.toLowerCase() === ping.email.toLowerCase()) ||
+                      t.name.toLowerCase() === ping.name.toLowerCase()
+                  );
+                  if (!alreadyInTechs && ping.role !== 'OWNER') {
+                    nextTechs = [
+                      ...nextTechs,
+                      {
+                        id: ping.cleanerId || ping.userId,
+                        name: ping.name,
+                        vanNumber: ping.assignedVan || `Mobile GPS (${ping.name.split(' ')[0]})`,
+                        phone: ping.phone || '(780) 718-5092',
+                        email: ping.email,
+                        role: ping.role,
+                        color: '#10b981',
+                        active: true,
+                        status: 'AVAILABLE',
+                        rating: 5.0,
+                        skills: ['Live Mobile GPS'],
+                        certifications: ['Verified Staff'],
+                        experienceYears: 3,
+                        currentLocation: {
+                          lat: ping.lat,
+                          lng: ping.lng,
+                          address: `Live Cell Phone GPS (${ping.lat.toFixed(4)}, ${ping.lng.toFixed(4)})`,
+                          city: 'Edmonton',
+                        },
+                        depotLocation: {
+                          name: 'Edmonton Hub',
+                          lat: ping.lat,
+                          lng: ping.lng,
+                          address: 'Edmonton, AB',
+                        },
+                        assignedTicketIds: [],
+                        shiftCapacityHours: 8,
+                        completedJobsCount: 0,
+                        partsInventory: [],
+                        isLiveGps: true,
+                        lastGpsPingAt: ping.timestamp,
+                        gpsAccuracyMeters: ping.accuracy,
+                        gpsSpeedKmh: ping.speedKmh,
+                        gpsDeviceType: ping.deviceType,
+                        lastUpdated: ping.timestamp,
+                      },
+                    ];
+                  }
+                }
+
+                return nextTechs;
+              });
+            }
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchLiveLocations();
+    const timer = setInterval(fetchLiveLocations, 8000);
+    return () => clearInterval(timer);
   }, []);
 
   // Fetch live Service Catalog Price List on mount and project change
@@ -1998,76 +2297,89 @@ export function App() {
           </div>
         )}
 
-        {/* Customer Portal Top Bar (Hidden on book.tidyupscleaning.com and Customer Lock Mode since CustomerPortalView has its own dedicated 833 TidyUps header) */}
-        {!isZenMode && !isStaffAuthenticated && !isStandaloneBookingDomain && !isCustomerLockPreview && activeTopView !== 'CUSTOMER_PORTAL' && (
+        {/* High-Visibility Owner (No Password) & Staff Login Bar when Unauthenticated */}
+        {!isZenMode && !isStaffAuthenticated && !isStandaloneBookingDomain && !isCustomerLockPreview && (
           <header
             id="customer-header"
-            className="h-16 px-3 sm:px-6 bg-white border-b border-slate-200 flex items-center justify-between flex-shrink-0 z-20 shadow-xs gap-3"
+            className="min-h-[56px] px-3 sm:px-6 py-2 bg-slate-950 text-white border-b-2 border-amber-400 flex flex-wrap items-center justify-between flex-shrink-0 z-30 shadow-lg gap-3"
           >
-            <div className="flex items-center gap-2 sm:gap-3 cursor-pointer" onClick={() => setActiveTopView('CUSTOMER_PORTAL')}>
-              <BookMyCleaningLogo projectId={activeBrandId} size={36} withText={true} />
+            <div className="flex items-center gap-2.5">
+              <span className="px-2.5 py-1 rounded-full bg-amber-400 text-slate-950 text-[11px] font-black uppercase tracking-wider flex items-center gap-1">
+                <Lock className="w-3.5 h-3.5" />
+                <span>TidyUps Console Login</span>
+              </span>
+              <span className="text-xs text-slate-200 hidden md:inline">
+                Owner (<strong>cleaningserviceyeg@gmail.com</strong>) logs in with 1 click (No Password) • Dispatchers &amp; Cleaners enter Password/PIN
+              </span>
             </div>
 
-            {/* Primary Domain Badge (app.tidyupscleaning.com) */}
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs font-bold shrink-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+              {/* 1-Click Instant Owner Login (cleaningserviceyeg@gmail.com - No Password) */}
               <button
                 type="button"
-                onClick={() => handleSwitchProject('tidyups')}
-                className="px-2.5 py-1 rounded-lg bg-emerald-700 text-white shadow-2xs font-extrabold transition-all flex items-center gap-1 cursor-pointer"
-                title="TidyUps Cleaning (app.tidyupscleaning.com)"
-              >
-                <span>✨</span>
-                <span className="hidden md:inline">app.tidyupscleaning.com</span>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 sm:gap-3">
-              {/* Toll-Free Hotline */}
-              <a
-                href="tel:18338439877"
-                className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-pink-50 to-purple-50 hover:from-pink-100 hover:to-purple-100 border border-pink-200/80 rounded-xl text-xs font-bold text-slate-800 transition-all cursor-pointer shadow-2xs group"
-                title="Dispatch Genie Toll-Free Hotline: 1-833-TIDYUPS (833-843-9877) or Direct Dispatch: (587) 900-7223"
-              >
-                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-pink-600 to-purple-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
-                  <Phone className="w-3.5 h-3.5 text-white" />
-                </div>
-                <div className="flex flex-col text-left leading-tight">
-                  <span className="text-[11px] font-black tracking-tight text-purple-950 font-mono">1-833-TIDYUPS</span>
-                  <span className="text-[9px] text-pink-700 font-extrabold font-mono">(833-843-9877) • Dispatch: (587) 900-7223</span>
-                </div>
-              </a>
-
-              {/* Support & Policies */}
-              <button
                 onClick={() => {
-                  setActiveLegalTab('SUPPORT');
-                  setActiveTopView('LEGAL');
+                  const ownerAcc =
+                    appUsersList.find((u) => u.email.toLowerCase() === 'cleaningserviceyeg@gmail.com') ||
+                    appUsersList.find((u) => u.role === 'OWNER') ||
+                    APP_USERS[0];
+                  handleSelectUser(ownerAcc);
                 }}
-                className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  activeTopView === 'LEGAL'
-                    ? 'bg-purple-100 text-purple-900 font-extrabold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
+                className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-300 hover:from-amber-300 hover:to-yellow-200 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer"
+                title="1-Click Instant Owner Login for cleaningserviceyeg@gmail.com (No Password Required)"
               >
-                <HelpCircle className="w-3.5 h-3.5 text-fuchsia-600" />
-                <span className="hidden sm:inline">Support &amp; Policies</span>
+                <span>👑</span>
+                <span>Owner Login (cleaningserviceyeg@gmail.com — No Password)</span>
               </button>
 
-              {/* Staff & Dispatch Login (Password Required) */}
+              {/* Staff & Dispatch Login (Password Required + Live Phone GPS) */}
               <button
+                type="button"
                 onClick={() => {
                   setRoleModalInitialTab('LOGIN');
                   setIsRoleModalOpen(true);
                 }}
-                className="min-h-[36px] px-3 sm:px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-400/50 font-extrabold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
-                title="Staff & Owner Login: Password Required for Owner, Dispatcher, and Cleaner Portals"
+                className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white border border-pink-400/50 font-black text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer"
+                title="Open Login & Password Screen for Dispatchers and Cleaners"
               >
-                <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>Staff Login</span>
+                <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span>Staff / Cleaner Login (Enter Password)</span>
               </button>
             </div>
           </header>
         )}
+
+        {/* Mandatory Live Cell Phone GPS Prompt Banner for Authenticated Staff / Cleaners */}
+        {!isZenMode &&
+          isStaffAuthenticated &&
+          !isStandaloneBookingDomain &&
+          !isCustomerLockPreview &&
+          currentUser.requireLiveLocation !== false &&
+          myGpsStatus !== 'ACTIVE' && (
+            <div className="bg-gradient-to-r from-emerald-950 via-teal-900 to-cyan-950 text-white px-4 py-2.5 border-b border-emerald-400/60 flex flex-wrap items-center justify-between gap-3 z-30 shadow-md">
+              <div className="flex items-center gap-2.5 text-xs">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-black text-[10px] uppercase tracking-wider flex items-center gap-1 shrink-0">
+                  <Navigation className="w-3 h-3" />
+                  <span>Required on Cell Phone</span>
+                </span>
+                <span>
+                  <strong>📍 Live Location Required ({currentUser.name}):</strong> Please allow your cell phone GPS location so the Owner &amp; Dispatch can see your live route location at all times.
+                  {myGpsStatus === 'DENIED' && (
+                    <span className="text-amber-300 font-bold ml-1">
+                      (If blocked on your phone: open browser Settings → Site Settings → Location → Allow)
+                    </span>
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleRequestDeviceLocation(currentUser)}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer shrink-0 active:scale-95"
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>Allow My Live Cell Phone Location Now</span>
+              </button>
+            </div>
+          )}
 
         {/* Global Top Application Navigation Bar (Only for Authenticated Staff & Hidden in Customer Lock Mode) */}
         {!isZenMode && isStaffAuthenticated && !isStandaloneBookingDomain && !isCustomerLockPreview && (
@@ -2787,10 +3099,8 @@ export function App() {
               if (!isStandaloneBookingDomain && isStaffAuthenticated) setIsQuoModalOpen(true);
             }}
             onOpenStaffLogin={() => {
-              if (!isStandaloneBookingDomain) {
-                setRoleModalInitialTab('LOGIN');
-                setIsRoleModalOpen(true);
-              }
+              setRoleModalInitialTab('LOGIN');
+              setIsRoleModalOpen(true);
             }}
             onOpenSpamShield={!isStandaloneBookingDomain && isStaffAuthenticated ? handleOpenSpamShield : undefined}
             onOpenVoiceIntake={() => {
@@ -3912,6 +4222,8 @@ export function App() {
           onUpdateUsersList={handleUpdateUsersList}
           onSelectUser={handleSelectUser}
           initialTab={roleModalInitialTab}
+          liveLocationsMap={liveLocationsMap}
+          onRequestDeviceLocation={handleRequestDeviceLocation}
         />
 
         {/* Service Catalog & Price List Modal */}

@@ -101,6 +101,12 @@ export interface Technician {
   partsInventory: InventoryItem[];
   routeMetrics?: RouteMetrics;
   lastUpdated?: string;
+  isLiveGps?: boolean;
+  lastGpsPingAt?: string;
+  gpsAccuracyMeters?: number;
+  gpsSpeedKmh?: number | null;
+  gpsDeviceType?: string;
+  gpsBatteryLevel?: number | null;
 }
 
 export interface ServiceTicket {

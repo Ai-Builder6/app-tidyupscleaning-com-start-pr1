@@ -16,11 +16,16 @@ import {
   Trash2,
   Save,
   Unlock,
+  MapPin,
+  Navigation,
+  Radio,
+  Smartphone,
 } from 'lucide-react';
 import {
   AppUser,
   AppUserRole,
   UserRolePermissions,
+  LiveStaffLocationPing,
   getUserPermissions,
   FULL_ACCESS_PERMISSIONS,
 } from '../types/authAndChat';
@@ -34,6 +39,8 @@ interface RoleSelectorModalProps {
   onUpdateUsersList: (users: AppUser[]) => void;
   onSelectUser: (user: AppUser) => void;
   initialTab?: 'LOGIN' | 'MANAGE_ACCESS';
+  liveLocationsMap?: Record<string, LiveStaffLocationPing>;
+  onRequestDeviceLocation?: (user?: AppUser) => void;
 }
 
 const PERMISSION_TOGGLE_ITEMS: Array<{
@@ -122,6 +129,8 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
   onUpdateUsersList,
   onSelectUser,
   initialTab = 'LOGIN',
+  liveLocationsMap = {},
+  onRequestDeviceLocation,
 }) => {
   const currentUserPerms = getUserPermissions(currentUser);
   const canCurrentUserManageAccess =
@@ -153,6 +162,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
   const [newPersonPassword, setNewPersonPassword] = useState('');
   const [newPersonPin, setNewPersonPin] = useState('');
   const [newPersonFullAccess, setNewPersonFullAccess] = useState(true);
+  const [newPersonRequireLocation, setNewPersonRequireLocation] = useState(true);
 
   useEffect(() => {
     if (isOpen) {
@@ -170,6 +180,8 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
 
   const ownerUsers = usersList.filter((u) => u.role === 'OWNER');
   const staffUsers = usersList.filter((u) => u.role !== 'OWNER');
+  const primaryOwnerAccount =
+    ownerUsers.find((u) => u.email.toLowerCase() === 'cleaningserviceyeg@gmail.com') || ownerUsers[0];
 
   const filteredUsersForLogin = usersList.filter((u) => {
     if (selectedRoleFilter !== 'ALL' && u.role !== selectedRoleFilter) return false;
@@ -184,7 +196,19 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
     );
   });
 
-  // Execute authenticated login after password verification
+  // Does this user require a password?
+  // Owner cleaningserviceyeg@gmail.com has noPasswordRequired: true by default
+  const doesUserRequirePassword = (user: AppUser): boolean => {
+    if (user.email.toLowerCase() === 'cleaningserviceyeg@gmail.com' && user.noPasswordRequired !== false) {
+      return false;
+    }
+    if (user.noPasswordRequired === true) {
+      return false;
+    }
+    return true;
+  };
+
+  // Execute authenticated login and trigger cell phone GPS tracking if required
   const completeLogin = (user: AppUser) => {
     const perms = getUserPermissions(user);
     const defaultTab =
@@ -200,7 +224,16 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
       console.warn('localStorage error:', e);
     }
 
-    setSuccessMessage(`✓ Password verified! Logged in as ${user.name} (${user.role})`);
+    // Immediately request live cell phone GPS location when staff logs in
+    if (user.requireLiveLocation !== false && onRequestDeviceLocation) {
+      onRequestDeviceLocation(user);
+    }
+
+    setSuccessMessage(
+      `✓ Logged in as ${user.name} (${user.role})${
+        user.requireLiveLocation !== false ? ' • Live Cell Phone GPS Sharing Active!' : ''
+      }`
+    );
     setTimeout(() => {
       onSelectUser(user);
       onClose();
@@ -209,19 +242,24 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
       setDirectLoginPassword('');
       setErrorMessage('');
       setSuccessMessage('');
-    }, 350);
+    }, 250);
   };
 
-  // Every user (Owner, Dispatcher, and Cleaner) MUST enter a password or PIN to log in
+  // Handle clicking any user card
   const handleUserClick = (user: AppUser) => {
     setErrorMessage('');
     setSuccessMessage('');
+    if (!doesUserRequirePassword(user)) {
+      completeLogin(user);
+      return;
+    }
     setSelectedPendingUser(user);
     setPasswordInput('');
   };
 
   // Check if a password/PIN matches a given user
   const isCredentialValidForUser = (user: AppUser, enteredRaw: string): boolean => {
+    if (!doesUserRequirePassword(user)) return true;
     const entered = enteredRaw.trim();
     if (!entered) return false;
 
@@ -229,7 +267,6 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
     if (user.password) validList.push(user.password);
     if (user.pin) validList.push(user.pin);
 
-    // Default fallback credentials if not customized yet
     if (user.role === 'OWNER') {
       validList.push('tidyups2026', 'owner2026');
     } else if (user.role === 'DISPATCHER') {
@@ -243,6 +280,11 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
   const handleVerifyPassword = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!selectedPendingUser) return;
+
+    if (!doesUserRequirePassword(selectedPendingUser)) {
+      completeLogin(selectedPendingUser);
+      return;
+    }
 
     const entered = passwordInput.trim();
     if (!entered) {
@@ -269,9 +311,19 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
     const idQuery = directLoginIdentifier.trim().toLowerCase();
     const pass = directLoginPassword.trim();
 
-    if (!idQuery || !pass) {
-      setErrorMessage('Please enter both your Name/Email and your Password/PIN.');
+    if (!idQuery) {
+      setErrorMessage('Please enter your Email or Name (e.g. cleaningserviceyeg@gmail.com, Dominic, Melissa).');
       return;
+    }
+
+    // Special instant check for cleaningserviceyeg@gmail.com (Owner - No Password Required)
+    if (idQuery === 'cleaningserviceyeg@gmail.com' || idQuery === 'richard') {
+      const ownerMatch =
+        usersList.find((u) => u.email.toLowerCase() === 'cleaningserviceyeg@gmail.com') || primaryOwnerAccount;
+      if (ownerMatch && !doesUserRequirePassword(ownerMatch)) {
+        completeLogin(ownerMatch);
+        return;
+      }
     }
 
     const matchedUser = usersList.find(
@@ -279,11 +331,23 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
         u.email.toLowerCase() === idQuery ||
         u.name.toLowerCase() === idQuery ||
         u.name.toLowerCase().includes(idQuery) ||
-        u.phone.replace(/\D/g, '').includes(idQuery.replace(/\D/g, ''))
+        (idQuery.replace(/\D/g, '').length >= 4 &&
+          u.phone.replace(/\D/g, '').includes(idQuery.replace(/\D/g, '')))
     );
 
     if (!matchedUser) {
       setErrorMessage('No account found matching that Name or Email. You can also click your profile below.');
+      return;
+    }
+
+    if (!doesUserRequirePassword(matchedUser)) {
+      completeLogin(matchedUser);
+      return;
+    }
+
+    if (!pass) {
+      setSelectedPendingUser(matchedUser);
+      setErrorMessage(`Please enter the password or PIN for ${matchedUser.name}.`);
       return;
     }
 
@@ -305,7 +369,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
     }
   };
 
-  // Owner updates a user's field (password, pin, role, customPermissions)
+  // Owner updates a user's field (password, pin, role, customPermissions, noPasswordRequired, requireLiveLocation)
   const handleUpdateSingleUser = (userId: string, patch: Partial<AppUser>, feedback?: string) => {
     const updated = usersList.map((u) => (u.id === userId ? { ...u, ...patch } : u));
     onUpdateUsersList(updated);
@@ -335,7 +399,6 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
         };
       }
     } else if (!nextValue && updatedCustom.hasFullAccess) {
-      // If unchecking a specific box while hasFullAccess was true, turn off hasFullAccess but keep other flags true
       updatedCustom = {
         ...FULL_ACCESS_PERMISSIONS,
         hasFullAccess: false,
@@ -416,7 +479,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
     }
   };
 
-  // Add a brand-new user account with password & access permissions
+  // Add a brand-new user account with password, access permissions & mandatory cell phone GPS location
   const handleAddNewPerson = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPersonName.trim() || !newPersonPassword.trim()) {
@@ -427,12 +490,16 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
     const newUser: AppUser = {
       id: `user-custom-${Date.now()}`,
       name: newPersonName.trim(),
-      email: newPersonEmail.trim() || `${newPersonName.trim().toLowerCase().replace(/\s+/g, '.')}@tidyupscleaning.com`,
+      email:
+        newPersonEmail.trim() ||
+        `${newPersonName.trim().toLowerCase().replace(/\s+/g, '.')}@tidyupscleaning.com`,
       phone: newPersonPhone.trim() || '(780) 718-5092',
       role: newPersonRole,
       title: newPersonTitle.trim() || (newPersonFullAccess ? 'Full-Access Staff' : newPersonRole),
       password: newPersonPassword.trim(),
       pin: newPersonPin.trim() || '1234',
+      noPasswordRequired: false,
+      requireLiveLocation: newPersonRequireLocation,
       customPermissions: newPersonFullAccess
         ? { ...FULL_ACCESS_PERMISSIONS, hasFullAccess: true }
         : undefined,
@@ -446,7 +513,9 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
     setNewPersonPassword('');
     setNewPersonPin('');
     setShowAddPersonForm(false);
-    setSuccessMessage(`✓ Added ${newUser.name} with password "${newUser.password}"!`);
+    setSuccessMessage(
+      `✓ Added ${newUser.name} with password "${newUser.password}" & Live Cell Phone GPS Tracking enabled!`
+    );
   };
 
   const handleDeleteCustomUser = (user: AppUser) => {
@@ -456,8 +525,8 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs animate-fadeIn">
-      <div className="bg-white rounded-3xl max-w-3xl w-full border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-xs animate-fadeIn">
+      <div className="bg-white rounded-3xl max-w-3xl w-full border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[94vh]">
         {/* Header */}
         <div className="bg-slate-900 text-white p-4 sm:p-5 flex flex-col gap-3 flex-shrink-0">
           <div className="flex items-start justify-between gap-3">
@@ -467,12 +536,12 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
               </div>
               <div>
                 <span className="text-[10px] font-extrabold text-pink-300 uppercase tracking-wider block">
-                  Mandatory Login &amp; Password Security • Owner, Dispatchers &amp; Cleaners
+                  Owner (No Password) • Staff Password Login • Live Cell Phone GPS Tracking
                 </span>
                 <h2 className="text-lg font-black text-white">
                   {activeModalTab === 'MANAGE_ACCESS'
-                    ? 'Owner Password & Access Control Center'
-                    : 'Staff & Owner Login (Password Required)'}
+                    ? 'Owner Password, Access & Live Cell Phone GPS Center'
+                    : 'TidyUps Owner & Staff Login'}
                 </h2>
                 <p className="text-xs text-slate-300 mt-0.5">
                   {isStaffAuthenticated ? (
@@ -481,7 +550,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                     </>
                   ) : (
                     <span className="text-amber-300 font-bold">
-                      🔒 Console Locked — Enter your Owner, Dispatcher, or Cleaner password to access the app
+                      👑 Owner (cleaningserviceyeg@gmail.com) logs in with 1 click (No Password) • Staff enter Password/PIN &amp; share Live Cell Phone GPS
                     </span>
                   )}
                 </p>
@@ -490,12 +559,13 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Close modal"
             >
               ✕
             </button>
           </div>
 
-          {/* Mode Switcher Tabs (Owner can switch between Login & Manage Passwords/Access) */}
+          {/* Mode Switcher Tabs */}
           <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800">
             <button
               type="button"
@@ -511,7 +581,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
               }`}
             >
               <Lock className="w-3.5 h-3.5" />
-              <span>Staff &amp; Owner Login</span>
+              <span>Owner &amp; Staff Login</span>
             </button>
 
             {canCurrentUserManageAccess ? (
@@ -529,12 +599,12 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                 }`}
               >
                 <KeyRound className="w-3.5 h-3.5" />
-                <span>🔑 Manage Passwords &amp; Grant Access (Owner Only)</span>
+                <span>🔑 Manage Passwords, Access &amp; Live GPS (Owner Only)</span>
               </button>
             ) : (
               <span className="text-[11px] text-slate-400 flex items-center gap-1 ml-auto">
                 <KeyRound className="w-3 h-3 text-amber-400" />
-                <span>Log in as Owner to edit passwords &amp; grant staff access</span>
+                <span>Click Owner (cleaningserviceyeg@gmail.com) below to unlock Access Manager</span>
               </span>
             )}
           </div>
@@ -551,14 +621,14 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
           <div className="p-3.5 bg-rose-50 border-b border-rose-200 text-rose-900 text-xs font-medium flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
             <div className="flex-1 leading-snug">
-              <strong className="block text-rose-950 font-bold mb-0.5">Authentication Required:</strong>
+              <strong className="block text-rose-950 font-bold mb-0.5">Login Notice:</strong>
               <span>{errorMessage}</span>
             </div>
           </div>
         )}
 
         {/* ═══════════════════════════════════════════════════════════════════════════
-            TAB 2: OWNER PASSWORD & ACCESS PERMISSIONS MANAGER
+            TAB 2: OWNER PASSWORD, ACCESS PERMISSIONS & LIVE CELL PHONE GPS MANAGER
            ═══════════════════════════════════════════════════════════════════════════ */}
         {activeModalTab === 'MANAGE_ACCESS' && canCurrentUserManageAccess ? (
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 bg-slate-50">
@@ -568,12 +638,11 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-amber-300" />
                   <h3 className="font-black text-sm text-white">
-                    Owner Master Control: Passwords &amp; Staff Permissions
+                    Owner Master Control: Passwords, Full Access &amp; Live Cell Phone GPS
                   </h3>
                 </div>
                 <p className="text-xs text-slate-300 mt-1">
-                  Set custom passwords/PINs for yourself, dispatchers, and cleaners — or click{' '}
-                  <strong className="text-emerald-300">&quot;🌟 Full Access to Everything&quot;</strong> on any person to give them full app access!
+                  Anyone you give access to must allow their cell phone GPS location when they log in, streaming their live position directly to your Dispatch Map at all times!
                 </p>
               </div>
               <button
@@ -595,7 +664,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <h4 className="font-black text-xs uppercase tracking-wider text-emerald-900 flex items-center gap-1.5">
                     <UserPlus className="w-4 h-4 text-emerald-600" />
-                    <span>Add New Person with Password &amp; Access Level</span>
+                    <span>Add New Person with Password, Access Level &amp; Live Cell Phone GPS</span>
                   </h4>
                 </div>
 
@@ -622,7 +691,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-extrabold text-slate-700 mb-1">Phone</label>
+                    <label className="block text-[11px] font-extrabold text-slate-700 mb-1">Cell Phone Number</label>
                     <input
                       type="text"
                       placeholder="(780) 555-0199"
@@ -683,21 +752,34 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddPersonForm(false)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Save New Login &amp; Password</span>
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                  <label className="flex items-center gap-2 text-xs font-extrabold text-emerald-900 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newPersonRequireLocation}
+                      onChange={(e) => setNewPersonRequireLocation(e.target.checked)}
+                      className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                    />
+                    <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Require Cell Phone Live GPS Location Sharing (See their live location on map at all times)</span>
+                  </label>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddPersonForm(false)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save New Login &amp; Password</span>
+                    </button>
+                  </div>
                 </div>
               </form>
             )}
@@ -708,7 +790,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Search owner, dispatcher, or cleaner to edit password or access..."
+                  placeholder="Search owner, dispatcher, or cleaner to edit password, access, or live GPS..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-purple-500"
@@ -732,13 +814,15 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
               </div>
             </div>
 
-            {/* User List with Password, PIN & Access Controls */}
+            {/* User List with Password, PIN, Live GPS Status & Access Controls */}
             <div className="space-y-3">
               {filteredUsersForLogin.map((u) => {
                 const perms = getUserPermissions(u);
                 const isExpanded = expandedUserId === u.id;
                 const isPassVisible = Boolean(visiblePasswordsMap[u.id]);
                 const isCustomUser = u.id.startsWith('user-custom-');
+                const livePing = liveLocationsMap[u.id] || (u.cleanerId ? liveLocationsMap[u.cleanerId] : undefined);
+                const requiresPass = doesUserRequirePassword(u);
 
                 return (
                   <div
@@ -773,11 +857,30 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                             >
                               {u.role}
                             </span>
+                            {!requiresPass && (
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
+                                🔓 No Password Needed
+                              </span>
+                            )}
                             {perms.hasFullAccess && (
                               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
                                 🌟 Full Access to Everything
                               </span>
                             )}
+                            {livePing ? (
+                              <span
+                                className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-2xs"
+                                title={`Live Cell Phone GPS: ${livePing.lat.toFixed(5)}, ${livePing.lng.toFixed(5)} (${livePing.deviceType || 'Cell Phone'})`}
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                                <span>📡 Live Cell GPS ({livePing.lat.toFixed(4)}, {livePing.lng.toFixed(4)})</span>
+                              </span>
+                            ) : u.requireLiveLocation !== false ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-800 border border-cyan-200 flex items-center gap-1">
+                                <Smartphone className="w-3 h-3 text-cyan-600" />
+                                <span>GPS Required on Phone Login</span>
+                              </span>
+                            ) : null}
                           </div>
                           <p className="text-[11px] text-slate-500 truncate">
                             {u.email} • {u.phone} {u.assignedVan ? `• ${u.assignedVan}` : ''}
@@ -871,17 +974,23 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Password & PIN Inline Editor Row */}
-                    <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+                    {/* Password, PIN, No-Password Toggle & Live Cell GPS Requirement Row */}
+                    <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
+                      <div className="sm:col-span-4 flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
                         <KeyRound className="w-3.5 h-3.5 text-purple-600 shrink-0" />
                         <span className="text-[11px] font-extrabold text-slate-600 shrink-0">Password:</span>
                         <input
                           type={isPassVisible ? 'text' : 'password'}
                           value={u.password || ''}
-                          placeholder="Set password..."
-                          onChange={(e) => handleUpdateSingleUser(u.id, { password: e.target.value })}
-                          className="flex-1 min-w-0 bg-white px-2.5 py-1 rounded-lg border border-slate-300 text-xs font-mono font-bold text-slate-900"
+                          disabled={!requiresPass}
+                          placeholder={requiresPass ? 'Set password...' : 'No password needed'}
+                          onChange={(e) =>
+                            handleUpdateSingleUser(u.id, {
+                              password: e.target.value,
+                              noPasswordRequired: false,
+                            })
+                          }
+                          className="flex-1 min-w-0 bg-white px-2 py-1 rounded-lg border border-slate-300 text-xs font-mono font-bold text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
                         />
                         <button
                           type="button"
@@ -895,17 +1004,59 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                         </button>
                       </div>
 
-                      <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+                      <div className="sm:col-span-3 flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
                         <Lock className="w-3.5 h-3.5 text-pink-600 shrink-0" />
-                        <span className="text-[11px] font-extrabold text-slate-600 shrink-0">4-Digit PIN:</span>
+                        <span className="text-[11px] font-extrabold text-slate-600 shrink-0">PIN:</span>
                         <input
                           type={isPassVisible ? 'text' : 'password'}
                           value={u.pin || ''}
-                          placeholder="PIN (e.g. 1001)"
+                          disabled={!requiresPass}
+                          placeholder="PIN"
                           onChange={(e) => handleUpdateSingleUser(u.id, { pin: e.target.value })}
-                          className="w-28 bg-white px-2.5 py-1 rounded-lg border border-slate-300 text-xs font-mono font-bold text-slate-900"
+                          className="w-20 bg-white px-2 py-1 rounded-lg border border-slate-300 text-xs font-mono font-bold text-slate-900 disabled:bg-slate-100"
                         />
-                        <span className="text-[10px] text-emerald-700 font-bold ml-auto">✓ Auto-Saved</span>
+                      </div>
+
+                      <div className="sm:col-span-5 flex flex-wrap items-center justify-end gap-2">
+                        <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!requiresPass}
+                            onChange={(e) =>
+                              handleUpdateSingleUser(
+                                u.id,
+                                { noPasswordRequired: e.target.checked },
+                                e.target.checked
+                                  ? `🔓 Enabled 1-Click No-Password Login for ${u.name}`
+                                  : `🔒 Password now required for ${u.name}`
+                              )
+                            }
+                            className="w-3.5 h-3.5 accent-emerald-600 rounded cursor-pointer"
+                          />
+                          <span>No Password</span>
+                        </label>
+
+                        <label
+                          className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-900 bg-emerald-50 px-2.5 py-1.5 rounded-xl border border-emerald-200 cursor-pointer"
+                          title="When checked, this user must allow cell phone GPS location on login so you see their live location on the map at all times"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={u.requireLiveLocation !== false}
+                            onChange={(e) =>
+                              handleUpdateSingleUser(
+                                u.id,
+                                { requireLiveLocation: e.target.checked },
+                                e.target.checked
+                                  ? `📍 Mandatory Live Cell Phone GPS enabled for ${u.name}`
+                                  : `Updated GPS preference for ${u.name}`
+                              )
+                            }
+                            className="w-3.5 h-3.5 accent-emerald-600 rounded cursor-pointer"
+                          />
+                          <MapPin className="w-3 h-3 text-emerald-600" />
+                          <span>Require Live Phone GPS</span>
+                        </label>
                       </div>
                     </div>
 
@@ -955,7 +1106,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
           </div>
         ) : selectedPendingUser ? (
           /* ═══════════════════════════════════════════════════════════════════════════
-              TAB 1A: PASSWORD / PIN ENTRY SCREEN FOR SELECTED ACCOUNT (OWNER, DISPATCHER, CLEANER)
+              TAB 1A: PASSWORD / PIN ENTRY SCREEN + MANDATORY CELL PHONE GPS NOTICE
              ═══════════════════════════════════════════════════════════════════════════ */
           <div className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1 bg-slate-50">
             <button
@@ -1018,6 +1169,22 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
               </div>
             </div>
 
+            {/* Mandatory Live Cell Phone GPS Banner */}
+            {selectedPendingUser.requireLiveLocation !== false && (
+              <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-start gap-2.5">
+                <Navigation className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="text-xs leading-snug">
+                  <strong className="font-black block text-emerald-950">
+                    📍 Live Cell Phone GPS Location Required on Login:
+                  </strong>
+                  <span>
+                    When you tap <strong>Verify Password &amp; Log In</strong> on your phone, please tap{' '}
+                    <strong>&quot;Allow&quot;</strong> when prompted for your location so Dispatch &amp; Owner can see your live route location in real time.
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Password Entry Box */}
             <form onSubmit={handleVerifyPassword} className="space-y-4">
               <div>
@@ -1027,7 +1194,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                     <span>Enter Password or 4-Digit PIN for {selectedPendingUser.name}</span>
                   </span>
                   <span className="text-[11px] text-rose-600 font-bold">
-                    Mandatory for {selectedPendingUser.role}
+                    Password / PIN Required
                   </span>
                 </label>
 
@@ -1087,32 +1254,100 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                   className="w-2/3 py-2.5 rounded-xl bg-gradient-to-r from-purple-700 via-purple-600 to-pink-600 hover:opacity-95 text-white font-extrabold text-xs shadow-md cursor-pointer flex items-center justify-center gap-2 active:scale-95"
                 >
                   <Lock className="w-4 h-4" />
-                  <span>Verify Password &amp; Log In →</span>
+                  <span>Verify Password &amp; Allow Live GPS →</span>
                 </button>
               </div>
             </form>
           </div>
         ) : (
           /* ═══════════════════════════════════════════════════════════════════════════
-              TAB 1B: DIRECTORY & DIRECT LOGIN (ALL ACCOUNTS REQUIRE PASSWORD)
+              TAB 1B: 1-CLICK OWNER LOGIN (cleaningserviceyeg@gmail.com) + STAFF PASSWORD LOGIN
              ═══════════════════════════════════════════════════════════════════════════ */
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 bg-slate-50/50">
+            {/* 1. 1-CLICK OWNER LOGIN (cleaningserviceyeg@gmail.com - NO PASSWORD REQUIRED) */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-900 via-indigo-900 to-pink-900 text-white border-2 border-amber-400 shadow-lg space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">👑</span>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-black text-sm text-white">
+                        Owner Login: cleaningserviceyeg@gmail.com
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-400 text-slate-950 uppercase">
+                        ✓ No Password Required
+                      </span>
+                    </div>
+                    <p className="text-xs text-purple-200 mt-0.5">
+                      Click below to enter the full Owner Console immediately (no password needed for Owner)
+                    </p>
+                  </div>
+                </div>
+
+                {primaryOwnerAccount && (
+                  <button
+                    type="button"
+                    onClick={() => completeLogin(primaryOwnerAccount)}
+                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-300 hover:from-amber-300 hover:to-yellow-200 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-95 shrink-0"
+                  >
+                    <Unlock className="w-4 h-4 text-slate-950" />
+                    <span>1-Click Owner Login (cleaningserviceyeg@gmail.com) →</span>
+                  </button>
+                )}
+              </div>
+
+              {ownerUsers.length > 1 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-white/15">
+                  {ownerUsers.map((owner) => {
+                    const isCurrent = isStaffAuthenticated && owner.id === currentUser.id;
+                    const needsPass = doesUserRequirePassword(owner);
+                    return (
+                      <button
+                        key={owner.id}
+                        type="button"
+                        onClick={() => handleUserClick(owner)}
+                        className={`p-2.5 rounded-xl border text-left flex items-center justify-between gap-2 transition-all cursor-pointer ${
+                          isCurrent
+                            ? 'bg-white text-purple-950 border-amber-300 shadow-sm'
+                            : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-xs truncate">{owner.name}</div>
+                          <div className={`text-[10px] truncate ${isCurrent ? 'text-purple-700' : 'text-purple-200'}`}>
+                            {owner.email}
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-emerald-400 text-slate-950 flex items-center gap-1 shrink-0">
+                          <Unlock className="w-3 h-3" />
+                          <span>{needsPass ? 'Enter Password' : 'Instant Login'}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             {/* Direct Email / Name + Password Form */}
             <form
               onSubmit={handleDirectLoginSubmit}
               className="p-4 rounded-2xl bg-slate-900 text-white border border-slate-800 shadow-md space-y-3"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-1">
                 <span className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
                   <KeyRound className="w-4 h-4 text-amber-400" />
-                  <span>Direct Login with Email / Name &amp; Password</span>
+                  <span>Staff Direct Login (Email / Name + Password or PIN)</span>
                 </span>
-                <span className="text-[10px] text-slate-400">Or select your account card below</span>
+                <span className="text-[10px] text-emerald-300 font-bold flex items-center gap-1">
+                  <MapPin className="w-3 h-3" />
+                  <span>Auto-activates Live Cell Phone GPS on Login</span>
+                </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
                 <input
                   type="text"
-                  placeholder="Email or Name (e.g. Richard, Dominic, Melissa...)"
+                  placeholder="Email or Name (cleaningserviceyeg@gmail.com, Dominic, Melissa...)"
                   value={directLoginIdentifier}
                   onChange={(e) => setDirectLoginIdentifier(e.target.value)}
                   className="sm:col-span-5 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-pink-500"
@@ -1120,7 +1355,7 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                 <div className="sm:col-span-4 relative">
                   <input
                     type={showDirectPassword ? 'text' : 'password'}
-                    placeholder="Password or PIN"
+                    placeholder="Password or PIN (blank for Owner)"
                     value={directLoginPassword}
                     onChange={(e) => setDirectLoginPassword(e.target.value)}
                     className="w-full px-3 py-2 pr-8 rounded-xl bg-slate-800 border border-slate-700 text-xs font-mono text-white placeholder-slate-400 focus:outline-none focus:border-pink-500"
@@ -1143,83 +1378,16 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
               </div>
             </form>
 
-            {/* 1. OWNER ACCOUNTS (PASSWORD REQUIRED) */}
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-50 via-indigo-50 to-pink-50 border border-purple-200 shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">👑</span>
-                  <div>
-                    <h3 className="font-extrabold text-xs text-purple-950">
-                      Owner &amp; Executive Accounts
-                    </h3>
-                    <p className="text-[11px] text-purple-800">
-                      Password or PIN required to unlock Owner console &amp; permissions manager
-                    </p>
-                  </div>
-                </div>
-
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-purple-900 text-amber-300 flex items-center gap-1">
-                  <Lock className="w-3 h-3" />
-                  <span>Password Protected</span>
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {ownerUsers.map((owner) => {
-                  const isCurrent = isStaffAuthenticated && owner.id === currentUser.id;
-                  return (
-                    <button
-                      key={owner.id}
-                      type="button"
-                      onClick={() => handleUserClick(owner)}
-                      className={`p-3 rounded-xl border text-left flex items-center justify-between gap-2 transition-all cursor-pointer ${
-                        isCurrent
-                          ? 'bg-purple-600 text-white border-purple-700 shadow-sm'
-                          : 'bg-white hover:bg-purple-100/50 text-slate-900 border-purple-200 hover:border-purple-400 shadow-2xs'
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <div
-                          className={`font-extrabold text-xs truncate ${
-                            isCurrent ? 'text-white' : 'text-purple-950'
-                          }`}
-                        >
-                          {owner.name}
-                        </div>
-                        <div
-                          className={`text-[10px] truncate ${
-                            isCurrent ? 'text-purple-200' : 'text-slate-500'
-                          }`}
-                        >
-                          {owner.email}
-                        </div>
-                      </div>
-                      <span
-                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black flex items-center gap-1 shrink-0 ${
-                          isCurrent
-                            ? 'bg-purple-800 text-amber-300'
-                            : 'bg-purple-900 text-white'
-                        }`}
-                      >
-                        <Lock className="w-3 h-3" />
-                        <span>{isCurrent ? 'Active (Re-verify)' : 'Enter Password'}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 2. DISPATCHERS & CLEANERS (PASSWORD REQUIRED) */}
+            {/* 2. DISPATCHERS & CLEANERS (PASSWORD REQUIRED + LIVE CELL PHONE GPS) */}
             <div className="space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <h3 className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
                     <Lock className="w-3.5 h-3.5 text-pink-600" />
-                    <span>Dispatchers &amp; Cleaners</span>
+                    <span>Dispatchers &amp; Cleaners (Password + Cell Phone GPS Location)</span>
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Password or PIN required for all staff accounts
+                    Select your profile to enter your password/PIN and share your live cell phone location
                   </p>
                 </div>
 
@@ -1265,6 +1433,9 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                   .map((staff) => {
                     const isCurrent = isStaffAuthenticated && staff.id === currentUser.id;
                     const staffPerms = getUserPermissions(staff);
+                    const livePing =
+                      liveLocationsMap[staff.id] ||
+                      (staff.cleanerId ? liveLocationsMap[staff.cleanerId] : undefined);
                     return (
                       <div
                         key={staff.id}
@@ -1304,6 +1475,12 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                                   🌟 Full Access
                                 </span>
                               )}
+                              {livePing && (
+                                <span className="text-[9px] font-black px-1.5 py-0.2 rounded-full bg-emerald-600 text-white flex items-center gap-1">
+                                  <Radio className="w-2.5 h-2.5 animate-pulse" />
+                                  <span>Live GPS Active</span>
+                                </span>
+                              )}
                             </div>
                             <p className="text-[11px] text-slate-500 truncate mt-0.5">
                               {staff.title} {staff.assignedVan ? `• ${staff.assignedVan}` : ''}
@@ -1319,7 +1496,9 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
                             className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-gradient-to-r hover:from-pink-600 hover:to-purple-600 text-white text-xs font-black flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95"
                           >
                             <Lock className="w-3 h-3 text-pink-300" />
-                            <span>{isCurrent ? 'Active (Re-verify)' : 'Enter Password'}</span>
+                            <span>
+                              {doesUserRequirePassword(staff) ? 'Enter Password' : '1-Click Login'}
+                            </span>
                             <ChevronRight className="w-3.5 h-3.5" />
                           </button>
                         </div>
@@ -1334,9 +1513,9 @@ export const RoleSelectorModal: React.FC<RoleSelectorModalProps> = ({
         {/* Footer */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 flex-shrink-0">
           <span className="text-[11px] flex items-center gap-1.5">
-            <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
             <span>
-              All Owner, Dispatcher &amp; Cleaner logins require a verified password or PIN. Unauthenticated visitors only see the Customer Booking page.
+              Owner (<strong>cleaningserviceyeg@gmail.com</strong>) logs in with 1 click (no password). All staff logins require Password/PIN &amp; share live cell phone GPS location.
             </span>
           </span>
           <button

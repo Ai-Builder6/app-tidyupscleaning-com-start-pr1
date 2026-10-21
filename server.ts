@@ -4976,6 +4976,138 @@ app.post("/api/auth/users", (req, res) => {
   });
 });
 
+// Real-Time Cell Phone Live GPS Location Tracking for All Staff & Cleaners
+const LIVE_LOCATIONS_FILE = path.join(process.cwd(), "data", "tidyups_live_gps_locations.json");
+
+function loadLiveStaffLocations(): Record<string, any> {
+  try {
+    if (fs.existsSync(LIVE_LOCATIONS_FILE)) {
+      const raw = fs.readFileSync(LIVE_LOCATIONS_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+  } catch (e) {
+    console.warn("Could not read tidyups_live_gps_locations.json:", e);
+  }
+  return {};
+}
+
+function saveLiveStaffLocations(locationsMap: Record<string, any>): void {
+  try {
+    const dir = path.dirname(LIVE_LOCATIONS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LIVE_LOCATIONS_FILE, JSON.stringify(locationsMap, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("Could not write tidyups_live_gps_locations.json:", e);
+  }
+}
+
+app.get("/api/staff/live-locations", (_req, res) => {
+  const locations = loadLiveStaffLocations();
+  res.json({
+    success: true,
+    locations,
+    list: Object.values(locations),
+  });
+});
+
+app.post("/api/staff/live-locations", (req, res) => {
+  const {
+    userId,
+    cleanerId,
+    name,
+    role,
+    email,
+    phone,
+    assignedVan,
+    lat,
+    lng,
+    accuracy,
+    speedKmh,
+    heading,
+    deviceType,
+    batteryLevel,
+    permissionState,
+  } = req.body || {};
+
+  if (!userId || typeof lat !== "number" || typeof lng !== "number" || isNaN(lat) || isNaN(lng)) {
+    return res.status(400).json({ error: "Valid userId, lat, and lng are required" });
+  }
+
+  const nowIso = new Date().toISOString();
+  const locations = loadLiveStaffLocations();
+  const entry = {
+    userId,
+    cleanerId: cleanerId || userId,
+    name: name || "Staff Member",
+    role: role || "CLEANER",
+    email: email || "",
+    phone: phone || "",
+    assignedVan: assignedVan || "Mobile Unit",
+    lat,
+    lng,
+    accuracy: typeof accuracy === "number" ? Math.round(accuracy) : 10,
+    speedKmh: typeof speedKmh === "number" ? Math.round(speedKmh) : null,
+    heading: typeof heading === "number" ? Math.round(heading) : null,
+    deviceType: deviceType || "Cell Phone GPS",
+    batteryLevel: typeof batteryLevel === "number" ? batteryLevel : null,
+    permissionState: permissionState || "granted",
+    timestamp: nowIso,
+  };
+
+  locations[userId] = entry;
+  if (cleanerId) {
+    locations[cleanerId] = entry;
+  }
+  saveLiveStaffLocations(locations);
+
+  // Also update matching technician in the store so Dispatch Map always shows the latest live cell phone coordinates
+  try {
+    const currentStore = loadStore();
+    if (Array.isArray(currentStore.technicians)) {
+      let updatedAny = false;
+      currentStore.technicians = currentStore.technicians.map((t: any) => {
+        if (
+          t.id === cleanerId ||
+          t.id === userId ||
+          (email && t.email && t.email.toLowerCase() === String(email).toLowerCase()) ||
+          (name && t.name && t.name.toLowerCase() === String(name).toLowerCase())
+        ) {
+          updatedAny = true;
+          return {
+            ...t,
+            currentLocation: {
+              ...(t.currentLocation || {}),
+              lat,
+              lng,
+              address: t.currentLocation?.address || `Live Cell GPS (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
+            },
+            isLiveGps: true,
+            lastGpsPingAt: nowIso,
+            gpsAccuracyMeters: entry.accuracy,
+            gpsSpeedKmh: entry.speedKmh,
+            gpsDeviceType: entry.deviceType,
+            gpsBatteryLevel: entry.batteryLevel,
+            lastUpdated: nowIso,
+          };
+        }
+        return t;
+      });
+      if (updatedAny) {
+        saveStore(currentStore);
+      }
+    }
+  } catch (e) {
+    console.warn("Could not update store technicians with live GPS:", e);
+  }
+
+  res.json({
+    success: true,
+    entry,
+    locations,
+  });
+});
+
 // Update cleaner assignments or details for a scheduled visit (dual-cleaner support & Jobber sync)
 app.post("/api/jobber/update-visit", (req, res) => {
   const { visitId, assignedCleaners, startAt, endAt, notes } = req.body || {};

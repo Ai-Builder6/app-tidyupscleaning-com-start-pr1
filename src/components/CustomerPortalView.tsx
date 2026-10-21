@@ -978,11 +978,11 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenStaffLogin}
-                className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-400/50 font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
-                title="Owner, Dispatcher & Cleaner Login (Password Required)"
+                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border-2 border-amber-400 font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+                title="Owner (cleaningserviceyeg@gmail.com - No Password), Dispatcher & Cleaner Login"
               >
                 <Lock className="w-3.5 h-3.5 text-amber-400" />
-                <span>Staff Login</span>
+                <span>👑 Owner / Staff Login</span>
               </button>
             )}
           </div>
@@ -2004,7 +2004,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 <HelpCircle className="w-3 h-3" />
                 <span>Customer Support &amp; FAQ (/support)</span>
               </button>
-              {!isStandaloneCustomerSite && !isCustomerLockPreview && onOpenStaffLogin && (
+              {onOpenStaffLogin && !isCustomerLockPreview && (
                 <button
                   type="button"
                   onClick={onOpenStaffLogin}
