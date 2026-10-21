@@ -7,7 +7,7 @@ import {
   saveClientToFirestore,
   saveQuoteToFirestore,
   saveScheduledVisitToFirestore,
-} from './services/firestoreSync';
+} from './services/firestoreSyncService';
 import './index.css';
 
 function isDedicatedCustomerBookingRoute(): boolean {

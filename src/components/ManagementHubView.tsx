@@ -66,6 +66,7 @@ interface ManagementHubViewProps {
   onSyncFirestore?: () => void;
   isSyncingFirestore?: boolean;
   onOpenProjectBackup?: () => void;
+  onOpenAccessManager?: () => void;
 }
 
 export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
@@ -96,6 +97,7 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
   onSyncFirestore,
   isSyncingFirestore = false,
   onOpenProjectBackup,
+  onOpenAccessManager,
 }) => {
   const [isUploadingProjectDrive, setIsUploadingProjectDrive] = useState(false);
   const [driveBackupNotice, setDriveBackupNotice] = useState<{
@@ -185,6 +187,17 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
                 : '1-Click Upload Whole Project ZIP to Drive'}
             </span>
           </button>
+          {onOpenAccessManager && (
+            <button
+              type="button"
+              onClick={onOpenAccessManager}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-300 hover:to-orange-300 text-slate-950 text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+              title="Owner Password & Access Control: Set passwords for Owner, Dispatchers & Cleaners and grant Full Access to Everything"
+            >
+              <Key className="w-3.5 h-3.5 text-slate-950" />
+              <span>🔑 Passwords &amp; Staff Access</span>
+            </button>
+          )}
           <button
             onClick={onOpenJobberSync}
             className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"

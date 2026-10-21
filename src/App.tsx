@@ -81,7 +81,15 @@ import { BookMyCleaningLogo } from './components/BookMyCleaningLogo';
 import { AddressSearchRadarView } from './components/AddressSearchRadarView';
 import { QuickMapScheduleRadarView } from './components/QuickMapScheduleRadarView';
 import { JobberQuote, JobberInvoice } from './services/jobberSyncModules';
-import { AppUser, APP_USERS, getRolePermissions } from './types/authAndChat';
+import {
+  AppUser,
+  APP_USERS,
+  getUserPermissions,
+  hasExpandedConsoleAccess,
+  loadAppUsers,
+  saveAppUsers,
+  mergeUsersWithCanonical,
+} from './types/authAndChat';
 import { 
   Truck, 
   Clock, 
@@ -296,22 +304,25 @@ export function App() {
   const [isPublicBookingModalOpen, setIsPublicBookingModalOpen] = useState<boolean>(false);
   const [isQuoModalOpen, setIsQuoModalOpen] = useState<boolean>(false);
 
-  // Multi-User RBAC & Real-Time Chat States
+  // Multi-User RBAC, Editable Passwords & Granular Permissions State
+  const [appUsersList, setAppUsersList] = useState<AppUser[]>(() => loadAppUsers());
   const [currentUser, setCurrentUser] = useState<AppUser>(() => {
+    const loaded = loadAppUsers();
     if (typeof window !== 'undefined') {
       try {
         const savedId = localStorage.getItem('bookmycleaning_active_user_id');
         if (savedId) {
-          const found = APP_USERS.find((u) => u.id === savedId);
+          const found = loaded.find((u) => u.id === savedId);
           if (found) return found;
         }
       } catch (e) {
         console.warn('localStorage error:', e);
       }
     }
-    return APP_USERS[0]; // Default to Owner / Director
+    return loaded[0] || APP_USERS[0];
   });
   const [isRoleModalOpen, setIsRoleModalOpen] = useState<boolean>(false);
+  const [roleModalInitialTab, setRoleModalInitialTab] = useState<'LOGIN' | 'MANAGE_ACCESS'>('LOGIN');
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
   const [chatRecipient, setChatRecipient] = useState<AppUser | null>(null);
   const [cleanerShowMap, setCleanerShowMap] = useState<boolean>(false);
@@ -338,7 +349,7 @@ export function App() {
   // Allows the owner inside the staff app to test the locked 1-page customer view
   const [isCustomerLockPreview, setIsCustomerLockPreview] = useState<boolean>(false);
 
-  // Authentication state: false on book.tidyupscleaning.com so customers never see staff tools; true on app.tidyupscleaning.com
+  // Mandatory Password Authentication: false until an Owner, Dispatcher, or Cleaner verifies their login & password
   const [isStaffAuthenticated, setIsStaffAuthenticated] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const host = window.location.hostname.toLowerCase();
@@ -354,23 +365,22 @@ export function App() {
         return false;
       }
       try {
-        const stored = localStorage.getItem('tidyups_staff_authenticated');
-        if (stored === 'false') return false;
-        return true;
+        return localStorage.getItem('tidyups_verified_password_session') === 'true';
       } catch {
-        return true;
+        return false;
       }
     }
-    return true;
+    return false;
   });
 
-  const permissions = getRolePermissions(currentUser.role);
+  const permissions = getUserPermissions(currentUser);
+  const isCleanerRestrictedMode = currentUser.role === 'CLEANER' && !hasExpandedConsoleAccess(permissions);
 
   // Dedicated Top Bar Navigation Tabs: 'MASTER_HUB' | 'QUICK_QUOTE' | 'MAP' | 'SCHEDULED_JOBS' | 'MANAGEMENT' | 'INTAKES' | 'CUSTOMER_PORTAL' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'SPAM_SHIELD'
   const [activeTopView, setActiveTopView] = useState<'MASTER_HUB' | 'MAP' | 'CUSTOMER_PORTAL' | 'SCHEDULED_JOBS' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'MANAGEMENT' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'QUICK_QUOTE' | 'INTAKES' | 'SPAM_SHIELD'>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const isAuth = localStorage.getItem('tidyups_staff_authenticated') !== 'false';
+        const isAuth = localStorage.getItem('tidyups_verified_password_session') === 'true';
         if (!isAuth) return 'CUSTOMER_PORTAL';
         const savedTab = localStorage.getItem('tidyups_active_tab');
         if (savedTab && ['MASTER_HUB', 'MAP', 'CUSTOMER_PORTAL', 'SCHEDULED_JOBS', 'CLIENTS', 'ADDRESS_SEARCH', 'MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL', 'LEADS', 'QUICK_QUOTE', 'INTAKES', 'SPAM_SHIELD'].includes(savedTab)) {
@@ -378,10 +388,10 @@ export function App() {
         }
         return 'MASTER_HUB';
       } catch {
-        return 'MASTER_HUB';
+        return 'CUSTOMER_PORTAL';
       }
     }
-    return 'MASTER_HUB';
+    return 'CUSTOMER_PORTAL';
   });
   const [masterHubFocusBlock, setMasterHubFocusBlock] = useState<MasterHubFocusBlock>('ALL');
   const [isSyncingEverything, setIsSyncingEverything] = useState<boolean>(false);
@@ -757,23 +767,18 @@ export function App() {
     }
   }, [activeProjectId]);
 
-  // Sync Firebase Auth session with active staff account
+  // Load persisted staff accounts, passwords, and custom permissions from server on mount
   useEffect(() => {
-    const unsub = onFirebaseAuthStateChanged((user) => {
-      if (user && user.email) {
-        const match = APP_USERS.find(
-          (u) => u.email.toLowerCase() === user.email?.toLowerCase()
-        ) || APP_USERS.find((u) => u.id === 'user-dispatcher-admin');
-        if (match) {
-          setCurrentUser(match);
-          try {
-            localStorage.setItem('tidyups_staff_authenticated', 'true');
-            localStorage.setItem('bookmycleaning_active_user_id', match.id);
-          } catch {}
+    fetch('/api/auth/users')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.users && Array.isArray(data.users)) {
+          const merged = mergeUsersWithCanonical(data.users);
+          setAppUsersList(merged);
+          setCurrentUser((prev) => merged.find((u) => u.id === prev.id) || prev);
         }
-      }
-    });
-    return unsub;
+      })
+      .catch((err) => console.warn('Could not load auth users from server:', err));
   }, []);
 
   // Fetch live Service Catalog Price List on mount and project change
@@ -1863,29 +1868,43 @@ export function App() {
 
   // Support clicking on any cleaner across the UI (TerritoryMap, DispatchKanban, Directory) to talk to them
   const handleMessageTech = useCallback((tech: Technician) => {
-    const matchedUser = APP_USERS.find(
+    const matchedUser = appUsersList.find(
       (u) => u.cleanerId === tech.id || u.email === tech.email || u.name === tech.name
     );
     if (matchedUser) {
       setChatRecipient(matchedUser);
       setIsChatOpen(true);
     }
+  }, [appUsersList]);
+
+  const handleUpdateUsersList = useCallback((updatedUsers: AppUser[]) => {
+    setAppUsersList(updatedUsers);
+    saveAppUsers(updatedUsers);
+    setCurrentUser((prev) => updatedUsers.find((u) => u.id === prev.id) || prev);
   }, []);
 
   const handleSelectUser = useCallback((user: AppUser) => {
     setCurrentUser(user);
     setIsStaffAuthenticated(true);
+    const userPerms = getUserPermissions(user);
+    const isRestrictedCleaner = user.role === 'CLEANER' && !hasExpandedConsoleAccess(userPerms);
+    const targetView = isRestrictedCleaner
+      ? 'MAP'
+      : userPerms.canAccessMasterHub
+      ? 'MASTER_HUB'
+      : 'MAP';
     try {
       localStorage.setItem('bookmycleaning_active_user_id', user.id);
       localStorage.setItem('tidyups_staff_authenticated', 'true');
-      localStorage.setItem('tidyups_active_tab', 'MAP');
+      localStorage.setItem('tidyups_verified_password_session', 'true');
+      localStorage.setItem('tidyups_active_tab', targetView);
     } catch (e) {
       console.warn('localStorage error:', e);
     }
-    setActiveTopView('MAP');
+    setActiveTopView(targetView);
     if (user.role === 'CLEANER') {
       setSelectedTechId(user.cleanerId || null);
-      setCleanerShowMap(false);
+      setCleanerShowMap(!isRestrictedCleaner);
     }
   }, []);
 
@@ -1893,6 +1912,7 @@ export function App() {
     setIsStaffAuthenticated(false);
     try {
       localStorage.removeItem('tidyups_staff_authenticated');
+      localStorage.removeItem('tidyups_verified_password_session');
       localStorage.setItem('tidyups_active_tab', 'CUSTOMER_PORTAL');
     } catch (e) {
       console.warn('localStorage error:', e);
@@ -2033,56 +2053,17 @@ export function App() {
                 <span className="hidden sm:inline">Support &amp; Policies</span>
               </button>
 
-              {/* Prominent Header Link to Voice Dictations & Quick Quote */}
+              {/* Staff & Dispatch Login (Password Required) */}
               <button
                 onClick={() => {
-                  setIsStaffAuthenticated(true);
-                  try {
-                    localStorage.setItem('tidyups_staff_authenticated', 'true');
-                    localStorage.setItem('tidyups_active_tab', 'QUICK_QUOTE');
-                  } catch {}
-                  setActiveTopView('QUICK_QUOTE');
+                  setRoleModalInitialTab('LOGIN');
+                  setIsRoleModalOpen(true);
                 }}
-                className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 via-fuchsia-600 to-purple-600 hover:opacity-95 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
-                title="Open Live Voice Dictation, Request Intake Form, Quick Quote & Quick Map"
+                className="min-h-[36px] px-3 sm:px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-400/50 font-extrabold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
+                title="Staff & Owner Login: Password Required for Owner, Dispatcher, and Cleaner Portals"
               >
-                <Mic className="w-3.5 h-3.5 text-white shrink-0" />
-                <span>Voice Dictation &amp; Quick Quote</span>
-              </button>
-
-              {/* 1-Click Block Caller / Area Code Button on Main Website */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleOpenSpamShield();
-                }}
-                className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer shrink-0"
-                title="Instant Call Blocker: Block a phone number or entire 3-digit area code across all Twilio lines"
-              >
-                <ShieldAlert className="w-3.5 h-3.5 text-white shrink-0" />
-                <span>Block Spam Caller</span>
-              </button>
-
-              {/* Project ZIP Download, Google Drive Backup & AI Build Guide */}
-              <button
-                onClick={() => setIsProjectBackupModalOpen(true)}
-                className="min-h-[36px] px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
-                title="Download Full Project ZIP, Backup to Google Drive, AI Build Workflow & GitHub / Publish Guide"
-              >
-                <FileArchive className="w-3.5 h-3.5 text-white shrink-0" />
-                <span className="hidden sm:inline">Backup ZIP &amp; Drive</span>
-              </button>
-
-              {/* Staff & Dispatch Login */}
-              <button
-                onClick={() => setIsRoleModalOpen(true)}
-                className="min-h-[36px] px-3 sm:px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
-                title="Staff Login: Owner, Dispatcher, and Cleaner Portals"
-              >
-                <Lock className="w-3.5 h-3.5 text-white shrink-0" />
-                <span className="hidden sm:inline">Console</span>
+                <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Staff Login</span>
               </button>
             </div>
           </header>
@@ -2149,7 +2130,7 @@ export function App() {
 
             {/* Dedicated Top Bar Primary Navigation Tabs (Drag & Drop or Click ◀ ▶ to Rearrange Left-to-Right) */}
             <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/80 flex-shrink-0">
-              {currentUser.role === 'CLEANER' ? (
+              {isCleanerRestrictedMode ? (
                 <>
                   <button
                     id="nav-tab-cleaner-jobs"
@@ -2185,10 +2166,27 @@ export function App() {
                 </>
               ) : (
                 <>
+                  {currentUser.role === 'CLEANER' && (
+                    <button
+                      id="nav-tab-cleaner-stops-expanded"
+                      onClick={() => {
+                        setCleanerShowMap(false);
+                        setActiveTopView('MAP');
+                      }}
+                      className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        activeTopView === 'MAP' && !cleanerShowMap
+                          ? 'bg-emerald-600 text-white shadow-xs font-extrabold'
+                          : 'bg-emerald-50 text-emerald-900 hover:bg-emerald-100 border border-emerald-200'
+                      }`}
+                    >
+                      <Truck className="w-3.5 h-3.5" />
+                      <span>My Stops</span>
+                    </button>
+                  )}
                   {headerNavOrder.map((btnKey, idx) => {
                     let buttonElement: React.ReactNode = null;
 
-                    if (btnKey === 'MASTER_HUB') {
+                    if (btnKey === 'MASTER_HUB' && permissions.canAccessMasterHub) {
                       buttonElement = (
                         <button
                           id="nav-tab-master-table"
@@ -2212,7 +2210,7 @@ export function App() {
                           </span>
                         </button>
                       );
-                    } else if (btnKey === 'QUICK_QUOTE') {
+                    } else if (btnKey === 'QUICK_QUOTE' && permissions.canAccessQuickQuote) {
                       buttonElement = (
                         <button
                           id="nav-tab-quick-quote"
@@ -2228,13 +2226,16 @@ export function App() {
                           <span>Voice Dictation &amp; Intake</span>
                         </button>
                       );
-                    } else if (btnKey === 'MAP') {
+                    } else if (btnKey === 'MAP' && permissions.canAccessDispatchMap) {
                       buttonElement = (
                         <button
                           id="nav-tab-map"
-                          onClick={() => setActiveTopView('MAP')}
+                          onClick={() => {
+                            if (currentUser.role === 'CLEANER') setCleanerShowMap(true);
+                            setActiveTopView('MAP');
+                          }}
                           className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            activeTopView === 'MAP'
+                            activeTopView === 'MAP' && (currentUser.role !== 'CLEANER' || cleanerShowMap)
                               ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
                               : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                           }`}
@@ -2244,7 +2245,7 @@ export function App() {
                           <span>Dispatch Map</span>
                         </button>
                       );
-                    } else if (btnKey === 'SCHEDULED_JOBS') {
+                    } else if (btnKey === 'SCHEDULED_JOBS' && permissions.canAccessSchedule) {
                       buttonElement = (
                         <button
                           id="nav-tab-jobs"
@@ -2270,7 +2271,7 @@ export function App() {
                           )}
                         </button>
                       );
-                    } else if (btnKey === 'MANAGEMENT') {
+                    } else if (btnKey === 'MANAGEMENT' && permissions.canAccessManagement) {
                       buttonElement = (
                         <button
                           id="nav-tab-management"
@@ -2288,7 +2289,7 @@ export function App() {
                           <span>Management</span>
                         </button>
                       );
-                    } else if (btnKey === 'INTAKES') {
+                    } else if (btnKey === 'INTAKES' && (permissions.canAccessQuickQuote || permissions.canAccessManagement)) {
                       buttonElement = (
                         <button
                           id="nav-tab-intakes"
@@ -2304,7 +2305,7 @@ export function App() {
                           <span>Intakes</span>
                         </button>
                       );
-                    } else if (btnKey === 'CLEAN_SHEET') {
+                    } else if (btnKey === 'CLEAN_SHEET' && permissions.canAccessLeads) {
                       buttonElement = (
                         <button
                           id="nav-tab-clean-sheet"
@@ -2325,7 +2326,7 @@ export function App() {
                           </span>
                         </button>
                       );
-                    } else if (btnKey === 'SPAM_SHIELD') {
+                    } else if (btnKey === 'SPAM_SHIELD' && permissions.canAccessQuoPhoneConfig) {
                       buttonElement = (
                         <button
                           id="nav-tab-spam-shield"
@@ -2341,7 +2342,7 @@ export function App() {
                           <span>Spam Shield</span>
                         </button>
                       );
-                    } else if (btnKey === 'ADDRESS_SEARCH') {
+                    } else if (btnKey === 'ADDRESS_SEARCH' && permissions.canAccessClients) {
                       buttonElement = (
                         <button
                           id="nav-tab-address-radar"
@@ -2357,7 +2358,7 @@ export function App() {
                           <span>Quick Map &amp; Radar</span>
                         </button>
                       );
-                    } else if (btnKey === 'CLIENTS') {
+                    } else if (btnKey === 'CLIENTS' && permissions.canAccessClients) {
                       buttonElement = (
                         <button
                           id="nav-tab-clients"
@@ -2373,7 +2374,7 @@ export function App() {
                           <span>Clients</span>
                         </button>
                       );
-                    } else if (btnKey === 'LEADS') {
+                    } else if (btnKey === 'LEADS' && permissions.canAccessLeads) {
                       buttonElement = (
                         <button
                           id="nav-tab-leads"
@@ -2405,7 +2406,7 @@ export function App() {
                           <span>Customer Page</span>
                         </button>
                       );
-                    } else if (btnKey === 'QUICK_LINKS') {
+                    } else if (btnKey === 'QUICK_LINKS' && permissions.canAccessManagement) {
                       buttonElement = (
                         <button
                           id="nav-quick-links"
@@ -2417,7 +2418,7 @@ export function App() {
                           <span>Quick Links</span>
                         </button>
                       );
-                    } else if (btnKey === 'SMS_REPLIES') {
+                    } else if (btnKey === 'SMS_REPLIES' && permissions.canAccessQuickQuote) {
                       buttonElement = (
                         <button
                           id="nav-quick-replies"
@@ -2429,7 +2430,7 @@ export function App() {
                           <span className="hidden sm:inline">SMS Replies</span>
                         </button>
                       );
-                    } else if (btnKey === 'PRICE_LIST') {
+                    } else if (btnKey === 'PRICE_LIST' && permissions.canAccessManagement) {
                       buttonElement = (
                         <button
                           id="nav-price-list"
@@ -2441,7 +2442,7 @@ export function App() {
                           <span className="hidden sm:inline">Price List</span>
                         </button>
                       );
-                    } else if (btnKey === 'BACKUP_ZIP') {
+                    } else if (btnKey === 'BACKUP_ZIP' && (currentUser.role === 'OWNER' || permissions.hasFullAccess)) {
                       buttonElement = (
                         <button
                           id="nav-project-backup"
@@ -2604,7 +2605,10 @@ export function App() {
               {/* Active User Login / Role Switcher */}
               <button
                 id="topbar-role-switcher-btn"
-                onClick={() => setIsRoleModalOpen(true)}
+                onClick={() => {
+                  setRoleModalInitialTab('LOGIN');
+                  setIsRoleModalOpen(true);
+                }}
                 className="min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs whitespace-nowrap cursor-pointer flex-shrink-0"
                 title={`Active Login: ${currentUser.name} (${currentUser.role}). Click to switch role/account.`}
                 aria-label="Switch User or Role"
@@ -2617,6 +2621,22 @@ export function App() {
                   {currentUser.role}
                 </span>
               </button>
+
+              {/* Owner Quick Button: Manage Passwords & Staff Access */}
+              {(currentUser.role === 'OWNER' || permissions.canManageUsersAndAccess) && (
+                <button
+                  id="topbar-access-manager-btn"
+                  onClick={() => {
+                    setRoleModalInitialTab('MANAGE_ACCESS');
+                    setIsRoleModalOpen(true);
+                  }}
+                  className="min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 border border-amber-400 text-amber-950 text-xs font-black flex items-center gap-1.5 transition-all shadow-2xs whitespace-nowrap cursor-pointer flex-shrink-0"
+                  title="Owner Control: Set Passwords & Grant Cleaners / Dispatchers More Access or Full Access to Everything"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <span className="hidden lg:inline">Passwords &amp; Access</span>
+                </button>
+              )}
 
               {/* Quo 5-Line Phone System Button */}
               {permissions.canAccessQuoPhoneConfig && (
@@ -2726,7 +2746,9 @@ export function App() {
             projectId={activeBrandId}
             isStandaloneCustomerSite={isStandaloneBookingDomain}
             isCustomerLockPreview={isCustomerLockPreview}
-            onToggleCustomerLockPreview={(locked) => setIsCustomerLockPreview(locked)}
+            onToggleCustomerLockPreview={
+              isStaffAuthenticated ? (locked) => setIsCustomerLockPreview(locked) : undefined
+            }
             serviceCatalog={serviceCatalog}
             onLeadsReconnected={(reconnected) => {
               if (Array.isArray(reconnected.leads)) setLeadsList(reconnected.leads);
@@ -2757,18 +2779,22 @@ export function App() {
               if (isStaffAuthenticated) {
                 setActiveTopView('MAP');
               } else {
+                setRoleModalInitialTab('LOGIN');
                 setIsRoleModalOpen(true);
               }
             }}
             onOpenPhoneModal={() => {
-              if (!isStandaloneBookingDomain) setIsQuoModalOpen(true);
+              if (!isStandaloneBookingDomain && isStaffAuthenticated) setIsQuoModalOpen(true);
             }}
             onOpenStaffLogin={() => {
-              if (!isStandaloneBookingDomain) setIsRoleModalOpen(true);
+              if (!isStandaloneBookingDomain) {
+                setRoleModalInitialTab('LOGIN');
+                setIsRoleModalOpen(true);
+              }
             }}
-            onOpenSpamShield={!isStandaloneBookingDomain ? handleOpenSpamShield : undefined}
+            onOpenSpamShield={!isStandaloneBookingDomain && isStaffAuthenticated ? handleOpenSpamShield : undefined}
             onOpenVoiceIntake={() => {
-              if (!isStandaloneBookingDomain) setActiveTopView('QUICK_QUOTE');
+              if (!isStandaloneBookingDomain && isStaffAuthenticated) setActiveTopView('QUICK_QUOTE');
             }}
           />
         ) : activeTopView === 'ADDRESS_SEARCH' ? (
@@ -2955,6 +2981,14 @@ export function App() {
             onSyncFirestore={handleSyncFirestore}
             isSyncingFirestore={isSyncingFirestore}
             onOpenProjectBackup={() => setIsProjectBackupModalOpen(true)}
+            onOpenAccessManager={
+              currentUser.role === 'OWNER' || permissions.canManageUsersAndAccess
+                ? () => {
+                    setRoleModalInitialTab('MANAGE_ACCESS');
+                    setIsRoleModalOpen(true);
+                  }
+                : undefined
+            }
           />
         ) : activeTopView === 'INTAKES' ? (
           <IntakesView
@@ -3868,12 +3902,16 @@ export function App() {
           preFillNumber={spamShieldNumber}
         />
 
-        {/* Role Selector & Login Switcher Modal */}
+        {/* Role Selector, Mandatory Password Login & Owner Access Control Modal */}
         <RoleSelectorModal
           isOpen={isRoleModalOpen}
           onClose={() => setIsRoleModalOpen(false)}
           currentUser={currentUser}
+          isStaffAuthenticated={isStaffAuthenticated}
+          usersList={appUsersList}
+          onUpdateUsersList={handleUpdateUsersList}
           onSelectUser={handleSelectUser}
+          initialTab={roleModalInitialTab}
         />
 
         {/* Service Catalog & Price List Modal */}

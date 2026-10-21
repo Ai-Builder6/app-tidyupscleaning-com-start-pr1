@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastSavedAt": "2026-10-21T01:19:21.568Z",
+  "lastSavedAt": "2026-10-21T03:36:44.370Z",
   "tickets": [
     {
       "id": "Z2lkOi8vSm9iYmVyL1Zpc2l0LzIzNTc2MjY0NTI=",
@@ -13989,9 +13989,9 @@
     "accountName": "Tidyups Cleaning Service Inc",
     "clientId": "27966135-e33e-4c2e-8dc3-ad7ba06dabb8",
     "clientSecret": "65534ce762fe3ec20a5c1447794dabee0ac03f2caf1048c8686377d4e754a36a",
-    "accessToken": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjE1ODAxNzYsImlzcyI6Imh0dHBzOi8vYXBpLmdldGpvYmJlci5jb20iLCJjbGllbnRfaWQiOiIyNzk2NjEzNS1lMzNlLTRjMmUtOGRjMy1hZDdiYTA2ZGFiYjgiLCJzY29wZSI6InJlYWRfY2xpZW50cyB3cml0ZV9jbGllbnRzIHJlYWRfcmVxdWVzdHMgd3JpdGVfcmVxdWVzdHMgcmVhZF9xdW90ZXMgd3JpdGVfcXVvdGVzIHJlYWRfam9icyB3cml0ZV9qb2JzIHJlYWRfc2NoZWR1bGVkX2l0ZW1zIHdyaXRlX3NjaGVkdWxlZF9pdGVtcyByZWFkX2ludm9pY2VzIHdyaXRlX2ludm9pY2VzIHJlYWRfam9iYmVyX3BheW1lbnRzIHJlYWRfdXNlcnMgd3JpdGVfdXNlcnMgd3JpdGVfdGF4X3JhdGVzIHJlYWRfZXhwZW5zZXMgd3JpdGVfZXhwZW5zZXMgcmVhZF9jdXN0b21fZmllbGRfY29uZmlndXJhdGlvbnMgd3JpdGVfY3VzdG9tX2ZpZWxkX2NvbmZpZ3VyYXRpb25zIHJlYWRfdGltZV9zaGVldHMgcmVhZF9lcXVpcG1lbnQgd3JpdGVfZXF1aXBtZW50IHJlYWRfbWFya2V0aW5nIHdyaXRlX21hcmtldGluZyIsImFwcF9pZCI6IjI3OTY2MTM1LWUzM2UtNGMyZS04ZGMzLWFkN2JhMDZkYWJiOCIsInVzZXJfaWQiOjE1ODAxNzYsImFjY291bnRfaWQiOjcxODU3NiwiYXVkIjpbImh0dHBzOi8vZ2V0am9iYmVyLmNvbS9ncmFwaHFsIl0sImV4cCI6MTc5MjU0NzQwM30.GV5uqyddvuIqFVqdlwpmNy17vPb9fmnB-eJzQK6p1cY",
+    "accessToken": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjE1ODAxNzYsImlzcyI6Imh0dHBzOi8vYXBpLmdldGpvYmJlci5jb20iLCJjbGllbnRfaWQiOiIyNzk2NjEzNS1lMzNlLTRjMmUtOGRjMy1hZDdiYTA2ZGFiYjgiLCJzY29wZSI6InJlYWRfY2xpZW50cyB3cml0ZV9jbGllbnRzIHJlYWRfcmVxdWVzdHMgd3JpdGVfcmVxdWVzdHMgcmVhZF9xdW90ZXMgd3JpdGVfcXVvdGVzIHJlYWRfam9icyB3cml0ZV9qb2JzIHJlYWRfc2NoZWR1bGVkX2l0ZW1zIHdyaXRlX3NjaGVkdWxlZF9pdGVtcyByZWFkX2ludm9pY2VzIHdyaXRlX2ludm9pY2VzIHJlYWRfam9iYmVyX3BheW1lbnRzIHJlYWRfdXNlcnMgd3JpdGVfdXNlcnMgd3JpdGVfdGF4X3JhdGVzIHJlYWRfZXhwZW5zZXMgd3JpdGVfZXhwZW5zZXMgcmVhZF9jdXN0b21fZmllbGRfY29uZmlndXJhdGlvbnMgd3JpdGVfY3VzdG9tX2ZpZWxkX2NvbmZpZ3VyYXRpb25zIHJlYWRfdGltZV9zaGVldHMgcmVhZF9lcXVpcG1lbnQgd3JpdGVfZXF1aXBtZW50IHJlYWRfbWFya2V0aW5nIHdyaXRlX21hcmtldGluZyIsImFwcF9pZCI6IjI3OTY2MTM1LWUzM2UtNGMyZS04ZGMzLWFkN2JhMDZkYWJiOCIsInVzZXJfaWQiOjE1ODAxNzYsImFjY291bnRfaWQiOjcxODU3NiwiYXVkIjpbImh0dHBzOi8vZ2V0am9iYmVyLmNvbS9ncmFwaHFsIl0sImV4cCI6MTc5MjU1NzIxM30.9mBrRdahPeafKt4OXHWP6NWAtx5A7Pntmwtz4c8rinA",
     "refreshToken": "872e027576e0973e31605ce6309ffaec",
-    "lastSyncedAt": "2026-10-21T01:14:50.219Z"
+    "lastSyncedAt": "2026-10-21T03:33:33.731Z"
   },
   "chatMessages": [
     {
@@ -14558,7 +14558,7 @@
       "notes": "Synced from Quote QT-4387 ($380) — Initial Basic / Standard Cleaning 2026 (4 Bedrooms, 2.5 Bathrooms • 3.5 hrs) (4 Bedrooms, 2.5 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.280Z",
-      "updatedAt": "2026-10-19T09:48:52.634Z"
+      "updatedAt": "2026-10-21T03:36:44.344Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTY1NjE4MjI=",
@@ -14581,7 +14581,7 @@
       "notes": "Synced from Quote QT-4382 ($223.32) — Basic Cleaning Services (2 Bedrooms, 2 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.280Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.344Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTEyMTk3NDE=",
@@ -14604,7 +14604,7 @@
       "notes": "Synced from Quote QT-4372 ($416.25) — Move Out Cleaning Services (3 Bedrooms, 3 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.280Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.344Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTEyODk5MjY=",
@@ -14627,7 +14627,7 @@
       "notes": "Synced from Quote QT-4370 ($416.25) — Move Out Cleaning Services (3 Bedrooms, 3 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.279Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTE0Mzg4MDE=",
@@ -14650,7 +14650,7 @@
       "notes": "Synced from Quote QT-4369 ($227.82) — Deep Cleaning Services (2 Bedrooms, 2 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.279Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTE4NTExNDA=",
@@ -14673,7 +14673,7 @@
       "notes": "Synced from Quote QT-4368 ($227.82) — Deep Cleaning Services (2 Bedrooms, 2 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.279Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTIyMzg4MTA=",
@@ -14696,7 +14696,7 @@
       "notes": "Synced from Quote QT-4364 ($227.82) — Deep Cleaning Services (2 Bedrooms, 2 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.279Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTI0Njk5Njg=",
@@ -14719,7 +14719,7 @@
       "notes": "Synced from Quote QT-4363 ($416.25) — Move Out Cleaning Services (3 Bedrooms, 3 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.279Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTI1ODg0MDE=",
@@ -14742,7 +14742,7 @@
       "notes": "Synced from Quote QT-4362 ($416.25) — Move Out Cleaning Services (3 Bedrooms, 3 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.279Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTI3MTQyMzg=",
@@ -14765,7 +14765,7 @@
       "notes": "Synced from Quote QT-4357 ($227.82) — Deep Cleaning Services (2 Bedrooms, 2 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.278Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTMxMTY0Mzg=",
@@ -14788,7 +14788,7 @@
       "notes": "Synced from Quote QT-4356 ($416.25) — Move Out Cleaning Services (3 Bedrooms, 3 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.278Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTMzMDMwODA=",
@@ -14811,7 +14811,7 @@
       "notes": "Synced from Quote QT-4355 ($227.82) — Deep Cleaning Services (2 Bedrooms, 2 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-19T05:56:23.278Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "cli-quo-1792365842603-g2v9",
@@ -15041,7 +15041,7 @@
       "notes": "Synced from Quote QT-4290 ($223.32) — Basic Cleaning Services (2 Bedrooms, 2 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-18T16:32:02.107Z",
-      "updatedAt": "2026-10-19T09:48:52.631Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTY0NTYyNzI=",
@@ -15064,7 +15064,7 @@
       "notes": "Synced from Quote QT-4373 ($334.69) — 2Bed 2Bath Deep Cleaning 2026 (2 Bedrooms, 2 Bathrooms).",
       "source": "Jobber",
       "createdAt": "2026-10-18T16:32:02.107Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "jobber-cli-4352",
@@ -15090,7 +15090,7 @@
       "notes": "Synced from Quote QT-4333 ($357.19) — Deep Cleaning Services 2026 (3 Bedrooms, 2 Bathrooms • 3 hrs) (3 Bedrooms, 2 Bathrooms).",
       "source": "Voice / Quick Quote",
       "createdAt": "2026-10-18T15:31:50.767Z",
-      "updatedAt": "2026-10-19T09:48:52.634Z",
+      "updatedAt": "2026-10-21T03:36:44.344Z",
       "callHistory": [
         {
           "id": "QUO_df8b60f6a7ae44f7b5af27b76bb0a8f5",
@@ -15907,7 +15907,7 @@
       "notes": "Google Synced Layout — Total: $357.19 | Deposit: $125.00 | Discount: -$10.00 | Balance: $232.19 | 3 Bedrooms, 2.5 Bathrooms (3 hrs @ $105.00/hr).",
       "source": "Jobber",
       "createdAt": "2026-10-17T19:56:56.811Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z",
+      "updatedAt": "2026-10-21T03:36:44.344Z",
       "callHistory": [
         {
           "id": "QUO_72dc624601aa40e38e0eae397b2b6cbe",
@@ -16118,7 +16118,7 @@
       "notes": "Inbound lead on Kijiji Line (+1 587-900-7223). Last transcript: The caller is inquiring about cleaning services for a small one-bedroom flat. Tidyups Cleaning confirmed the service is for a regular clean, not a move-out clean. The quoted cost for three hours of cleaning is $140. The caller requested to reduce the cost to $80 due to the size of the house. Tidyups Cleaning will send a revised quote via text.",
       "source": "Quo",
       "createdAt": "2026-10-16T14:25:37.412Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z",
+      "updatedAt": "2026-10-21T03:36:44.344Z",
       "callHistory": [
         {
           "id": "QUO_e866dfd251ff4674ac426108dfc01ea7",
@@ -16344,7 +16344,7 @@
       "notes": "Synced with Jobber Client #156423542 & Quote #4293 ($221.07 CAD, Deposit $50.00).",
       "source": "Jobber",
       "createdAt": "2026-10-15T23:46:55Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z",
+      "updatedAt": "2026-10-21T03:36:44.344Z",
       "callHistory": [
         {
           "id": "QUO_3d13a7bfc4394ca99bf7d1f4761baa54",
@@ -17748,7 +17748,7 @@
       "createdAt": "2026-10-11T02:01:56.779Z",
       "jobberId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTEwNzQzNTE=",
       "email": "michael@mbeckford.com",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.343Z"
     },
     {
       "id": "cli-visit-Z2lkOi8vSm9iYmVyL1Zpc2l0LzIyMDg4NTE3MzU=",
@@ -17846,7 +17846,7 @@
       "source": "Jobber",
       "createdAt": "2026-10-11T02:01:56.779Z",
       "jobberId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTEyMjE4NzI=",
-      "updatedAt": "2026-10-19T09:48:52.633Z"
+      "updatedAt": "2026-10-21T03:36:44.344Z"
     },
     {
       "id": "cli-visit-Z2lkOi8vSm9iYmVyL1Zpc2l0LzIzMTQzMzEzODA=",
@@ -21837,7 +21837,7 @@
       "latestServiceDate": "2026-10-15",
       "source": "Jobber",
       "createdAt": "2026-10-16T19:32:03.607Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z",
+      "updatedAt": "2026-10-21T03:36:44.344Z",
       "callHistory": [
         {
           "id": "QUO_7c24e30088de4a1eafb8707d0681ca4d",
@@ -22302,7 +22302,7 @@
       "latestServiceDate": "2026-10-16",
       "source": "Jobber",
       "createdAt": "2026-10-16T19:32:03.607Z",
-      "updatedAt": "2026-10-19T09:48:52.633Z",
+      "updatedAt": "2026-10-21T03:36:44.344Z",
       "callHistory": [
         {
           "id": "QUO_c1239523e85b4b5a9bc2c98ec57bb437",
@@ -25618,8 +25618,8 @@
     "SPAM_SHIELD",
     "CLIENTS",
     "LEADS",
-    "CUSTOMER_PORTAL",
     "SMS_REPLIES",
+    "CUSTOMER_PORTAL",
     "PRICE_LIST",
     "BACKUP_ZIP"
   ],

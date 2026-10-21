@@ -964,6 +964,18 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <Sparkles className="w-3.5 h-3.5" />
               <span>Book Now ↓</span>
             </button>
+
+            {!isStandaloneCustomerSite && !isCustomerLockPreview && onOpenStaffLogin && (
+              <button
+                type="button"
+                onClick={onOpenStaffLogin}
+                className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-400/50 font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer"
+                title="Owner, Dispatcher & Cleaner Login (Password Required)"
+              >
+                <Lock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Staff Login</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -1980,6 +1992,16 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 <HelpCircle className="w-3 h-3" />
                 <span>Customer Support &amp; FAQ (/support)</span>
               </button>
+              {!isStandaloneCustomerSite && !isCustomerLockPreview && onOpenStaffLogin && (
+                <button
+                  type="button"
+                  onClick={onOpenStaffLogin}
+                  className="text-slate-400 hover:text-amber-300 underline cursor-pointer flex items-center gap-1"
+                >
+                  <Lock className="w-3 h-3" />
+                  <span>Staff &amp; Owner Login</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

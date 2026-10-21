@@ -32,6 +32,7 @@ import {
   parseStaffCsv,
   generateStaffCsv,
 } from "./src/services/staffRosterService";
+import { APP_USERS, mergeUsersWithCanonical, AppUser } from "./src/types/authAndChat";
 import {
   syncJobberCalendar,
   syncJobberClients,
@@ -4926,6 +4927,52 @@ app.post("/api/staff/delete", (req, res) => {
     deletedStaff: existing,
     count: updatedStaff.length,
     staff: updatedStaff,
+  });
+});
+
+// GET & POST Staff Login Accounts, Passwords, PINs & Custom Role Permissions
+const AUTH_USERS_FILE = path.join(process.cwd(), "data", "tidyups_auth_users.json");
+
+function loadPersistedAuthUsers(): AppUser[] {
+  try {
+    if (fs.existsSync(AUTH_USERS_FILE)) {
+      const raw = fs.readFileSync(AUTH_USERS_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      return mergeUsersWithCanonical(parsed);
+    }
+  } catch (e) {
+    console.warn("Could not read tidyups_auth_users.json:", e);
+  }
+  return APP_USERS;
+}
+
+function savePersistedAuthUsers(users: AppUser[]): AppUser[] {
+  const merged = mergeUsersWithCanonical(users);
+  try {
+    const dir = path.dirname(AUTH_USERS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(AUTH_USERS_FILE, JSON.stringify(merged, null, 2), "utf-8");
+  } catch (e) {
+    console.warn("Could not write tidyups_auth_users.json:", e);
+  }
+  return merged;
+}
+
+app.get("/api/auth/users", (_req, res) => {
+  const users = loadPersistedAuthUsers();
+  res.json({ success: true, users });
+});
+
+app.post("/api/auth/users", (req, res) => {
+  const { users } = req.body || {};
+  if (!Array.isArray(users)) {
+    return res.status(400).json({ error: "users array is required" });
+  }
+  const saved = savePersistedAuthUsers(users);
+  res.json({
+    success: true,
+    message: `Saved passwords and access permissions for ${saved.length} users.`,
+    users: saved,
   });
 });
 

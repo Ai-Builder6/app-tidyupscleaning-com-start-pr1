@@ -1,5 +1,26 @@
 export type AppUserRole = 'OWNER' | 'DISPATCHER' | 'CLEANER';
 
+export interface UserRolePermissions {
+  hasFullAccess: boolean;
+  canAccessMasterHub: boolean;
+  canAccessQuickQuote: boolean;
+  canAccessDispatchMap: boolean;
+  canAccessSchedule: boolean;
+  canAccessClients: boolean;
+  canAccessLeads: boolean;
+  canAccessManagement: boolean;
+  canViewAllVans: boolean;
+  canAssignTickets: boolean;
+  canAccessBillingInvoices: boolean;
+  canAccessQuotesPipeline: boolean;
+  canAccessJobberConfig: boolean;
+  canAccessQuoPhoneConfig: boolean;
+  canManageUsersAndAccess: boolean;
+  canViewOnlyAssignedJobs: boolean;
+  canUpdateJobStatus: boolean;
+  canChatWithAll: boolean;
+}
+
 export interface AppUser {
   id: string;
   name: string;
@@ -12,6 +33,7 @@ export interface AppUser {
   title: string;
   pin?: string;
   password?: string;
+  customPermissions?: Partial<UserRolePermissions>;
 }
 
 export interface ChatMessage {
@@ -36,6 +58,8 @@ export const APP_USERS: AppUser[] = [
     phone: '(780) 718-5092',
     title: 'Owner & Executive Director',
     pin: '1001',
+    password: 'tidyups2026',
+    customPermissions: { hasFullAccess: true },
   },
   {
     id: 'user-dispatcher-admin',
@@ -46,6 +70,8 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Executive HQ',
     title: 'Executive Admin & Owner',
     pin: '1002',
+    password: 'tidyups2026',
+    customPermissions: { hasFullAccess: true },
   },
   {
     id: 'user-dispatcher',
@@ -57,6 +83,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 15 (Lead Mobile)',
     title: 'Lead Dispatcher & Operations Manager',
     pin: '2002',
+    password: 'dispatch2026',
   },
   {
     id: 'cleaner-1',
@@ -68,6 +95,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 1 (Chappelle Hub)',
     title: 'Senior Cleaner',
     pin: '3001',
+    password: 'cleaner3001',
   },
   {
     id: 'cleaner-3',
@@ -79,6 +107,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 3 (Keheewin / South Hub)',
     title: 'Deep Clean & Sanitization Specialist',
     pin: '3003',
+    password: 'cleaner3003',
   },
   {
     id: 'cleaner-4',
@@ -90,6 +119,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 4 (Oliver / Downtown Hub)',
     title: 'Condo & High-Rise Turnover Lead',
     pin: '3004',
+    password: 'cleaner3004',
   },
   {
     id: 'cleaner-5',
@@ -101,6 +131,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 5 (Clareview Hub)',
     title: 'Master Move-Out & Commercial Cleaner',
     pin: '3005',
+    password: 'cleaner3005',
   },
   {
     id: 'cleaner-7',
@@ -112,6 +143,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 7 (Mill Woods Hub)',
     title: 'Eco-Sanitization & Turnover Cleaner',
     pin: '3007',
+    password: 'cleaner3007',
   },
   {
     id: 'cleaner-8',
@@ -123,6 +155,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 8 (Central Hub)',
     title: 'Residential & Move-Out Cleaner',
     pin: '3008',
+    password: 'cleaner3008',
   },
   {
     id: 'cleaner-9',
@@ -134,6 +167,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 9 (Secord / West Hub - Team)',
     title: 'Large Home & Tandem Move-Out Crew',
     pin: '3009',
+    password: 'cleaner3009',
   },
   {
     id: 'cleaner-10',
@@ -145,6 +179,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 10 (Callingwood / West Hub)',
     title: 'Deep Cleaning Specialist',
     pin: '3010',
+    password: 'cleaner3010',
   },
   {
     id: 'cleaner-11',
@@ -156,6 +191,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 11 (Dechene / West Hub)',
     title: 'Turnover & Floor Care Cleaner',
     pin: '3011',
+    password: 'cleaner3011',
   },
   {
     id: 'cleaner-12',
@@ -167,6 +203,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 12 (Westwood / North Central Hub)',
     title: 'Commercial & Office Specialist',
     pin: '3012',
+    password: 'cleaner3012',
   },
   {
     id: 'cleaner-13',
@@ -178,6 +215,7 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 13 (Lorelei / North YEG Hub)',
     title: 'Move-Out & Cabinet Specialist',
     pin: '3013',
+    password: 'cleaner3013',
   },
   {
     id: 'cleaner-14',
@@ -189,59 +227,196 @@ export const APP_USERS: AppUser[] = [
     assignedVan: 'Unit 14 (The Hamptons / West Hub - Team)',
     title: 'Two-Person Tandem Crew',
     pin: '3014',
+    password: 'cleaner3014',
   },
 ];
 
-export interface UserRolePermissions {
-  canViewAllVans: boolean;
-  canAssignTickets: boolean;
-  canAccessBillingInvoices: boolean;
-  canAccessQuotesPipeline: boolean;
-  canAccessJobberConfig: boolean;
-  canAccessQuoPhoneConfig: boolean;
-  canViewOnlyAssignedJobs: boolean;
-  canUpdateJobStatus: boolean;
-  canChatWithAll: boolean;
-}
+export const FULL_ACCESS_PERMISSIONS: UserRolePermissions = {
+  hasFullAccess: true,
+  canAccessMasterHub: true,
+  canAccessQuickQuote: true,
+  canAccessDispatchMap: true,
+  canAccessSchedule: true,
+  canAccessClients: true,
+  canAccessLeads: true,
+  canAccessManagement: true,
+  canViewAllVans: true,
+  canAssignTickets: true,
+  canAccessBillingInvoices: true,
+  canAccessQuotesPipeline: true,
+  canAccessJobberConfig: true,
+  canAccessQuoPhoneConfig: true,
+  canManageUsersAndAccess: true,
+  canViewOnlyAssignedJobs: false,
+  canUpdateJobStatus: true,
+  canChatWithAll: true,
+};
 
-export function getRolePermissions(role: AppUserRole): UserRolePermissions {
+export function getRolePermissions(
+  role: AppUserRole,
+  customPermissions?: Partial<UserRolePermissions>
+): UserRolePermissions {
+  let base: UserRolePermissions;
   switch (role) {
     case 'OWNER':
-      return {
-        canViewAllVans: true,
-        canAssignTickets: true,
-        canAccessBillingInvoices: true,
-        canAccessQuotesPipeline: true,
-        canAccessJobberConfig: true,
-        canAccessQuoPhoneConfig: true,
-        canViewOnlyAssignedJobs: false,
-        canUpdateJobStatus: true,
-        canChatWithAll: true,
-      };
+      base = { ...FULL_ACCESS_PERMISSIONS };
+      break;
     case 'DISPATCHER':
-      return {
+      base = {
+        hasFullAccess: false,
+        canAccessMasterHub: true,
+        canAccessQuickQuote: true,
+        canAccessDispatchMap: true,
+        canAccessSchedule: true,
+        canAccessClients: true,
+        canAccessLeads: true,
+        canAccessManagement: true,
         canViewAllVans: true,
         canAssignTickets: true,
-        canAccessBillingInvoices: false, // Invoices reserved exclusively for Owner
-        canAccessQuotesPipeline: true,   // Dispatcher can inspect job quotes
-        canAccessJobberConfig: false,    // Jobber API secrets reserved for Owner
-        canAccessQuoPhoneConfig: true,   // Dispatcher uses Quo 5-line calling system
+        canAccessBillingInvoices: false,
+        canAccessQuotesPipeline: true,
+        canAccessJobberConfig: false,
+        canAccessQuoPhoneConfig: true,
+        canManageUsersAndAccess: false,
         canViewOnlyAssignedJobs: false,
         canUpdateJobStatus: true,
         canChatWithAll: true,
       };
+      break;
     case 'CLEANER':
     default:
-      return {
+      base = {
+        hasFullAccess: false,
+        canAccessMasterHub: false,
+        canAccessQuickQuote: false,
+        canAccessDispatchMap: false,
+        canAccessSchedule: false,
+        canAccessClients: false,
+        canAccessLeads: false,
+        canAccessManagement: false,
         canViewAllVans: false,
         canAssignTickets: false,
         canAccessBillingInvoices: false,
         canAccessQuotesPipeline: false,
         canAccessJobberConfig: false,
         canAccessQuoPhoneConfig: false,
+        canManageUsersAndAccess: false,
         canViewOnlyAssignedJobs: true,
         canUpdateJobStatus: true,
         canChatWithAll: true,
       };
+      break;
+  }
+
+  if (!customPermissions) return base;
+
+  if (customPermissions.hasFullAccess) {
+    return {
+      ...FULL_ACCESS_PERMISSIONS,
+      ...customPermissions,
+      hasFullAccess: true,
+      canViewOnlyAssignedJobs: false,
+    };
+  }
+
+  const merged: UserRolePermissions = {
+    ...base,
+    ...customPermissions,
+  };
+
+  // If the owner granted any broader dispatch/hub access to a cleaner, unlock assigned-only restriction
+  if (
+    merged.canAccessMasterHub ||
+    merged.canAccessQuickQuote ||
+    merged.canAccessDispatchMap ||
+    merged.canAccessSchedule ||
+    merged.canAccessClients ||
+    merged.canAccessLeads ||
+    merged.canAccessManagement ||
+    merged.canAccessBillingInvoices ||
+    merged.canAccessQuotesPipeline ||
+    merged.canViewAllVans
+  ) {
+    merged.canViewOnlyAssignedJobs = false;
+  }
+
+  return merged;
+}
+
+export function getUserPermissions(user: AppUser): UserRolePermissions {
+  return getRolePermissions(user.role, user.customPermissions);
+}
+
+export function hasExpandedConsoleAccess(permissions: UserRolePermissions): boolean {
+  return Boolean(
+    permissions.hasFullAccess ||
+      permissions.canAccessMasterHub ||
+      permissions.canAccessQuickQuote ||
+      permissions.canAccessDispatchMap ||
+      permissions.canAccessSchedule ||
+      permissions.canAccessClients ||
+      permissions.canAccessLeads ||
+      permissions.canAccessManagement ||
+      permissions.canAccessQuotesPipeline ||
+      permissions.canAccessBillingInvoices ||
+      permissions.canAssignTickets ||
+      permissions.canAccessJobberConfig ||
+      permissions.canAccessQuoPhoneConfig
+  );
+}
+
+const APP_USERS_STORAGE_KEY = 'tidyups_app_users_v1';
+
+export function mergeUsersWithCanonical(savedUsers?: AppUser[] | null): AppUser[] {
+  if (!Array.isArray(savedUsers) || savedUsers.length === 0) {
+    return APP_USERS;
+  }
+  const savedById = new Map<string, AppUser>();
+  for (const u of savedUsers) {
+    if (u && u.id) savedById.set(u.id, u);
+  }
+  const merged: AppUser[] = APP_USERS.map((canon) => {
+    const existing = savedById.get(canon.id);
+    if (!existing) return canon;
+    savedById.delete(canon.id);
+    return {
+      ...canon,
+      ...existing,
+      password: existing.password || canon.password,
+      pin: existing.pin || canon.pin,
+      customPermissions: existing.customPermissions || canon.customPermissions,
+    };
+  });
+  // Append any custom users added by the Owner
+  for (const extra of savedById.values()) {
+    merged.push(extra);
+  }
+  return merged;
+}
+
+export function loadAppUsers(): AppUser[] {
+  if (typeof window === 'undefined') return APP_USERS;
+  try {
+    const raw = localStorage.getItem(APP_USERS_STORAGE_KEY);
+    if (!raw) return APP_USERS;
+    const parsed = JSON.parse(raw);
+    return mergeUsersWithCanonical(parsed);
+  } catch {
+    return APP_USERS;
   }
 }
+
+export function saveAppUsers(users: AppUser[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(APP_USERS_STORAGE_KEY, JSON.stringify(users));
+  } catch (e) {
+    console.warn('Could not save app users to localStorage:', e);
+  }
+  fetch('/api/auth/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ users }),
+  }).catch((err) => console.warn('Could not sync app users to server:', err));
+}
+
