@@ -605,8 +605,182 @@ export async function deleteBlockedNumberFromFirestore(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BATCH FULL SYNC
+// LEADS SYNC (Master Leads & Quotes Hub / Clean Google Sheet)
 // ─────────────────────────────────────────────────────────────────────────────
+
+export function toFirestoreLead(lead: any): Record<string, unknown> {
+  const cleanId = sanitizeDocId(lead.id || `lead_${lead.phone || Date.now()}`, 'lead');
+  const now = new Date().toISOString();
+  const payload: Record<string, unknown> = {
+    id: cleanId,
+    customerName: String(lead.customerName || lead.clientName || 'Cleaning Lead').substring(0, 150),
+    updatedAt: now,
+  };
+
+  if (lead.phone) payload.phone = String(lead.phone).substring(0, 40);
+  if (lead.email) payload.email = String(lead.email).substring(0, 200);
+  if (lead.address) payload.address = String(lead.address).substring(0, 300);
+  if (lead.city) payload.city = String(lead.city).substring(0, 100);
+  if (lead.postalCode) payload.postalCode = String(lead.postalCode).substring(0, 30);
+  if (lead.serviceRequested) payload.serviceRequested = String(lead.serviceRequested).substring(0, 200);
+  if (lead.bedrooms) payload.bedrooms = String(lead.bedrooms).substring(0, 60);
+  if (lead.bathrooms) payload.bathrooms = String(lead.bathrooms).substring(0, 60);
+  if (lead.source) payload.source = String(lead.source).substring(0, 100);
+  if (lead.sourceTab) payload.sourceTab = String(lead.sourceTab).substring(0, 100);
+  if (lead.verdict) payload.verdict = String(lead.verdict).substring(0, 50);
+  if (lead.status) payload.status = String(lead.status).substring(0, 50);
+  if (lead.quoteId) payload.quoteId = String(lead.quoteId).substring(0, 128);
+  if (lead.quoteNumber) payload.quoteNumber = String(lead.quoteNumber).substring(0, 50);
+  if (typeof lead.quotedAmount === 'number' && !isNaN(lead.quotedAmount) && lead.quotedAmount >= 0) {
+    payload.quotedAmount = Math.min(100000, lead.quotedAmount);
+  }
+  if (lead.notes) payload.notes = String(lead.notes).substring(0, 2500);
+  if (lead.dateReceived) payload.dateReceived = String(lead.dateReceived).substring(0, 60);
+
+  return stripUndefinedFields(payload);
+}
+
+export async function saveLeadToFirestore(lead: any): Promise<void> {
+  if (!lead) return;
+  const docId = sanitizeDocId(lead.id || `lead_${lead.phone || Date.now()}`, 'lead');
+  const payload = toFirestoreLead(lead);
+  try {
+    const docRef = doc(db, 'leads', docId);
+    await setDoc(docRef, payload, { merge: true });
+    markRecordSynced(`lead:${docId}`, computeRecordFingerprint(lead));
+  } catch (error) {
+    console.warn(`Firestore save error on leads/${docId}:`, error);
+  }
+}
+
+export async function deleteLeadFromFirestore(leadId: string): Promise<void> {
+  if (!leadId) return;
+  const docId = sanitizeDocId(leadId, 'lead');
+  try {
+    const docRef = doc(db, 'leads', docId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.warn(`Firestore delete error on leads/${docId}:`, error);
+  }
+}
+
+export async function fetchLeadsFromFirestore(): Promise<any[]> {
+  try {
+    const snap = await getDocs(collection(db, 'leads'));
+    const list: any[] = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data && data.customerName) {
+        list.push({
+          ...data,
+          id: data.id || d.id,
+        });
+      }
+    });
+    return list;
+  } catch (err) {
+    console.warn('Could not read leads from Firestore:', err);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WORKSPACE STATE SYNC ("Resume Exactly Where You Left Off")
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PersistedWorkspaceState {
+  id: string;
+  activeTopView: string;
+  masterHubFocusBlock?: string;
+  scheduledJobsSubTab?: string;
+  mapInspectDate?: string;
+  lastSyncedAt?: string;
+  updatedAt: string;
+}
+
+export async function saveWorkspaceStateToFirestore(state: Partial<PersistedWorkspaceState>): Promise<void> {
+  const docId = sanitizeDocId(state.id || 'owner_default', 'ws');
+  const now = new Date().toISOString();
+  const payload = stripUndefinedFields({
+    id: docId,
+    activeTopView: String(state.activeTopView || 'MASTER_HUB').substring(0, 60),
+    masterHubFocusBlock: state.masterHubFocusBlock ? String(state.masterHubFocusBlock).substring(0, 60) : undefined,
+    scheduledJobsSubTab: state.scheduledJobsSubTab ? String(state.scheduledJobsSubTab).substring(0, 60) : undefined,
+    mapInspectDate: state.mapInspectDate ? String(state.mapInspectDate).substring(0, 40) : undefined,
+    lastSyncedAt: state.lastSyncedAt ? String(state.lastSyncedAt).substring(0, 60) : now,
+    updatedAt: now,
+  });
+  try {
+    const docRef = doc(db, 'workspaceState', docId);
+    await setDoc(docRef, payload, { merge: true });
+  } catch (err) {
+    console.warn('Could not save workspaceState to Firestore:', err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INCREMENTAL DELTA SYNC ENGINE (Only writes new or modified records!)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DELTA_HASH_STORAGE_KEY = 'tidyups_firestore_delta_hashes_v1';
+let memoryDeltaHashes: Record<string, string> | null = null;
+
+function getDeltaHashMap(): Record<string, string> {
+  if (memoryDeltaHashes) return memoryDeltaHashes;
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(DELTA_HASH_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          memoryDeltaHashes = parsed;
+          return memoryDeltaHashes;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  memoryDeltaHashes = {};
+  return memoryDeltaHashes;
+}
+
+function persistDeltaHashMap(): void {
+  if (typeof window !== 'undefined' && memoryDeltaHashes) {
+    try {
+      localStorage.setItem(DELTA_HASH_STORAGE_KEY, JSON.stringify(memoryDeltaHashes));
+    } catch {
+      // ignore quota
+    }
+  }
+}
+
+export function computeRecordFingerprint(record: any): string {
+  if (!record || typeof record !== 'object') return String(record);
+  const clone: Record<string, any> = {};
+  for (const k of Object.keys(record).sort()) {
+    if (k === 'updatedAt' || k === 'syncedAt' || k === 'lastSavedAt') continue;
+    clone[k] = record[k];
+  }
+  const str = JSON.stringify(clone);
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
+  }
+  return `${str.length}:${hash}`;
+}
+
+function shouldSyncRecordDelta(key: string, record: any, forceFull = false): boolean {
+  if (forceFull) return true;
+  const map = getDeltaHashMap();
+  const fp = computeRecordFingerprint(record);
+  return map[key] !== fp;
+}
+
+function markRecordSynced(key: string, fingerprint: string): void {
+  const map = getDeltaHashMap();
+  map[key] = fingerprint;
+}
 
 export interface FullSyncResult {
   clientsCount: number;
@@ -614,15 +788,19 @@ export interface FullSyncResult {
   unscheduledJobsCount: number;
   quotesCount: number;
   invoicesCount: number;
+  leadsCount?: number;
   vanOverridesCount: number;
   serviceCatalogCount?: number;
   blockedNumbersCount?: number;
   screenedCallsCount?: number;
+  deltaWritesCount?: number;
+  unchangedSkippedCount?: number;
   errors: string[];
 }
 
 /**
- * Syncs the entire current in-memory operational state to Firestore
+ * Syncs operational state to Firestore using Incremental Delta Sync by default:
+ * Only new or modified records are written to Firestore, avoiding re-uploading unchanged records on every sync.
  */
 export async function syncAllToFirestore({
   clients,
@@ -630,18 +808,21 @@ export async function syncAllToFirestore({
   unscheduledJobs,
   quotes,
   invoices,
+  leads = [],
   technicians,
   serviceCatalog = [],
   spamShieldConfig,
   screenedCalls = [],
   quoCallLogs = [],
   blockedCallsHistory = [],
+  forceFullSync = false,
 }: {
   clients: ClientRecord[];
   scheduledVisits: ScheduledJobItem[];
   unscheduledJobs: UnscheduledJobItem[];
   quotes: JobberQuote[];
   invoices: JobberInvoice[];
+  leads?: any[];
   technicians: Technician[];
   serviceCatalog?: any[];
   spamShieldConfig?: {
@@ -652,6 +833,7 @@ export async function syncAllToFirestore({
   screenedCalls?: any[];
   quoCallLogs?: any[];
   blockedCallsHistory?: any[];
+  forceFullSync?: boolean;
 }): Promise<FullSyncResult> {
   const result: FullSyncResult = {
     clientsCount: 0,
@@ -659,95 +841,197 @@ export async function syncAllToFirestore({
     unscheduledJobsCount: 0,
     quotesCount: 0,
     invoicesCount: 0,
+    leadsCount: 0,
     vanOverridesCount: 0,
     serviceCatalogCount: 0,
     blockedNumbersCount: 0,
     screenedCallsCount: 0,
+    deltaWritesCount: 0,
+    unchangedSkippedCount: 0,
     errors: [],
   };
 
+  for (const lead of leads) {
+    const docId = sanitizeDocId(lead?.id || `lead_${lead?.phone || ''}`, 'lead');
+    const key = `lead:${docId}`;
+    const fp = computeRecordFingerprint(lead);
+    if (!shouldSyncRecordDelta(key, lead, forceFullSync)) {
+      result.unchangedSkippedCount = (result.unchangedSkippedCount || 0) + 1;
+      continue;
+    }
+    try {
+      await saveLeadToFirestore(lead);
+      markRecordSynced(key, fp);
+      result.leadsCount = (result.leadsCount || 0) + 1;
+      result.deltaWritesCount = (result.deltaWritesCount || 0) + 1;
+    } catch (e: any) {
+      result.errors.push(`Lead ${lead?.id}: ${e?.message || e}`);
+    }
+  }
+
   for (const client of clients) {
+    const docId = sanitizeDocId(client.id, 'cli');
+    const key = `cli:${docId}`;
+    const fp = computeRecordFingerprint(client);
+    if (!shouldSyncRecordDelta(key, client, forceFullSync)) {
+      result.unchangedSkippedCount = (result.unchangedSkippedCount || 0) + 1;
+      continue;
+    }
     try {
       await saveClientToFirestore(client);
+      markRecordSynced(key, fp);
       result.clientsCount++;
+      result.deltaWritesCount = (result.deltaWritesCount || 0) + 1;
     } catch (e: any) {
       result.errors.push(`Client ${client.id}: ${e?.message || e}`);
     }
   }
 
   for (const visit of scheduledVisits) {
+    const docId = sanitizeDocId(visit.id, 'visit');
+    const key = `visit:${docId}`;
+    const fp = computeRecordFingerprint(visit);
+    if (!shouldSyncRecordDelta(key, visit, forceFullSync)) {
+      result.unchangedSkippedCount = (result.unchangedSkippedCount || 0) + 1;
+      continue;
+    }
     try {
       await saveScheduledVisitToFirestore(visit);
+      markRecordSynced(key, fp);
       result.scheduledVisitsCount++;
+      result.deltaWritesCount = (result.deltaWritesCount || 0) + 1;
     } catch (e: any) {
       result.errors.push(`Visit ${visit.id}: ${e?.message || e}`);
     }
   }
 
   for (const job of unscheduledJobs) {
+    const docId = sanitizeDocId(job.id, 'ujob');
+    const key = `ujob:${docId}`;
+    const fp = computeRecordFingerprint(job);
+    if (!shouldSyncRecordDelta(key, job, forceFullSync)) {
+      result.unchangedSkippedCount = (result.unchangedSkippedCount || 0) + 1;
+      continue;
+    }
     try {
       await saveUnscheduledJobToFirestore(job);
+      markRecordSynced(key, fp);
       result.unscheduledJobsCount++;
+      result.deltaWritesCount = (result.deltaWritesCount || 0) + 1;
     } catch (e: any) {
       result.errors.push(`Unscheduled Job ${job.id}: ${e?.message || e}`);
     }
   }
 
   for (const quote of quotes) {
+    const docId = sanitizeDocId(quote.id, 'quote');
+    const key = `quote:${docId}`;
+    const fp = computeRecordFingerprint(quote);
+    if (!shouldSyncRecordDelta(key, quote, forceFullSync)) {
+      result.unchangedSkippedCount = (result.unchangedSkippedCount || 0) + 1;
+      continue;
+    }
     try {
       await saveQuoteToFirestore(quote);
+      markRecordSynced(key, fp);
       result.quotesCount++;
+      result.deltaWritesCount = (result.deltaWritesCount || 0) + 1;
     } catch (e: any) {
       result.errors.push(`Quote ${quote.id}: ${e?.message || e}`);
     }
   }
 
   for (const invoice of invoices) {
+    const docId = sanitizeDocId(invoice.id, 'inv');
+    const key = `inv:${docId}`;
+    const fp = computeRecordFingerprint(invoice);
+    if (!shouldSyncRecordDelta(key, invoice, forceFullSync)) {
+      result.unchangedSkippedCount = (result.unchangedSkippedCount || 0) + 1;
+      continue;
+    }
     try {
       await saveInvoiceToFirestore(invoice);
+      markRecordSynced(key, fp);
       result.invoicesCount++;
+      result.deltaWritesCount = (result.deltaWritesCount || 0) + 1;
     } catch (e: any) {
       result.errors.push(`Invoice ${invoice.id}: ${e?.message || e}`);
     }
   }
 
   for (const tech of technicians) {
+    const docId = sanitizeDocId(tech.id, 'van').substring(0, 50);
+    const key = `van:${docId}`;
+    const fp = computeRecordFingerprint(tech);
+    if (!shouldSyncRecordDelta(key, tech, forceFullSync)) {
+      result.unchangedSkippedCount = (result.unchangedSkippedCount || 0) + 1;
+      continue;
+    }
     try {
       await saveVanOverrideToFirestore(tech);
+      markRecordSynced(key, fp);
       result.vanOverridesCount++;
+      result.deltaWritesCount = (result.deltaWritesCount || 0) + 1;
     } catch (e: any) {
       result.errors.push(`Van ${tech.id}: ${e?.message || e}`);
     }
   }
 
   for (const catItem of serviceCatalog) {
+    const docId = sanitizeDocId(catItem.id || catItem.name, 'cat');
+    const key = `cat:${docId}`;
+    const fp = computeRecordFingerprint(catItem);
+    if (!shouldSyncRecordDelta(key, catItem, forceFullSync)) {
+      result.unchangedSkippedCount = (result.unchangedSkippedCount || 0) + 1;
+      continue;
+    }
     try {
       await saveServiceCatalogItemToFirestore(catItem);
+      markRecordSynced(key, fp);
       result.serviceCatalogCount = (result.serviceCatalogCount || 0) + 1;
+      result.deltaWritesCount = (result.deltaWritesCount || 0) + 1;
     } catch (e: any) {
       result.errors.push(`Catalog ${catItem.id}: ${e?.message || e}`);
     }
   }
 
   if (spamShieldConfig) {
-    try {
-      result.blockedNumbersCount = await syncSpamShieldConfigToFirestore(spamShieldConfig);
-    } catch (e: any) {
-      result.errors.push(`SpamShield: ${e?.message || e}`);
+    const key = 'spamShieldConfig';
+    const fp = computeRecordFingerprint(spamShieldConfig);
+    if (shouldSyncRecordDelta(key, spamShieldConfig, forceFullSync)) {
+      try {
+        result.blockedNumbersCount = await syncSpamShieldConfigToFirestore(spamShieldConfig);
+        markRecordSynced(key, fp);
+        result.deltaWritesCount = (result.deltaWritesCount || 0) + (result.blockedNumbersCount || 0);
+      } catch (e: any) {
+        result.errors.push(`SpamShield: ${e?.message || e}`);
+      }
     }
   }
 
   const allScreenedRecords = [...screenedCalls, ...quoCallLogs, ...blockedCallsHistory];
   for (const callItem of allScreenedRecords) {
+    const rawId = callItem?.id || callItem?.callId || `call_${(callItem?.callerNumber || callItem?.callerPhone || '').replace(/\D/g, '')}`;
+    const docId = sanitizeDocId(rawId, 'scr');
+    const key = `scr:${docId}`;
+    const fp = computeRecordFingerprint(callItem);
+    if (!shouldSyncRecordDelta(key, callItem, forceFullSync)) {
+      result.unchangedSkippedCount = (result.unchangedSkippedCount || 0) + 1;
+      continue;
+    }
     try {
       await saveScreenedCallToFirestore(callItem);
+      markRecordSynced(key, fp);
       result.screenedCallsCount = (result.screenedCallsCount || 0) + 1;
+      result.deltaWritesCount = (result.deltaWritesCount || 0) + 1;
     } catch (e: any) {
       result.errors.push(`ScreenedCall ${callItem?.id}: ${e?.message || e}`);
     }
   }
 
+  persistDeltaHashMap();
   return result;
 }
+
 
 

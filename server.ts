@@ -4701,6 +4701,7 @@ const handleSaveStore = (req: any, res: any) => {
     headerNavOrder,
     footerBtnOrder,
     footerButtonsSide,
+    workspaceState,
   } = req.body || {};
   const current = loadStore(projectId) || {
     version: 1,
@@ -4715,6 +4716,44 @@ const handleSaveStore = (req: any, res: any) => {
     invoices: [],
   };
 
+  // Merge adLeads incrementally by id so newly created leads from webhooks/calls/UI are never overwritten by an older client snapshot
+  const mergedAdLeads = (() => {
+    if (!Array.isArray(adLeads)) return current.adLeads;
+    if (adLeads.length === 0 && (req.body as any)?.explicitClearLeads) return [];
+    const byId = new Map<string, any>();
+    for (const item of current.adLeads || []) {
+      if (item && item.id) byId.set(String(item.id), item);
+    }
+    for (const item of adLeads) {
+      if (item && item.id) {
+        const prev = byId.get(String(item.id));
+        byId.set(String(item.id), prev ? { ...prev, ...item } : item);
+      }
+    }
+    // Preserve incoming ordering at the front for newly added items
+    const orderedIds = adLeads.map((l: any) => String(l?.id || '')).filter(Boolean);
+    const orderedSet = new Set(orderedIds);
+    const front = orderedIds.map((id: string) => byId.get(id)).filter(Boolean);
+    const rest = Array.from(byId.values()).filter((l: any) => !orderedSet.has(String(l?.id || '')));
+    return [...front, ...rest];
+  })();
+
+  // Merge quotes incrementally by id so newly created quotes are never lost
+  const mergedQuotes = (() => {
+    if (!Array.isArray(quotes)) return current.quotes;
+    const byId = new Map<string, any>();
+    for (const q of current.quotes || []) {
+      if (q && q.id) byId.set(String(q.id), q);
+    }
+    for (const q of quotes) {
+      if (q && q.id) {
+        const prev = byId.get(String(q.id));
+        byId.set(String(q.id), prev ? { ...prev, ...q } : q);
+      }
+    }
+    return Array.from(byId.values());
+  })();
+
   const updated: AppPersistentStore = {
     ...current,
     lastSavedAt: new Date().toISOString(),
@@ -4726,10 +4765,10 @@ const handleSaveStore = (req: any, res: any) => {
     unscheduledJobs: unscheduledJobs || current.unscheduledJobs,
     staffRoster: staffRoster || current.staffRoster,
     clients: clients || current.clients,
-    quotes: quotes || current.quotes,
+    quotes: mergedQuotes,
     invoices: invoices || current.invoices,
     serviceCatalog: serviceCatalog || current.serviceCatalog,
-    adLeads: adLeads || current.adLeads,
+    adLeads: mergedAdLeads,
     quoCallLogs: quoCallLogs || current.quoCallLogs,
     spamShieldConfig: spamShieldConfig || current.spamShieldConfig,
     blockedCallsHistory: blockedCallsHistory || current.blockedCallsHistory,
@@ -4745,6 +4784,13 @@ const handleSaveStore = (req: any, res: any) => {
       footerButtonsSide === 'left' || footerButtonsSide === 'right'
         ? footerButtonsSide
         : current.footerButtonsSide,
+    workspaceState: workspaceState
+      ? {
+          ...(current.workspaceState || {}),
+          ...workspaceState,
+          updatedAt: new Date().toISOString(),
+        }
+      : current.workspaceState,
   };
 
   repairAndSyncStoreData(updated);
@@ -4755,6 +4801,7 @@ const handleSaveStore = (req: any, res: any) => {
     activeProjectId: projectId,
     spamShieldConfig: updated.spamShieldConfig,
     blockedCallsHistory: updated.blockedCallsHistory,
+    workspaceState: updated.workspaceState,
   });
 };
 
@@ -9318,21 +9365,18 @@ async function syncLiveQuoCallsAndTranscripts() {
     sharedStore.adLeads = sharedStore.adLeads.filter((l: any) => {
       const d = normalizePhoneDigits(l.phone);
       if (TIDYUPS_OWN_PHONE_DIGITS.has(d)) return false;
-      if (l.quoteId || l.quoteNumber) return true;
-      return !String(l.id || "").startsWith("lead-quo-");
+      return true;
     });
   }
 
-  // Keep manual overrides from existing call logs, then replace quoCallLogs with freshly evaluated live calls across all 6 lines
+  // Keep all existing call logs & manual overrides so incremental sync only adds/updates new calls without dropping previous history
   const previousLogsById = new Map<string, any>();
   if (Array.isArray(sharedStore.quoCallLogs)) {
     for (const oldCall of sharedStore.quoCallLogs) {
       if (oldCall?.id) previousLogsById.set(oldCall.id, oldCall);
     }
   }
-  sharedStore.quoCallLogs = Array.from(previousLogsById.values()).filter(
-    (c: any) => c.manuallyBlocked || c.manuallyMarkedGoodLead
-  );
+  sharedStore.quoCallLogs = Array.from(previousLogsById.values());
 
   const syncedCalls: any[] = [];
   const syncedCleaningLeads: any[] = [];

@@ -30,6 +30,16 @@ import {
   Tag,
   FileSpreadsheet,
   FolderOpen,
+  Calendar,
+  Compass,
+  Zap,
+  MessageSquare,
+  Plus,
+  Maximize2,
+  PanelRightOpen,
+  Flame,
+  CheckCircle2,
+  HardDrive,
 } from 'lucide-react';
 import { Technician } from '../types/dispatch';
 import {
@@ -52,6 +62,22 @@ interface ManagementHubViewProps {
   onNavigateToCustomerPortal: () => void;
   onOpenPriceList?: () => void;
   onNavigateToMasterHub?: () => void;
+  onNavigateToPasteTable?: () => void;
+  onNavigateToCleanSheet?: () => void;
+  onNavigateToAddressRadar?: () => void;
+  onNavigateToDispatchMap?: () => void;
+  onNavigateToSchedule?: () => void;
+  onNavigateToUnscheduled?: () => void;
+  onNavigateToClients?: () => void;
+  onOpenQuickLinks?: () => void;
+  onOpenQuickReplies?: () => void;
+  onOpenPublicBookingModal?: () => void;
+  onOpenNewTicketModal?: () => void;
+  onOpenAiDispatchModal?: () => void;
+  onToggleZenMode?: () => void;
+  onToggleBoard?: () => void;
+  onToggleRearrangeBars?: () => void;
+  isRearrangingBars?: boolean;
   onSyncEverything?: () => void;
   isSyncingEverything?: boolean;
   onSwitchBrand?: (brand: 'dispatchgeeni' | 'tidyups' | 'easycleans') => void;
@@ -59,12 +85,23 @@ interface ManagementHubViewProps {
   intakesCount?: number;
   quotesCount?: number;
   invoicesCount?: number;
+  leadsCount?: number;
+  clientsCount?: number;
+  scheduledCount?: number;
+  callsCount?: number;
   staffCount?: number;
   cleanersCount?: number;
   technicians?: Technician[];
   onEditVanHub?: (tech: Technician) => void;
   onSyncFirestore?: () => void;
   isSyncingFirestore?: boolean;
+  lastSyncedAllAt?: string | null;
+  firestoreSyncStatus?: string | null;
+  deltaSyncStats?: {
+    deltaWritesCount: number;
+    unchangedSkippedCount: number;
+    lastDeltaSyncAt?: string;
+  } | null;
   onOpenProjectBackup?: () => void;
   onOpenAccessManager?: () => void;
 }
@@ -83,6 +120,22 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
   onNavigateToCustomerPortal,
   onOpenPriceList,
   onNavigateToMasterHub,
+  onNavigateToPasteTable,
+  onNavigateToCleanSheet,
+  onNavigateToAddressRadar,
+  onNavigateToDispatchMap,
+  onNavigateToSchedule,
+  onNavigateToUnscheduled,
+  onNavigateToClients,
+  onOpenQuickLinks,
+  onOpenQuickReplies,
+  onOpenPublicBookingModal,
+  onOpenNewTicketModal,
+  onOpenAiDispatchModal,
+  onToggleZenMode,
+  onToggleBoard,
+  onToggleRearrangeBars,
+  isRearrangingBars = false,
   onSyncEverything,
   isSyncingEverything = false,
   onSwitchBrand,
@@ -90,12 +143,19 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
   intakesCount = 0,
   quotesCount = 0,
   invoicesCount = 0,
+  leadsCount = 0,
+  clientsCount = 0,
+  scheduledCount = 0,
+  callsCount = 0,
   staffCount = 15,
   cleanersCount = 15,
   technicians = [],
   onEditVanHub,
   onSyncFirestore,
   isSyncingFirestore = false,
+  lastSyncedAllAt,
+  firestoreSyncStatus,
+  deltaSyncStats,
   onOpenProjectBackup,
   onOpenAccessManager,
 }) => {
@@ -131,10 +191,12 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
       <div className="border-b border-slate-800 pb-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
-            <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center justify-center font-bold">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center font-bold">
               <SlidersHorizontal className="w-5 h-5" />
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Management &amp; Operations</h1>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              👑 Owner Hub — All App Buttons &amp; Operations
+            </h1>
             {/* Relocated Compact Domain Button inside Management Section */}
             <button
               type="button"
@@ -147,7 +209,7 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
             </button>
           </div>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Centralized hub for quotes, invoices, mobile fleet and van hubs, staff roster, policies, and Jobber CRM sync.
+            Clean header above with your main workflow tabs • Every single Owner, Admin, Phone, Sync, Map &amp; Tool button is organized right here in 1 click.
           </p>
         </div>
 
@@ -158,20 +220,22 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
               onClick={onSyncEverything}
               disabled={isSyncingEverything}
               className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
-              title="1-Click Sync Everything: Quotes, Invoices, Jobber Visits, Clients, Quo Calls & Master Leads Sheet"
+              title="1-Click Incremental Delta Sync: Quotes, Invoices, Jobber Visits, Clients, Quo Calls & Master Leads Sheet"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncingEverything ? 'animate-spin' : ''}`} />
-              <span>{isSyncingEverything ? 'Syncing All...' : 'Sync Everything (6-in-1)'}</span>
+              <span>{isSyncingEverything ? 'Delta Syncing...' : 'Sync Everything (Incremental Delta)'}</span>
             </button>
           )}
-          {onNavigateToMasterHub && (
+          {onSyncFirestore && (
             <button
               type="button"
-              onClick={onNavigateToMasterHub}
-              className="px-3.5 py-2 rounded-xl bg-emerald-900/80 hover:bg-emerald-800 text-emerald-100 border border-emerald-500/40 text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer"
+              onClick={onSyncFirestore}
+              disabled={isSyncingFirestore}
+              className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+              title="Push only new/updated records to Firebase Firestore"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Master Leads &amp; Quotes Table</span>
+              <Database className={`w-3.5 h-3.5 ${isSyncingFirestore ? 'animate-spin' : ''}`} />
+              <span>{isSyncingFirestore ? 'Updating Firestore...' : 'Delta Sync to Firebase'}</span>
             </button>
           )}
           <button
@@ -184,7 +248,7 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
             <span>
               {isUploadingProjectDrive
                 ? `Uploading to "${TIDYUPS_DRIVE_FOLDER_NAME}"...`
-                : '1-Click Upload Whole Project ZIP to Drive'}
+                : '1-Click Upload ZIP to Drive'}
             </span>
           </button>
           {onOpenAccessManager && (
@@ -198,13 +262,399 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
               <span>🔑 Passwords &amp; Staff Access</span>
             </button>
           )}
-          <button
-            onClick={onOpenJobberSync}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-          >
-            <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Jobber Status</span>
-          </button>
+        </div>
+      </div>
+
+      {/* LIVE INCREMENTAL DELTA STORAGE & RESUME WHERE YOU LEFT OFF BANNER */}
+      <div className="bg-gradient-to-r from-emerald-950/90 via-slate-900 to-indigo-950/90 border border-emerald-500/40 rounded-3xl p-4 sm:p-5 shadow-xl">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[11px] font-black uppercase tracking-wider flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Incremental Delta Sync Active</span>
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 text-[11px] font-black uppercase tracking-wider flex items-center gap-1">
+                <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Always Resumes Where You Left Off</span>
+              </span>
+              {lastSyncedAllAt && (
+                <span className="text-[11px] font-mono text-slate-400">
+                  Last Saved: {new Date(lastSyncedAllAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
+            </div>
+            <p className="text-xs sm:text-sm text-slate-200 font-semibold leading-relaxed">
+              Every time a new lead, quote, call transcript, or Jobber update comes in, <strong className="text-emerald-300">only the new or changed records (Delta Updates)</strong> are saved to your Server Store &amp; Firebase Firestore — never re-uploading everything from scratch. When you open your screen, it loads your <strong className="text-cyan-300">exact last active tab &amp; newest data</strong> immediately.
+            </p>
+            {firestoreSyncStatus && (
+              <p className="text-xs text-emerald-300 font-mono font-bold">{firestoreSyncStatus}</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-center">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Live Leads</div>
+              <div className="text-base font-black text-emerald-400 font-mono">{leadsCount}</div>
+            </div>
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-center">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Jobber Quotes</div>
+              <div className="text-base font-black text-amber-400 font-mono">{quotesCount}</div>
+            </div>
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-center">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Clients &amp; Jobs</div>
+              <div className="text-base font-black text-cyan-400 font-mono">{clientsCount} / {scheduledCount}</div>
+            </div>
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-center">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Delta Writes</div>
+              <div className="text-base font-black text-purple-400 font-mono">
+                {deltaSyncStats ? `${deltaSyncStats.deltaWritesCount} new / ${deltaSyncStats.unchangedSkippedCount} cached` : 'Up to Date'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 👑 ALL APP BUTTONS — OWNER COMMAND LAUNCHPAD */}
+      <div className="bg-[#131722] border-2 border-amber-500/40 rounded-3xl p-5 sm:p-6 space-y-5 shadow-2xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3.5">
+          <div>
+            <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
+              <span>🎛️</span>
+              <span>All App Buttons &amp; Owner Launchpad (Every Tool in One Place)</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              We moved secondary buttons out of the top header so your header stays clean. Click any button below to open that page or tool immediately.
+            </p>
+          </div>
+          {onToggleRearrangeBars && (
+            <button
+              type="button"
+              onClick={onToggleRearrangeBars}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border cursor-pointer transition-all self-start ${
+                isRearrangingBars
+                  ? 'bg-amber-400 text-slate-950 border-amber-300'
+                  : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700'
+              }`}
+            >
+              <span>⇄</span>
+              <span>{isRearrangingBars ? 'Done Moving Header/Footer Buttons' : 'Move / Rearrange Header & Footer'}</span>
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          {/* Group 1: Daily Workflow, Leads & Quotes */}
+          <div className="bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-4 space-y-2.5">
+            <div className="text-xs font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5 pb-1 border-b border-slate-800">
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>1. Leads, Quotes &amp; Intakes</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {onNavigateToMasterHub && (
+                <button
+                  type="button"
+                  onClick={onNavigateToMasterHub}
+                  className="w-full px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black flex items-center justify-between cursor-pointer shadow-sm"
+                >
+                  <span className="flex items-center gap-2"><FileSpreadsheet className="w-3.5 h-3.5" /> Master Leads &amp; Quotes Table</span>
+                  <span className="px-1.5 py-0.5 rounded bg-black/25 font-mono text-[10px]">{leadsCount + quotesCount}</span>
+                </button>
+              )}
+              {onNavigateToPasteTable && (
+                <button
+                  type="button"
+                  onClick={onNavigateToPasteTable}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-200 border border-emerald-500/30 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><ClipboardList className="w-3.5 h-3.5 text-emerald-400" /> Paste Table &amp; Lead Parser</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-emerald-400" />
+                </button>
+              )}
+              {onNavigateToVoiceIntake && (
+                <button
+                  type="button"
+                  onClick={onNavigateToVoiceIntake}
+                  className="w-full px-3 py-2 rounded-xl bg-pink-600/90 hover:bg-pink-500 text-white text-xs font-black flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Mic className="w-3.5 h-3.5" /> Voice Dictation &amp; Quick Quote</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {onNavigateToCleanSheet && (
+                <button
+                  type="button"
+                  onClick={onNavigateToCleanSheet}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Flame className="w-3.5 h-3.5 text-rose-400" /> Clean Google Sheet / Ad Leads</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-950 text-emerald-300 font-mono text-[10px]">{leadsCount}</span>
+                </button>
+              )}
+              {onNavigateToIntakes && (
+                <button
+                  type="button"
+                  onClick={onNavigateToIntakes}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><ClipboardList className="w-3.5 h-3.5 text-pink-400" /> Intakes Log Page</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-950 text-pink-300 font-mono text-[10px]">{intakesCount}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onNavigateToQuotes}
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+              >
+                <span className="flex items-center gap-2"><FileCheck className="w-3.5 h-3.5 text-amber-400" /> Quotes Pipeline</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-950 text-amber-300 font-mono text-[10px]">{quotesCount}</span>
+              </button>
+              <button
+                type="button"
+                onClick={onNavigateToInvoices}
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+              >
+                <span className="flex items-center gap-2"><Receipt className="w-3.5 h-3.5 text-emerald-400" /> Invoices &amp; Billing</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-950 text-emerald-300 font-mono text-[10px]">{invoicesCount}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Group 2: Dispatch Map, Radar, Schedule & Tickets */}
+          <div className="bg-slate-900/90 border border-blue-500/30 rounded-2xl p-4 space-y-2.5">
+            <div className="text-xs font-black uppercase tracking-wider text-blue-400 flex items-center gap-1.5 pb-1 border-b border-slate-800">
+              <Navigation className="w-4 h-4" />
+              <span>2. Map, Radar &amp; Schedule</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {onNavigateToDispatchMap && (
+                <button
+                  type="button"
+                  onClick={onNavigateToDispatchMap}
+                  className="w-full px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-black flex items-center justify-between cursor-pointer shadow-sm"
+                >
+                  <span className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5" /> Live Dispatch Map &amp; GPS</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {onNavigateToAddressRadar && (
+                <button
+                  type="button"
+                  onClick={onNavigateToAddressRadar}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-200 border border-purple-500/30 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Compass className="w-3.5 h-3.5 text-purple-400" /> Quick Map &amp; Schedule Radar</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-purple-400" />
+                </button>
+              )}
+              {onNavigateToSchedule && (
+                <button
+                  type="button"
+                  onClick={onNavigateToSchedule}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Calendar className="w-3.5 h-3.5 text-cyan-400" /> Schedule Calendar</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-950 text-cyan-300 font-mono text-[10px]">{scheduledCount}</span>
+                </button>
+              )}
+              {onNavigateToClients && (
+                <button
+                  type="button"
+                  onClick={onNavigateToClients}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Users className="w-3.5 h-3.5 text-blue-400" /> Clients Database</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-950 text-blue-300 font-mono text-[10px]">{clientsCount}</span>
+                </button>
+              )}
+              {onOpenNewTicketModal && (
+                <button
+                  type="button"
+                  onClick={onOpenNewTicketModal}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Plus className="w-3.5 h-3.5 text-emerald-400" /> + Create Service Ticket</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {onOpenAiDispatchModal && (
+                <button
+                  type="button"
+                  onClick={onOpenAiDispatchModal}
+                  className="w-full px-3 py-2 rounded-xl bg-blue-950/80 hover:bg-blue-900 text-blue-200 border border-blue-500/30 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Sparkles className="w-3.5 h-3.5 text-blue-400" /> AI Dispatch Assistant</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                {onToggleZenMode && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigateToDispatchMap?.();
+                      onToggleZenMode();
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Maximize2 className="w-3 h-3 text-cyan-400" /> Full Map
+                  </button>
+                )}
+                {onToggleBoard && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigateToDispatchMap?.();
+                      onToggleBoard();
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <PanelRightOpen className="w-3 h-3 text-blue-400" /> Toggle Board
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Group 3: Phone Lines, SMS, Spam Shield & Customer Portal */}
+          <div className="bg-slate-900/90 border border-violet-500/30 rounded-2xl p-4 space-y-2.5">
+            <div className="text-xs font-black uppercase tracking-wider text-violet-400 flex items-center gap-1.5 pb-1 border-b border-slate-800">
+              <PhoneCall className="w-4 h-4" />
+              <span>3. Phone Lines, SMS &amp; Spam</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                onClick={onOpenQuoModal}
+                className="w-full px-3 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white text-xs font-black flex items-center justify-between cursor-pointer shadow-sm"
+              >
+                <span className="flex items-center gap-2"><PhoneCall className="w-3.5 h-3.5" /> Quo (6 Lines &amp; Transcripts)</span>
+                <span className="px-1.5 py-0.5 rounded bg-black/25 font-mono text-[10px]">{callsCount || '6 Lines'}</span>
+              </button>
+              {onNavigateToSpamShield && (
+                <button
+                  type="button"
+                  onClick={onNavigateToSpamShield}
+                  className="w-full px-3 py-2 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-black flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><ShieldAlert className="w-3.5 h-3.5" /> Spam Shield Console Page</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {onOpenSpamShield && (
+                <button
+                  type="button"
+                  onClick={() => onOpenSpamShield()}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-200 border border-rose-500/30 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><ShieldAlert className="w-3.5 h-3.5 text-rose-400" /> Block Caller / Area Code Modal</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-rose-400" />
+                </button>
+              )}
+              {onOpenQuickReplies && (
+                <button
+                  type="button"
+                  onClick={onOpenQuickReplies}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-pink-200 border border-pink-500/30 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><MessageSquare className="w-3.5 h-3.5 text-pink-400" /> SMS Quick Replies</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-pink-400" />
+                </button>
+              )}
+              {onOpenQuickLinks && (
+                <button
+                  type="button"
+                  onClick={onOpenQuickLinks}
+                  className="w-full px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Zap className="w-3.5 h-3.5 text-amber-400" /> Quick Links &amp; Shortcuts</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-amber-400" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onNavigateToCustomerPortal}
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+              >
+                <span className="flex items-center gap-2"><Sparkles className="w-3.5 h-3.5 text-fuchsia-400" /> Customer Booking Page (/book)</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              {onOpenPublicBookingModal && (
+                <button
+                  type="button"
+                  onClick={onOpenPublicBookingModal}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-200 border border-teal-500/30 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Globe className="w-3.5 h-3.5 text-teal-400" /> Book Online Popup Form</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-teal-400" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Group 4: Owner Admin, Price List, Jobber Sync, Staff & Backups */}
+          <div className="bg-slate-900/90 border border-amber-500/30 rounded-2xl p-4 space-y-2.5">
+            <div className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5 pb-1 border-b border-slate-800">
+              <Key className="w-4 h-4" />
+              <span>4. Owner Admin, Sync &amp; Backups</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {onOpenAccessManager && (
+                <button
+                  type="button"
+                  onClick={onOpenAccessManager}
+                  className="w-full px-3 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-300 hover:to-orange-300 text-slate-950 text-xs font-black flex items-center justify-between cursor-pointer shadow-sm"
+                >
+                  <span className="flex items-center gap-2"><Key className="w-3.5 h-3.5" /> Passwords &amp; Staff Access</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onOpenJobberSync}
+                className="w-full px-3 py-2 rounded-xl bg-emerald-950/90 hover:bg-emerald-900 text-emerald-200 border border-emerald-500/40 text-xs font-bold flex items-center justify-between cursor-pointer"
+              >
+                <span className="flex items-center gap-2"><Database className="w-3.5 h-3.5 text-emerald-400" /> Jobber CRM Sync Hub</span>
+                <ArrowRight className="w-3.5 h-3.5 text-emerald-400" />
+              </button>
+              {onOpenPriceList && (
+                <button
+                  type="button"
+                  onClick={onOpenPriceList}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-200 border border-emerald-500/30 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><Tag className="w-3.5 h-3.5 text-emerald-400" /> Service Catalog Price List</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-950 text-emerald-300 font-mono text-[10px]">{catalogCount}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onOpenStaffRoster}
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+              >
+                <span className="flex items-center gap-2"><Truck className="w-3.5 h-3.5 text-purple-400" /> Staff Roster &amp; 15 Vans</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-950 text-purple-300 font-mono text-[10px]">{staffCount}</span>
+              </button>
+              {onOpenProjectBackup && (
+                <button
+                  type="button"
+                  onClick={onOpenProjectBackup}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+                >
+                  <span className="flex items-center gap-2"><FileArchive className="w-3.5 h-3.5 text-emerald-400" /> Backup ZIP, Drive &amp; GitHub</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onNavigateToLegal('SUPPORT')}
+                className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
+              >
+                <span className="flex items-center gap-2"><HelpCircle className="w-3.5 h-3.5 text-cyan-400" /> Support, Terms &amp; Privacy</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

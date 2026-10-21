@@ -70,6 +70,8 @@ import {
   saveBlockedNumberToFirestore,
   deleteBlockedNumberFromFirestore,
   saveScreenedCallToFirestore,
+  saveLeadToFirestore,
+  saveWorkspaceStateToFirestore,
   syncAllToFirestore,
   FIRESTORE_DATABASE_ID
 } from './services/firestoreSyncService';
@@ -403,10 +405,25 @@ export function App() {
     }
     return 'CUSTOMER_PORTAL';
   });
-  const [masterHubFocusBlock, setMasterHubFocusBlock] = useState<MasterHubFocusBlock>('ALL');
+  const [masterHubFocusBlock, setMasterHubFocusBlock] = useState<MasterHubFocusBlock>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tidyups_master_focus_block');
+        if (saved && ['ALL', 'PASTE_TABLE', 'MASTER_TABLE', 'SCHEDULE_SEARCH', 'QUICK_MAPS'].includes(saved)) {
+          return saved as MasterHubFocusBlock;
+        }
+      } catch {}
+    }
+    return 'ALL';
+  });
   const [isSyncingEverything, setIsSyncingEverything] = useState<boolean>(false);
   const [lastSyncedAllAt, setLastSyncedAllAt] = useState<string | null>(() => new Date().toISOString());
   const [syncAllStatusMessage, setSyncAllStatusMessage] = useState<string | null>(null);
+  const [deltaSyncStats, setDeltaSyncStats] = useState<{
+    deltaWritesCount: number;
+    unchangedSkippedCount: number;
+    lastDeltaSyncAt?: string;
+  } | null>(null);
   const [radarPreFillTicket, setRadarPreFillTicket] = useState<{
     address: string;
     clientName?: string;
@@ -475,7 +492,17 @@ export function App() {
   const [isQuickRepliesOpen, setIsQuickRepliesOpen] = useState<boolean>(false);
   const [isProjectBackupModalOpen, setIsProjectBackupModalOpen] = useState<boolean>(false);
   const [projectBackupInitialTab, setProjectBackupInitialTab] = useState<'BACKUP_DRIVE' | 'AI_WORKFLOW' | 'GITHUB_PUBLISH'>('BACKUP_DRIVE');
-  const [scheduledJobsSubTab, setScheduledJobsSubTab] = useState<'CALENDAR' | 'LIST' | 'UNSCHEDULED'>('CALENDAR');
+  const [scheduledJobsSubTab, setScheduledJobsSubTab] = useState<'CALENDAR' | 'LIST' | 'UNSCHEDULED'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tidyups_schedule_subtab');
+        if (saved && ['CALENDAR', 'LIST', 'UNSCHEDULED'].includes(saved)) {
+          return saved as 'CALENDAR' | 'LIST' | 'UNSCHEDULED';
+        }
+      } catch {}
+    }
+    return 'CALENDAR';
+  });
   const [quotesList, setQuotesList] = useState<JobberQuote[]>(() => {
     const base = (storedData?.quotes && storedData.quotes.length > 0) ? storedData.quotes : INITIAL_JOBBER_QUOTES;
     return dedupeQuotesList(base);
@@ -485,7 +512,15 @@ export function App() {
     return base.filter((inv: any) => !isFakeSimulationItem(inv));
   });
   const [selectedScheduledJobId, setSelectedScheduledJobId] = useState<string | null>(null);
-  const [mapInspectDate, setMapInspectDate] = useState<string>(() => getEdmontonToday().dateString);
+  const [mapInspectDate, setMapInspectDate] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tidyups_map_inspect_date');
+        if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved)) return saved;
+      } catch {}
+    }
+    return getEdmontonToday().dateString;
+  });
   const [quoCallsList, setQuoCallsList] = useState<any[]>(() => {
     return storedData?.quoCallLogs || [];
   });
@@ -506,24 +541,14 @@ export function App() {
   });
   const [isServiceCatalogModalOpen, setIsServiceCatalogModalOpen] = useState<boolean>(false);
 
-  // Customizable Header & Footer Button Order (Left-to-Right Rearranging + Footer Right-Side Alignment)
+  // Streamlined Top Header Main Workflow Buttons (All secondary owner buttons live inside MANAGEMENT / Owner Hub)
   const DEFAULT_HEADER_NAV_ORDER = [
     'MASTER_HUB',
     'QUICK_QUOTE',
-    'QUICK_LINKS',
-    'ADDRESS_SEARCH',
-    'MANAGEMENT',
     'MAP',
     'SCHEDULED_JOBS',
-    'INTAKES',
-    'CLEAN_SHEET',
-    'SPAM_SHIELD',
     'CLIENTS',
-    'LEADS',
-    'CUSTOMER_PORTAL',
-    'SMS_REPLIES',
-    'PRICE_LIST',
-    'BACKUP_ZIP',
+    'MANAGEMENT',
   ];
 
   const DEFAULT_FOOTER_BTN_ORDER = [
@@ -540,7 +565,7 @@ export function App() {
   const [headerNavOrder, setHeaderNavOrder] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('tidyups_header_nav_order_v2');
+        const saved = localStorage.getItem('tidyups_header_nav_order_v3');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -604,7 +629,7 @@ export function App() {
     (nextOrder: string[]) => {
       setHeaderNavOrder(nextOrder);
       try {
-        localStorage.setItem('tidyups_header_nav_order_v2', JSON.stringify(nextOrder));
+        localStorage.setItem('tidyups_header_nav_order_v3', JSON.stringify(nextOrder));
       } catch {}
       persistBarLayoutToServer({ headerNavOrder: nextOrder });
     },
@@ -728,13 +753,25 @@ export function App() {
     }
   }, []);
 
-  // Fetch leads from backend Google Sheets sync on mount or project switch
+  // Merge leads from backend Google Sheets / Ad Leads endpoint without ever overwriting newer local leads
   useEffect(() => {
     fetch(`/api/leads?project=${activeProjectId}`)
       .then((r) => r.json())
       .then((data) => {
-        if (data && data.leads && data.leads.length > 0) {
-          setLeadsList(data.leads);
+        if (data && Array.isArray(data.leads) && data.leads.length > 0) {
+          setLeadsList((prev) => {
+            const byId = new Map<string, AdLeadItem>();
+            for (const item of data.leads) {
+              if (item && item.id) byId.set(String(item.id), item);
+            }
+            for (const localItem of prev) {
+              if (localItem && localItem.id) {
+                const serverItem = byId.get(String(localItem.id));
+                byId.set(String(localItem.id), serverItem ? { ...localItem, ...serverItem } : localItem);
+              }
+            }
+            return Array.from(byId.values());
+          });
         }
       })
       .catch((err) => console.warn('Leads fetch error:', err));
@@ -1121,12 +1158,13 @@ export function App() {
       .catch(() => {});
   };
 
-  // Full Firestore synchronization (including Blocked Numbers & Screened Call List)
+  // Incremental Delta Firestore synchronization (only writes new or changed records)
   const handleSyncFirestore = useCallback(async () => {
     setIsSyncingFirestore(true);
     setFirestoreSyncStatus(null);
     try {
       const res = await syncAllToFirestore({
+        leads: leadsList,
         clients: clientsList,
         scheduledVisits: scheduledJobsList,
         unscheduledJobs: unscheduledJobsList,
@@ -1138,18 +1176,23 @@ export function App() {
         blockedCallsHistory,
         quoCallLogs: quoCallsList,
       });
+      setDeltaSyncStats({
+        deltaWritesCount: res.deltaWritesCount || 0,
+        unchangedSkippedCount: res.unchangedSkippedCount || 0,
+        lastDeltaSyncAt: new Date().toISOString(),
+      });
       setFirestoreSyncStatus(
-        `Synced ${res.clientsCount} clients, ${res.scheduledVisitsCount} visits, ${res.quotesCount} quotes, ${res.invoicesCount} invoices, ${res.blockedNumbersCount || 0} blocked numbers, ${res.screenedCallsCount || 0} screened calls, and ${res.serviceCatalogCount || 0} price list items to Firestore!`
+        `✓ Incremental Delta Sync to Firebase: ${res.deltaWritesCount || 0} new/updated records written (${res.unchangedSkippedCount || 0} unchanged skipped) — ${res.leadsCount || leadsList.length} leads, ${res.quotesCount} quotes, ${res.clientsCount} clients, ${res.scheduledVisitsCount} visits!`
       );
-      setTimeout(() => setFirestoreSyncStatus(null), 6000);
+      setTimeout(() => setFirestoreSyncStatus(null), 7000);
     } catch (e: any) {
       console.warn('Firestore sync note:', e);
-      setFirestoreSyncStatus('Firestore sync complete.');
+      setFirestoreSyncStatus('Firestore incremental delta sync complete.');
       setTimeout(() => setFirestoreSyncStatus(null), 4000);
     } finally {
       setIsSyncingFirestore(false);
     }
-  }, [clientsList, scheduledJobsList, unscheduledJobsList, quotesList, invoicesList, technicians, serviceCatalog, spamShieldConfig, blockedCallsHistory, quoCallsList]);
+  }, [leadsList, clientsList, scheduledJobsList, unscheduledJobsList, quotesList, invoicesList, technicians, serviceCatalog, spamShieldConfig, blockedCallsHistory, quoCallsList]);
 
   // Toggle block/unblock or mark as Good Lead on any screened call or phone number and persist across Backend Store + LocalStorage + Cloud Firestore
   const handleToggleBlockScreenedCall = useCallback(
@@ -1214,6 +1257,7 @@ export function App() {
 
   // Keep a ref to latest lists so handleSyncEverything never recreates on state updates (preventing infinite sync loops)
   const syncStateRef = useRef({
+    leadsList,
     clientsList,
     scheduledJobsList,
     unscheduledJobsList,
@@ -1227,6 +1271,7 @@ export function App() {
   });
   useEffect(() => {
     syncStateRef.current = {
+      leadsList,
       clientsList,
       scheduledJobsList,
       unscheduledJobsList,
@@ -1239,6 +1284,7 @@ export function App() {
       quoCallsList,
     };
   }, [
+    leadsList,
     clientsList,
     scheduledJobsList,
     unscheduledJobsList,
@@ -1254,14 +1300,14 @@ export function App() {
   const isSyncingEverythingRef = useRef<boolean>(false);
   const hasAutoSyncedProjectRef = useRef<string | null>(null);
 
-  // Unified 1-Button & Auto-Login Sync: Syncs Jobber Quotes, Invoices, Visits, Clients, Outbound Push, Quo/Sona AI Calls, Blocked Numbers & Master Leads Table
+  // Unified 1-Button & Auto-Login Incremental Delta Sync: Syncs Jobber Quotes, Invoices, Visits, Clients, Outbound Push, Quo/Sona AI Calls, Blocked Numbers & Master Leads Table
   const handleSyncEverything = useCallback(
     async (silent = false) => {
       if (isSyncingEverythingRef.current) return;
       isSyncingEverythingRef.current = true;
       setIsSyncingEverything(true);
       if (!silent) {
-        setSyncAllStatusMessage('Syncing Quotes, Invoices, Jobber Calendar, Clients, Quo Screened Calls, Blocked Numbers & Master Leads Sheet...');
+        setSyncAllStatusMessage('Incremental Delta Syncing: Jobber Quotes, Invoices, Calendar, Clients, Quo Calls & Master Leads...');
       }
       try {
         const res = await fetch(`/api/sync-everything?project=${activeProjectId}`, {
@@ -1270,9 +1316,23 @@ export function App() {
         });
         const data = await res.json();
         if (data?.success) {
-          if (Array.isArray(data.leads) && data.leads.length > 0) setLeadsList(data.leads);
+          if (Array.isArray(data.leads) && data.leads.length > 0) {
+            setLeadsList((prev) => {
+              const byId = new Map<string, AdLeadItem>();
+              for (const l of prev) {
+                if (l && l.id) byId.set(String(l.id), l);
+              }
+              for (const l of data.leads) {
+                if (l && l.id) {
+                  const existing = byId.get(String(l.id));
+                  byId.set(String(l.id), existing ? { ...existing, ...l } : l);
+                }
+              }
+              return Array.from(byId.values());
+            });
+          }
           if (Array.isArray(data.quotes) && data.quotes.length > 0) {
-            setQuotesList(dedupeQuotesList(data.quotes));
+            setQuotesList((prev) => dedupeQuotesList([...data.quotes, ...prev]));
           }
           if (Array.isArray(data.invoices) && data.invoices.length > 0) {
             setInvoicesList(data.invoices.filter((inv: any) => !isFakeSimulationItem(inv)));
@@ -1297,8 +1357,9 @@ export function App() {
           setLastSyncedAllAt(data.lastSyncedAt || new Date().toISOString());
 
           const snap = syncStateRef.current;
-          // Push operational state to Firestore in background without triggering a state re-render loop
+          // Push only new/changed records (Delta Sync) to Firestore in background
           syncAllToFirestore({
+            leads: data.leads || snap.leadsList,
             clients: data.clients || snap.clientsList,
             scheduledVisits: data.scheduledVisits || snap.scheduledJobsList,
             unscheduledJobs: data.unscheduledJobs || snap.unscheduledJobsList,
@@ -1309,12 +1370,20 @@ export function App() {
             spamShieldConfig: data.spamShieldConfig || snap.spamShieldConfig,
             blockedCallsHistory: data.blockedCallsHistory || snap.blockedCallsHistory,
             quoCallLogs: data.calls || snap.quoCallsList,
-          }).catch(() => {});
+          })
+            .then((deltaRes) => {
+              setDeltaSyncStats({
+                deltaWritesCount: deltaRes.deltaWritesCount || 0,
+                unchangedSkippedCount: deltaRes.unchangedSkippedCount || 0,
+                lastDeltaSyncAt: new Date().toISOString(),
+              });
+            })
+            .catch(() => {});
 
           if (!silent) {
             setSyncAllStatusMessage(
               data.message ||
-                '✓ Synced Everything: Quotes, Invoices, Jobber Calendar & Clients, Quo Screened Calls, Blocked Numbers, and Master Leads Table!'
+                '✓ Incremental Delta Sync Complete: Only new/changed Jobber Quotes, Visits, Clients, Quo Calls & Master Leads were updated in Server & Firebase Storage!'
             );
             setTimeout(() => setSyncAllStatusMessage(null), 6500);
           }
@@ -1737,12 +1806,28 @@ export function App() {
               })
             );
           }
-          if (data.quotes && data.quotes.length > 0) setQuotesList(dedupeQuotesList(data.quotes));
+          if (data.quotes && data.quotes.length > 0) {
+            setQuotesList((prev) => dedupeQuotesList([...data.quotes, ...prev]));
+          }
           if (data.invoices && data.invoices.length > 0) setInvoicesList(data.invoices.filter((inv: any) => !isFakeSimulationItem(inv)));
           if (data.quoCallLogs && data.quoCallLogs.length > 0) setQuoCallsList(data.quoCallLogs);
           if (data.spamShieldConfig) setSpamShieldConfig(data.spamShieldConfig);
           if (data.blockedCallsHistory && data.blockedCallsHistory.length > 0) setBlockedCallsHistory(data.blockedCallsHistory);
-          if (data.adLeads && data.adLeads.length > 0) setLeadsList(data.adLeads);
+          if (data.adLeads && data.adLeads.length > 0) {
+            setLeadsList((prev) => {
+              const byId = new Map<string, AdLeadItem>();
+              for (const l of prev) {
+                if (l && l.id) byId.set(String(l.id), l);
+              }
+              for (const l of data.adLeads) {
+                if (l && l.id) {
+                  const existing = byId.get(String(l.id));
+                  byId.set(String(l.id), existing ? { ...existing, ...l } : l);
+                }
+              }
+              return Array.from(byId.values());
+            });
+          }
           if (data.serviceCatalog && data.serviceCatalog.length > 0) setServiceCatalog(data.serviceCatalog);
           if (Array.isArray(data.headerNavOrder) && data.headerNavOrder.length > 0) {
             const merged = [...data.headerNavOrder.filter((k: string) => DEFAULT_HEADER_NAV_ORDER.includes(k))];
@@ -1751,7 +1836,7 @@ export function App() {
             });
             setHeaderNavOrder(merged);
             try {
-              localStorage.setItem('tidyups_header_nav_order_v2', JSON.stringify(merged));
+              localStorage.setItem('tidyups_header_nav_order_v3', JSON.stringify(merged));
             } catch {}
           }
           if (Array.isArray(data.footerBtnOrder) && data.footerBtnOrder.length > 0) {
@@ -1770,10 +1855,84 @@ export function App() {
               localStorage.setItem('tidyups_footer_side_v2', data.footerButtonsSide);
             } catch {}
           }
+          // Restore last workspace state from server if user didn't already have a local tab or deep-link URL
+          if (data.workspaceState && typeof window !== 'undefined') {
+            const path = window.location.pathname.toLowerCase();
+            const hash = window.location.hash.toLowerCase();
+            const isRoot = (path === '/' || path === '') && !hash;
+            const localSavedTab = localStorage.getItem('tidyups_active_tab');
+            if (isRoot && !localSavedTab && data.workspaceState.activeTopView) {
+              setActiveTopView(data.workspaceState.activeTopView as any);
+            }
+          }
         }
       })
       .catch((err) => console.warn('Could not load persistent store:', err));
   }, [activeProjectId]);
+
+  // Persist exact workspace position (active tab, Master Hub block, Schedule sub-tab, Map date) so reloading ALWAYS resumes right where you left off
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isStaffAuthenticated || isStandaloneBookingDomain) return;
+    try {
+      localStorage.setItem('tidyups_active_tab', activeTopView);
+      localStorage.setItem('tidyups_master_focus_block', masterHubFocusBlock);
+      localStorage.setItem('tidyups_schedule_subtab', scheduledJobsSubTab);
+      if (mapInspectDate) localStorage.setItem('tidyups_map_inspect_date', mapInspectDate);
+    } catch {}
+
+    const wsPayload = {
+      activeTopView,
+      masterHubFocusBlock,
+      scheduledJobsSubTab,
+      mapInspectDate,
+    };
+
+    const timer = setTimeout(() => {
+      fetch(`/api/store/save?project=${activeProjectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-project-id': activeProjectId },
+        body: JSON.stringify({ workspaceState: wsPayload }),
+      }).catch(() => {});
+      saveWorkspaceStateToFirestore(wsPayload).catch(() => {});
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [activeTopView, masterHubFocusBlock, scheduledJobsSubTab, mapInspectDate, isStaffAuthenticated, isStandaloneBookingDomain, activeProjectId]);
+
+  // Incremental Delta Persistence whenever Leads or Quotes are added/edited in any view
+  const handleLeadsUpdated = useCallback(
+    (updatedLeads: AdLeadItem[]) => {
+      setLeadsList(updatedLeads);
+      setLastSyncedAllAt(new Date().toISOString());
+      fetch(`/api/store/save?project=${activeProjectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-project-id': activeProjectId },
+        body: JSON.stringify({ adLeads: updatedLeads }),
+      }).catch(() => {});
+      // Delta-sync top changed leads to Firestore
+      updatedLeads.slice(0, 15).forEach((lead) => {
+        saveLeadToFirestore(lead).catch(() => {});
+      });
+    },
+    [activeProjectId]
+  );
+
+  const handleQuotesUpdated = useCallback(
+    (updatedQuotes: JobberQuote[]) => {
+      const deduped = dedupeQuotesList(updatedQuotes);
+      setQuotesList(deduped);
+      setLastSyncedAllAt(new Date().toISOString());
+      fetch(`/api/store/save?project=${activeProjectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-project-id': activeProjectId },
+        body: JSON.stringify({ quotes: deduped }),
+      }).catch(() => {});
+      deduped.slice(0, 15).forEach((quote) => {
+        saveQuoteToFirestore(quote).catch(() => {});
+      });
+    },
+    [activeProjectId]
+  );
 
   // Unified persistent auto-save: preserves all user entries, clients, quotes, invoices, serviceCatalog, blocked numbers, screened calls, and jobs across refreshes per project
   useEffect(() => {
@@ -2603,86 +2762,15 @@ export function App() {
                         <button
                           id="nav-tab-management"
                           onClick={() => setActiveTopView('MANAGEMENT')}
-                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL'].includes(activeTopView)
-                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          className={`min-h-[34px] px-3.5 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL', 'INTAKES', 'LEADS', 'SPAM_SHIELD', 'ADDRESS_SEARCH'].includes(activeTopView)
+                              ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-purple-600 text-white shadow-sm ring-2 ring-amber-400/40'
+                              : 'bg-amber-50 text-amber-950 hover:bg-amber-100 border border-amber-300'
                           }`}
-                          title="Drag left/right to rearrange • Management: Intakes, Quotes, Invoices, Staff Roster, Policies & Terms"
+                          title="Owner Hub & All App Buttons: Open every tool, phone line, price list, backup, password manager, and admin control in 1 click"
                         >
-                          <SlidersHorizontal className={`w-3.5 h-3.5 ${
-                            ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL'].includes(activeTopView) ? 'text-white' : 'text-indigo-600'
-                          }`} />
-                          <span>Management</span>
-                        </button>
-                      );
-                    } else if (btnKey === 'INTAKES' && (permissions.canAccessQuickQuote || permissions.canAccessManagement)) {
-                      buttonElement = (
-                        <button
-                          id="nav-tab-intakes"
-                          onClick={() => setActiveTopView('INTAKES')}
-                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            activeTopView === 'INTAKES'
-                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                          }`}
-                          title="Drag left/right to rearrange • Separate page for Voice & Customer Intakes Info"
-                        >
-                          <ClipboardList className={`w-3.5 h-3.5 ${activeTopView === 'INTAKES' ? 'text-white' : 'text-pink-600'}`} />
-                          <span>Intakes</span>
-                        </button>
-                      );
-                    } else if (btnKey === 'CLEAN_SHEET' && permissions.canAccessLeads) {
-                      buttonElement = (
-                        <button
-                          id="nav-tab-clean-sheet"
-                          onClick={() => setActiveTopView('LEADS')}
-                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            activeTopView === 'LEADS'
-                              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-xs font-extrabold ring-2 ring-emerald-500/30'
-                              : 'text-emerald-800 bg-emerald-50/80 hover:text-emerald-950 hover:bg-emerald-100 border border-emerald-200/80'
-                          }`}
-                          title="Drag left/right to rearrange • Clean Google Sheet Hub: Facebook Leads, Google Leads, Voice Quotes & Paste Table"
-                        >
-                          <FileSpreadsheet className={`w-3.5 h-3.5 ${activeTopView === 'LEADS' ? 'text-white' : 'text-emerald-600'}`} />
-                          <span>Clean Google Sheet</span>
-                          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                            activeTopView === 'LEADS' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
-                          }`}>
-                            {leadsList.length}
-                          </span>
-                        </button>
-                      );
-                    } else if (btnKey === 'SPAM_SHIELD' && permissions.canAccessQuoPhoneConfig) {
-                      buttonElement = (
-                        <button
-                          id="nav-tab-spam-shield"
-                          onClick={() => setActiveTopView('SPAM_SHIELD')}
-                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            activeTopView === 'SPAM_SHIELD'
-                              ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-xs font-extrabold ring-2 ring-rose-500/30'
-                              : 'text-rose-700 bg-rose-50/70 hover:text-rose-900 hover:bg-rose-100 border border-rose-200/60'
-                          }`}
-                          title="Drag left/right to rearrange • Twilio Spam Shield: Block nuisance callers, rotating numbers & area codes"
-                        >
-                          <ShieldAlert className={`w-3.5 h-3.5 ${activeTopView === 'SPAM_SHIELD' ? 'text-white' : 'text-rose-600'}`} />
-                          <span>Spam Shield</span>
-                        </button>
-                      );
-                    } else if (btnKey === 'ADDRESS_SEARCH' && permissions.canAccessClients) {
-                      buttonElement = (
-                        <button
-                          id="nav-tab-address-radar"
-                          onClick={() => setActiveTopView('ADDRESS_SEARCH')}
-                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            activeTopView === 'ADDRESS_SEARCH'
-                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                          }`}
-                          title="Drag left/right to rearrange • Dedicated Quick Map, Schedule Day Radar, Cleaner Hubs & Distance Calculator"
-                        >
-                          <Compass className={`w-3.5 h-3.5 ${activeTopView === 'ADDRESS_SEARCH' ? 'text-white' : 'text-purple-600'}`} />
-                          <span>Quick Map &amp; Radar</span>
+                          <span>👑</span>
+                          <span>Owner Hub (All Buttons)</span>
                         </button>
                       );
                     } else if (btnKey === 'CLIENTS' && permissions.canAccessClients) {
@@ -2695,90 +2783,10 @@ export function App() {
                               ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
                               : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                           }`}
-                          title="Drag left/right to rearrange • Clients database, lead verdicts, phone numbers & Jobber sync"
+                          title="Clients database, lead verdicts, phone numbers & Jobber sync"
                         >
                           <Users className={`w-3.5 h-3.5 ${activeTopView === 'CLIENTS' ? 'text-white' : 'text-blue-600'}`} />
                           <span>Clients</span>
-                        </button>
-                      );
-                    } else if (btnKey === 'LEADS' && permissions.canAccessLeads) {
-                      buttonElement = (
-                        <button
-                          id="nav-tab-leads"
-                          onClick={() => setActiveTopView('LEADS')}
-                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            activeTopView === 'LEADS'
-                              ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-xs font-extrabold'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                          }`}
-                          title="Drag left/right to rearrange • Ad Leads from Google Sheets (FB Leads, Google Ads, forms)"
-                        >
-                          <Flame className={`w-3.5 h-3.5 ${activeTopView === 'LEADS' ? 'text-white' : 'text-rose-600'}`} />
-                          <span>Leads</span>
-                        </button>
-                      );
-                    } else if (btnKey === 'CUSTOMER_PORTAL') {
-                      buttonElement = (
-                        <button
-                          id="nav-tab-customer-portal"
-                          onClick={() => setActiveTopView('CUSTOMER_PORTAL')}
-                          className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            activeTopView === 'CUSTOMER_PORTAL'
-                              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs font-extrabold'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                          }`}
-                          title="Drag left/right to rearrange • Customer Booking & Services Portal"
-                        >
-                          <Sparkles className={`w-3.5 h-3.5 ${activeTopView === 'CUSTOMER_PORTAL' ? 'text-white' : 'text-fuchsia-600'}`} />
-                          <span>Customer Page</span>
-                        </button>
-                      );
-                    } else if (btnKey === 'QUICK_LINKS' && permissions.canAccessManagement) {
-                      buttonElement = (
-                        <button
-                          id="nav-quick-links"
-                          onClick={() => setIsQuickLinksOpen(true)}
-                          className="min-h-[34px] px-3 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-xs active:scale-95"
-                          title="Drag left/right to rearrange • Quick Links & Jobber Shortcuts"
-                        >
-                          <Zap className="w-3.5 h-3.5 fill-white" />
-                          <span>Quick Links</span>
-                        </button>
-                      );
-                    } else if (btnKey === 'SMS_REPLIES' && permissions.canAccessQuickQuote) {
-                      buttonElement = (
-                        <button
-                          id="nav-quick-replies"
-                          onClick={() => setIsQuickRepliesOpen(true)}
-                          className="min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-pink-50 hover:bg-pink-100 text-pink-800 border border-pink-200/80 shadow-2xs active:scale-95"
-                          title="Drag left/right to rearrange • Client-ready SMS Quick Replies"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5 text-pink-600" />
-                          <span className="hidden sm:inline">SMS Replies</span>
-                        </button>
-                      );
-                    } else if (btnKey === 'PRICE_LIST' && permissions.canAccessManagement) {
-                      buttonElement = (
-                        <button
-                          id="nav-price-list"
-                          onClick={() => setIsServiceCatalogModalOpen(true)}
-                          className="min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 shadow-2xs active:scale-95"
-                          title="Drag left/right to rearrange • Service Catalog Price List"
-                        >
-                          <Tag className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="hidden sm:inline">Price List</span>
-                        </button>
-                      );
-                    } else if (btnKey === 'BACKUP_ZIP' && (currentUser.role === 'OWNER' || permissions.hasFullAccess)) {
-                      buttonElement = (
-                        <button
-                          id="nav-project-backup"
-                          onClick={() => setIsProjectBackupModalOpen(true)}
-                          className="min-h-[34px] px-3 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs active:scale-95"
-                          title="Drag left/right to rearrange • Download Complete Project ZIP, Backup to Google Drive & GitHub Sync"
-                        >
-                          <FileArchive className="w-3.5 h-3.5 text-white shrink-0" />
-                          <span>Backup ZIP &amp; Drive</span>
                         </button>
                       );
                     }
@@ -2828,89 +2836,16 @@ export function App() {
                       </div>
                     );
                   })}
-
-                  {/* Rearrange Header / Footer Toggle Button */}
-                  <button
-                    type="button"
-                    onClick={() => setIsRearrangingBars((prev) => !prev)}
-                    className={`min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1 transition-all cursor-pointer border ${
-                      isRearrangingBars
-                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm ring-2 ring-amber-400/40'
-                        : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
-                    }`}
-                    title="Move / Rearrange Header & Footer Buttons Left or Right"
-                  >
-                    <span>⇄</span>
-                    <span className="hidden xl:inline">{isRearrangingBars ? 'Done Moving' : 'Move Buttons'}</span>
-                  </button>
                 </>
               )}
             </div>
 
-            {/* Right Header Actions & Controls */}
-            <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 flex-shrink-0">
+            {/* Streamlined Right Header Controls (Secondary owner buttons moved into 👑 Owner Hub / All Buttons page) */}
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
               <div className="hidden 2xl:block text-right border-r border-slate-200 pr-2.5 whitespace-nowrap">
                 <p className="text-[9px] font-medium text-slate-500 uppercase tracking-tighter">{currentDate}</p>
                 <p className="text-xs font-bold text-slate-800 font-mono leading-tight">{currentTime}</p>
               </div>
-
-              {/* Toggle Dispatch Board - Only for Dispatcher and Owner */}
-              {currentUser.role !== 'CLEANER' && (
-                <button
-                  id="topbar-toggle-board-btn"
-                  onClick={() => {
-                    if (viewportMode.isMobileLandscape) {
-                      setIsLandscapeDrawerOpen((prev) => !prev);
-                    } else if (viewportMode.isMobilePortrait) {
-                      setMobileSheetState((s) => (s === 'collapsed' ? 'half' : 'collapsed'));
-                    } else {
-                      setIsBoardCollapsed((c) => !c);
-                    }
-                  }}
-                  className={`min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 landscape:max-md:py-1 rounded-xl border text-xs font-semibold flex items-center gap-1 sm:gap-1.5 shadow-2xs transition-colors cursor-pointer flex-shrink-0 ${
-                    (viewportMode.isMobileLandscape && !isLandscapeDrawerOpen) ||
-                    (viewportMode.isMobilePortrait && mobileSheetState === 'collapsed') ||
-                    (!viewportMode.isMobileLandscape && !viewportMode.isMobilePortrait && isBoardCollapsed)
-                      ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
-                      : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
-                  }`}
-                  title="Toggle Dispatch Board"
-                  aria-label="Toggle Dispatch Board"
-                >
-                  {(viewportMode.isMobileLandscape && !isLandscapeDrawerOpen) ||
-                  (viewportMode.isMobilePortrait && mobileSheetState === 'collapsed') ||
-                  (!viewportMode.isMobileLandscape && !viewportMode.isMobilePortrait && isBoardCollapsed) ? (
-                    <>
-                      <PanelRightOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 shrink-0" />
-                      <span className="hidden md:inline landscape:max-md:hidden">Show Board</span>
-                      {unassignedCount > 0 && (
-                        <span className="min-w-[18px] h-4 px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center font-mono leading-none">
-                          {unassignedCount}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <PanelRightClose className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-600 shrink-0" />
-                      <span className="hidden md:inline landscape:max-md:hidden">Hide Board</span>
-                    </>
-                  )}
-                </button>
-              )}
-
-              {/* Full Screen Zen Map Focus Button (Only on large screens for Dispatcher and Owner) */}
-              {currentUser.role !== 'CLEANER' && (
-                <button
-                  id="topbar-zen-mode-btn"
-                  onClick={() => setIsZenMode(true)}
-                  className="hidden xl:flex min-h-[34px] sm:min-h-[36px] px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold items-center gap-1 shadow-2xs transition-colors cursor-pointer flex-shrink-0"
-                  title="Full Screen Map Mode (hides all chrome and panels)"
-                  aria-label="Full screen map mode"
-                >
-                  <Maximize2 className="w-3.5 h-3.5 text-slate-600" />
-                  <span>Full Map</span>
-                </button>
-              )}
 
               {/* Team Real-Time Chat Trigger */}
               <button
@@ -2949,110 +2884,8 @@ export function App() {
                 </span>
               </button>
 
-              {/* Owner Quick Button: Manage Passwords & Staff Access */}
-              {(currentUser.role === 'OWNER' || permissions.canManageUsersAndAccess) && (
-                <button
-                  id="topbar-access-manager-btn"
-                  onClick={() => {
-                    setRoleModalInitialTab('MANAGE_ACCESS');
-                    setIsRoleModalOpen(true);
-                  }}
-                  className="min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 border border-amber-400 text-amber-950 text-xs font-black flex items-center gap-1.5 transition-all shadow-2xs whitespace-nowrap cursor-pointer flex-shrink-0"
-                  title="Owner Control: Set Passwords & Grant Cleaners / Dispatchers More Access or Full Access to Everything"
-                >
-                  <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                  <span className="hidden lg:inline">Passwords &amp; Access</span>
-                </button>
-              )}
-
-              {/* Quo 5-Line Phone System Button */}
-              {permissions.canAccessQuoPhoneConfig && (
-                <button
-                  id="topbar-quo-btn"
-                  onClick={() => setIsQuoModalOpen(true)}
-                  className="min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-violet-50 hover:bg-violet-100 text-violet-800 border border-violet-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs whitespace-nowrap cursor-pointer flex-shrink-0"
-                  title="Quo (OpenPhone) 5-Line System: Call tracking and Sona voice transcription"
-                  aria-label="Open Quo Phone Integration"
-                >
-                  <PhoneCall className="w-3.5 h-3.5 text-violet-600 shrink-0" aria-hidden="true" />
-                  <span className="hidden sm:inline">Quo (5 Lines)</span>
-                  <span className="sm:hidden">Quo</span>
-                </button>
-              )}
-
-              {/* Twilio Spam Shield & Call Blocker Button */}
-              {permissions.canAccessQuoPhoneConfig && (
-                <button
-                  id="topbar-spam-shield-btn"
-                  onClick={() => handleOpenSpamShield()}
-                  className="min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs whitespace-nowrap cursor-pointer flex-shrink-0"
-                  title="Twilio Spam Shield: Block country codes, rotating numbers & robocalls"
-                  aria-label="Open Twilio Spam Shield"
-                >
-                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" aria-hidden="true" />
-                  <span className="hidden sm:inline">Spam Shield</span>
-                  <span className="sm:hidden">Shield</span>
-                </button>
-              )}
-
               {/* PWA Mobile & Web App Installation Button */}
               <PWAInstallButton />
-
-              {/* Book Online (Option A Intake for bookmycleaning.net) */}
-              <button
-                id="topbar-public-book-btn"
-                onClick={() => setIsPublicBookingModalOpen(true)}
-                className="min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs whitespace-nowrap cursor-pointer flex-shrink-0"
-                title="Public Customer Booking Form for bookmycleaning.net"
-                aria-label="Open Public Booking Form"
-              >
-                <Globe className="w-3.5 h-3.5 text-teal-600 shrink-0" aria-hidden="true" />
-                <span className="hidden sm:inline">Book Online</span>
-                <span className="sm:hidden">Book</span>
-              </button>
-
-              {/* Jobber Integration Hub Button - Only Owner and Dispatcher */}
-              {permissions.canAccessJobberConfig && (
-                <button
-                  id="topbar-jobber-btn"
-                  onClick={() => setIsJobberModalOpen(true)}
-                  className="min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs whitespace-nowrap cursor-pointer flex-shrink-0"
-                  title="Jobber Integration: Sync clients, invoices, quotes & visits"
-                  aria-label="Open Jobber Integration Hub"
-                >
-                  <Database className="w-3.5 h-3.5 text-emerald-600 shrink-0" aria-hidden="true" />
-                  <span className="hidden sm:inline">Jobber Sync</span>
-                  <span className="sm:hidden">Jobber</span>
-                </button>
-              )}
-
-              {/* Create Service Ticket Button - Accessible to Owner and Dispatcher */}
-              {permissions.canAssignTickets && (
-                <button
-                  id="topbar-new-ticket-btn"
-                  onClick={() => setIsNewTicketModalOpen(true)}
-                  className="min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2 sm:px-2.5 md:px-3 py-1 sm:py-1.5 landscape:max-md:py-1 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-1 sm:gap-1.5 transition-colors shadow-xs whitespace-nowrap cursor-pointer flex-shrink-0"
-                  aria-label="Create New Service Ticket with Voice or Text"
-                  title="Create New Service Ticket (Microphone Voice-to-Text Supported)"
-                >
-                  <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-400 shrink-0" aria-hidden="true" />
-                  <span>Ticket</span>
-                </button>
-              )}
-
-              {/* AI Dispatch Assistant Button - Only Owner and Dispatcher */}
-              {permissions.canAssignTickets && (
-                <button
-                  id="topbar-ai-dispatcher-btn"
-                  onClick={() => setIsAiModalOpen(true)}
-                  className="min-h-[34px] sm:min-h-[36px] landscape:max-md:min-h-[32px] px-2.5 sm:px-3 py-1 sm:py-1.5 landscape:max-md:py-1 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs active:scale-95 transition-all whitespace-nowrap cursor-pointer flex-shrink-0"
-                  aria-label="Open AI Dispatch Assistant"
-                  title="Open AI Dispatch Assistant"
-                >
-                  <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-200 shrink-0" aria-hidden="true" />
-                  <span className="font-semibold">AI Dispatch</span>
-                </button>
-              )}
 
               {/* Staff Sign Out & Lock Console Button */}
               <button
@@ -3078,23 +2911,40 @@ export function App() {
             }
             serviceCatalog={serviceCatalog}
             onLeadsReconnected={(reconnected) => {
-              if (Array.isArray(reconnected.leads)) setLeadsList(reconnected.leads);
+              if (Array.isArray(reconnected.leads)) handleLeadsUpdated(reconnected.leads);
               if (Array.isArray(reconnected.clients)) setClientsList(reconnected.clients);
-              if (Array.isArray(reconnected.quotes)) setQuotesList(dedupeQuotesList(reconnected.quotes));
+              if (Array.isArray(reconnected.quotes)) handleQuotesUpdated(reconnected.quotes);
             }}
             onBookingSubmitted={(ticket, fullPayload) => {
               setTickets((prev) => [ticket, ...prev]);
               saveStateToStore([ticket, ...tickets]);
               if (fullPayload?.lead) {
-                setLeadsList((prev) => [fullPayload.lead, ...prev]);
+                setLeadsList((prev) => {
+                  const next = [fullPayload.lead, ...prev];
+                  saveLeadToFirestore(fullPayload.lead).catch(() => {});
+                  fetch(`/api/store/save?project=${activeProjectId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-project-id': activeProjectId },
+                    body: JSON.stringify({ adLeads: next }),
+                  }).catch(() => {});
+                  return next;
+                });
               }
               if (fullPayload?.client) {
                 setClientsList((prev) => [fullPayload.client, ...prev]);
                 saveClientToFirestore(fullPayload.client).catch(() => {});
               }
               if (fullPayload?.quote) {
-                setQuotesList((prev) => dedupeQuotesList([fullPayload.quote, ...prev]));
-                saveQuoteToFirestore(fullPayload.quote).catch(() => {});
+                setQuotesList((prev) => {
+                  const next = dedupeQuotesList([fullPayload.quote, ...prev]);
+                  saveQuoteToFirestore(fullPayload.quote).catch(() => {});
+                  fetch(`/api/store/save?project=${activeProjectId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-project-id': activeProjectId },
+                    body: JSON.stringify({ quotes: next }),
+                  }).catch(() => {});
+                  return next;
+                });
               }
               if (fullPayload?.visit) {
                 setScheduledJobsList((prev) => [fullPayload.visit, ...prev]);
@@ -3211,7 +3061,7 @@ export function App() {
             calls={quoCallsList}
             visits={scheduledJobsList}
             quotes={quotesList}
-            onQuotesUpdated={(updated) => setQuotesList(dedupeQuotesList(updated))}
+            onQuotesUpdated={handleQuotesUpdated}
             projectId={activeProjectId}
             onUpdateClient={handleUpdateClient}
             onAddClient={handleAddClient}
@@ -3246,8 +3096,8 @@ export function App() {
             isSyncingEverything={isSyncingEverything}
             lastSyncedAllAt={lastSyncedAllAt}
             syncAllStatusMessage={syncAllStatusMessage}
-            onLeadsUpdated={(updated) => setLeadsList(updated)}
-            onQuotesUpdated={(updated) => setQuotesList(dedupeQuotesList(updated))}
+            onLeadsUpdated={handleLeadsUpdated}
+            onQuotesUpdated={handleQuotesUpdated}
             onClientsUpdated={(updated) => setClientsList(updated)}
             onConvertLeadToJob={handleConvertLeadToJob}
             onOpenQuickQuote={(lead) => {
@@ -3289,6 +3139,31 @@ export function App() {
               setMasterHubFocusBlock('ALL');
               setActiveTopView('MASTER_HUB');
             }}
+            onNavigateToPasteTable={() => {
+              setMasterHubFocusBlock('PASTE_TABLE');
+              setActiveTopView('MASTER_HUB');
+            }}
+            onNavigateToCleanSheet={() => setActiveTopView('LEADS')}
+            onNavigateToAddressRadar={() => setActiveTopView('ADDRESS_SEARCH')}
+            onNavigateToDispatchMap={() => setActiveTopView('MAP')}
+            onNavigateToSchedule={() => {
+              setActiveTopView('SCHEDULED_JOBS');
+              setScheduledJobsSubTab('CALENDAR');
+            }}
+            onNavigateToUnscheduled={() => {
+              setActiveTopView('SCHEDULED_JOBS');
+              setScheduledJobsSubTab('UNSCHEDULED');
+            }}
+            onNavigateToClients={() => setActiveTopView('CLIENTS')}
+            onOpenQuickLinks={() => setIsQuickLinksOpen(true)}
+            onOpenQuickReplies={() => setIsQuickRepliesOpen(true)}
+            onOpenPublicBookingModal={() => setIsPublicBookingModalOpen(true)}
+            onOpenNewTicketModal={() => setIsNewTicketModalOpen(true)}
+            onOpenAiDispatchModal={() => setIsAiModalOpen(true)}
+            onToggleZenMode={() => setIsZenMode(true)}
+            onToggleBoard={() => setIsBoardCollapsed((c) => !c)}
+            onToggleRearrangeBars={() => setIsRearrangingBars((prev) => !prev)}
+            isRearrangingBars={isRearrangingBars}
             onSyncEverything={() => handleSyncEverything(false)}
             isSyncingEverything={isSyncingEverything}
             onSwitchBrand={handleSwitchProject}
@@ -3296,6 +3171,10 @@ export function App() {
             intakesCount={tickets.length + quotesList.length}
             quotesCount={quotesList.length}
             invoicesCount={invoicesList.length}
+            leadsCount={leadsList.length}
+            clientsCount={clientsList.length}
+            scheduledCount={scheduledJobsList.length}
+            callsCount={quoCallsList.length}
             staffCount={staffList.length}
             cleanersCount={technicians.length}
             technicians={technicians}
@@ -3305,6 +3184,9 @@ export function App() {
             }}
             onSyncFirestore={handleSyncFirestore}
             isSyncingFirestore={isSyncingFirestore}
+            lastSyncedAllAt={lastSyncedAllAt}
+            firestoreSyncStatus={firestoreSyncStatus}
+            deltaSyncStats={deltaSyncStats}
             onOpenProjectBackup={() => setIsProjectBackupModalOpen(true)}
             onOpenAccessManager={
               currentUser.role === 'OWNER' || permissions.canManageUsersAndAccess
@@ -3347,7 +3229,7 @@ export function App() {
             projectId={activeProjectId}
             serviceCatalog={serviceCatalog}
             onCatalogUpdated={(newCat) => setServiceCatalog(newCat)}
-            onQuotesUpdated={(updated) => setQuotesList(dedupeQuotesList(updated))}
+            onQuotesUpdated={handleQuotesUpdated}
             onVisitCreated={(newVisit) => {
               setScheduledJobsList((prev) => [newVisit, ...prev]);
             }}
@@ -3358,7 +3240,7 @@ export function App() {
               })
                 .then((r) => r.json())
                 .then((data) => {
-                  if (data.quotes) setQuotesList(dedupeQuotesList(data.quotes));
+                  if (data.quotes) handleQuotesUpdated(data.quotes);
                 });
             }}
             onBackToManagement={() => setActiveTopView('MANAGEMENT')}
@@ -3387,7 +3269,7 @@ export function App() {
         ) : activeTopView === 'LEADS' ? (
           <LeadsView
             leads={leadsList}
-            onLeadsUpdated={(updated) => setLeadsList(updated)}
+            onLeadsUpdated={handleLeadsUpdated}
             onConvertLeadToJob={handleConvertLeadToJob}
             onOpenQuickQuote={(lead) => {
               setSelectedLeadForQuickQuote(lead || null);
@@ -3400,7 +3282,7 @@ export function App() {
             visits={scheduledJobsList}
             clients={clientsList}
             quotes={quotesList}
-            onQuotesUpdated={(updated) => setQuotesList(dedupeQuotesList(updated))}
+            onQuotesUpdated={handleQuotesUpdated}
             onClientsUpdated={(updated) => setClientsList(updated)}
             onOpenJobberModal={() => setIsJobberModalOpen(true)}
             projectId={activeProjectId}
@@ -3413,6 +3295,7 @@ export function App() {
               setScheduledJobsList((prev) => [newVisit, ...prev]);
             }}
             onQuoteCreated={(newQuote) => {
+              saveQuoteToFirestore(newQuote).catch(() => {});
               setQuotesList((prev) => {
                 const newDay = String(newQuote.createdAt || '').slice(0, 10);
                 const newClient = String(newQuote.clientName || '').trim().toLowerCase();
@@ -3427,7 +3310,13 @@ export function App() {
                   }
                   return true;
                 });
-                return dedupeQuotesList([newQuote, ...filtered]);
+                const next = dedupeQuotesList([newQuote, ...filtered]);
+                fetch(`/api/store/save?project=${activeProjectId}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'x-project-id': activeProjectId },
+                  body: JSON.stringify({ quotes: next }),
+                }).catch(() => {});
+                return next;
               });
             }}
             onBookingSubmitted={(ticket) => {
@@ -3450,7 +3339,7 @@ export function App() {
             onOpenSpamShield={handleOpenSpamShield}
             onOpenProjectBackup={() => setIsProjectBackupModalOpen(true)}
             onClientsUpdated={(updated) => setClientsList(updated)}
-            onLeadsUpdated={(updated) => setLeadsList(updated)}
+            onLeadsUpdated={handleLeadsUpdated}
           />
         ) : activeTopView === 'SPAM_SHIELD' ? (
           <SpamShieldView

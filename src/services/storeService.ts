@@ -80,6 +80,13 @@ export interface AppPersistentStore {
   headerNavOrder?: string[];
   footerBtnOrder?: string[];
   footerButtonsSide?: 'left' | 'right';
+  workspaceState?: {
+    activeTopView?: string;
+    masterHubFocusBlock?: string;
+    scheduledJobsSubTab?: string;
+    mapInspectDate?: string | null;
+    updatedAt?: string;
+  };
 }
 
 // Ensure data directory exists

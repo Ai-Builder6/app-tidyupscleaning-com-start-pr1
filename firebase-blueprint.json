@@ -566,6 +566,154 @@
         }
       },
       "required": ["id", "callerNumber", "status", "updatedAt"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "Inbound customer lead from Quo phone calls, Voice & Quick Quotes, Facebook Ads, Google Ads, or Pasted Leads Table.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique lead ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Customer or caller name.",
+          "maxLength": 150
+        },
+        "phone": {
+          "type": "string",
+          "description": "Customer phone number.",
+          "maxLength": 40
+        },
+        "email": {
+          "type": "string",
+          "description": "Customer email address.",
+          "maxLength": 200
+        },
+        "address": {
+          "type": "string",
+          "description": "Service street address.",
+          "maxLength": 300
+        },
+        "city": {
+          "type": "string",
+          "description": "Service city.",
+          "maxLength": 100
+        },
+        "postalCode": {
+          "type": "string",
+          "description": "Postal code.",
+          "maxLength": 30
+        },
+        "serviceRequested": {
+          "type": "string",
+          "description": "Requested cleaning package or service.",
+          "maxLength": 200
+        },
+        "bedrooms": {
+          "type": "string",
+          "description": "Bedrooms count.",
+          "maxLength": 60
+        },
+        "bathrooms": {
+          "type": "string",
+          "description": "Bathrooms count.",
+          "maxLength": 60
+        },
+        "source": {
+          "type": "string",
+          "description": "Lead source label.",
+          "maxLength": 100
+        },
+        "sourceTab": {
+          "type": "string",
+          "description": "Clean Sheet tab classification.",
+          "maxLength": 100
+        },
+        "verdict": {
+          "type": "string",
+          "description": "Lead qualification verdict.",
+          "maxLength": 50
+        },
+        "status": {
+          "type": "string",
+          "description": "Lead pipeline status.",
+          "maxLength": 50
+        },
+        "quoteId": {
+          "type": "string",
+          "description": "Linked Jobber or local quote ID.",
+          "maxLength": 128
+        },
+        "quoteNumber": {
+          "type": "string",
+          "description": "Linked quote number (e.g. QT-4379).",
+          "maxLength": 50
+        },
+        "quotedAmount": {
+          "type": "number",
+          "description": "Quoted total in CAD."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Call summary, transcript notes, or special instructions.",
+          "maxLength": 2500
+        },
+        "dateReceived": {
+          "type": "string",
+          "description": "ISO timestamp when lead was received."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when lead was last updated."
+        }
+      },
+      "required": ["id", "customerName", "updatedAt"]
+    },
+    "WorkspaceState": {
+      "title": "WorkspaceState",
+      "description": "Persistent user workspace state so the owner and staff always resume exactly where they left off.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Workspace state document ID.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "activeTopView": {
+          "type": "string",
+          "description": "Last active top-level view tab.",
+          "maxLength": 60
+        },
+        "masterHubFocusBlock": {
+          "type": "string",
+          "description": "Last active focus block in Master Hub.",
+          "maxLength": 60
+        },
+        "scheduledJobsSubTab": {
+          "type": "string",
+          "description": "Last active sub-tab in Schedule view.",
+          "maxLength": 60
+        },
+        "mapInspectDate": {
+          "type": "string",
+          "description": "Last inspected date on Dispatch Map.",
+          "maxLength": 40
+        },
+        "lastSyncedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last delta sync."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when workspace state was saved."
+        }
+      },
+      "required": ["id", "activeTopView", "updatedAt"]
     }
   },
   "firestore": {
@@ -608,6 +756,14 @@
     "/screenedCalls/{callId}": {
       "schema": "ScreenedCallRecord",
       "description": "Persistent screened calls, voicemails, and blocked call history."
+    },
+    "/leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Master Leads & Quotes Hub rows synced incrementally across Quo calls, Jobber, and Google Sheets."
+    },
+    "/workspaceState/{stateId}": {
+      "schema": "WorkspaceState",
+      "description": "Persistent workspace session state so the app resumes where the user left off."
     },
     "/admins/{adminId}": {
       "schema": "Admin",

@@ -276,6 +276,57 @@ service cloud.firestore {
       allow delete: if isVerified() && isValidId(callId);
     }
 
+    // Master Leads & Quotes Hub Collection
+    function isValidLeadRecord(data) {
+      return data.keys().hasAll(['id', 'customerName', 'updatedAt']) &&
+             data.keys().hasOnly(['id', 'customerName', 'phone', 'email', 'address', 'city', 'postalCode', 'serviceRequested', 'bedrooms', 'bathrooms', 'source', 'sourceTab', 'verdict', 'status', 'quoteId', 'quoteNumber', 'quotedAmount', 'notes', 'dateReceived', 'updatedAt']) &&
+             data.id is string && isValidId(data.id) &&
+             data.customerName is string && data.customerName.size() > 0 && data.customerName.size() <= 150 &&
+             data.updatedAt is string && data.updatedAt.size() <= 60 &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 40)) &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
+             (!('address' in data) || (data.address is string && data.address.size() <= 300)) &&
+             (!('city' in data) || (data.city is string && data.city.size() <= 100)) &&
+             (!('postalCode' in data) || (data.postalCode is string && data.postalCode.size() <= 30)) &&
+             (!('serviceRequested' in data) || (data.serviceRequested is string && data.serviceRequested.size() <= 200)) &&
+             (!('bedrooms' in data) || (data.bedrooms is string && data.bedrooms.size() <= 60)) &&
+             (!('bathrooms' in data) || (data.bathrooms is string && data.bathrooms.size() <= 60)) &&
+             (!('source' in data) || (data.source is string && data.source.size() <= 100)) &&
+             (!('sourceTab' in data) || (data.sourceTab is string && data.sourceTab.size() <= 100)) &&
+             (!('verdict' in data) || (data.verdict is string && data.verdict.size() <= 50)) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('quoteId' in data) || (data.quoteId is string && data.quoteId.size() <= 128)) &&
+             (!('quoteNumber' in data) || (data.quoteNumber is string && data.quoteNumber.size() <= 50)) &&
+             (!('quotedAmount' in data) || (data.quotedAmount is number && data.quotedAmount >= 0 && data.quotedAmount <= 100000)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 2500)) &&
+             (!('dateReceived' in data) || (data.dateReceived is string && data.dateReceived.size() <= 60));
+    }
+
+    match /leads/{leadId} {
+      allow get, list: if isVerified();
+      allow create, update: if isVerified() && isValidId(leadId) && isValidLeadRecord(incoming()) && incoming().id == leadId;
+      allow delete: if isVerified() && isValidId(leadId);
+    }
+
+    // Persistent Workspace State Collection (Resume Where You Left Off)
+    function isValidWorkspaceState(data) {
+      return data.keys().hasAll(['id', 'activeTopView', 'updatedAt']) &&
+             data.keys().hasOnly(['id', 'activeTopView', 'masterHubFocusBlock', 'scheduledJobsSubTab', 'mapInspectDate', 'lastSyncedAt', 'updatedAt']) &&
+             data.id is string && isValidId(data.id) &&
+             data.activeTopView is string && data.activeTopView.size() > 0 && data.activeTopView.size() <= 60 &&
+             data.updatedAt is string && data.updatedAt.size() <= 60 &&
+             (!('masterHubFocusBlock' in data) || (data.masterHubFocusBlock is string && data.masterHubFocusBlock.size() <= 60)) &&
+             (!('scheduledJobsSubTab' in data) || (data.scheduledJobsSubTab is string && data.scheduledJobsSubTab.size() <= 60)) &&
+             (!('mapInspectDate' in data) || (data.mapInspectDate is string && data.mapInspectDate.size() <= 40)) &&
+             (!('lastSyncedAt' in data) || (data.lastSyncedAt is string && data.lastSyncedAt.size() <= 60));
+    }
+
+    match /workspaceState/{stateId} {
+      allow get, list: if isVerified();
+      allow create, update: if isVerified() && isValidId(stateId) && isValidWorkspaceState(incoming()) && incoming().id == stateId;
+      allow delete: if isAdmin() && isValidId(stateId);
+    }
+
     // Admins Collection
     match /admins/{adminId} {
       allow get: if isAdmin() && isValidId(adminId);
