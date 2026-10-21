@@ -485,7 +485,7 @@ export function App() {
     return base.filter((inv: any) => !isFakeSimulationItem(inv));
   });
   const [selectedScheduledJobId, setSelectedScheduledJobId] = useState<string | null>(null);
-  const [mapInspectDate, setMapInspectDate] = useState<string>(() => getEdmontonToday());
+  const [mapInspectDate, setMapInspectDate] = useState<string>(() => getEdmontonToday().dateString);
   const [quoCallsList, setQuoCallsList] = useState<any[]>(() => {
     return storedData?.quoCallLogs || [];
   });

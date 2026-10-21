@@ -21,6 +21,7 @@ export interface AppPersistentStore {
   version: number;
   lastSavedAt: string;
   tickets: any[];
+  technicians?: any[];
   cleanerOverrides: Record<string, any>;
   scheduledVisits: any[];
   unscheduledJobs?: any[];
@@ -37,6 +38,7 @@ export interface AppPersistentStore {
     blockedCountryCodes: string[];
     blockedPrefixes: string[];
     blockedNumbers: string[];
+    unblockedNumbers?: string[];
     blockRobocallFloods: boolean;
     rejectionAction: 'busy' | 'reject';
     forwardDestinationNumber?: string;

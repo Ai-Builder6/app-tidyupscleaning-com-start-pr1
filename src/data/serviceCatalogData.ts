@@ -58,7 +58,20 @@ export interface ServiceCatalogItem {
  * If switched to 1 Cleaner, QTY becomes 6 (3 * 2) and Unit Price becomes $52.50 ($105 / 2), Total = $315.00.
  */
 export function convertItemForCleanersCount(
-  item: { quantity: number; unitPrice: number; total?: number; cleanersCount: number; isAddon?: boolean },
+  item: {
+    quantity: number;
+    unitPrice: number;
+    total?: number;
+    cleanersCount: number;
+    isAddon?: boolean;
+    category?: string;
+    name?: string;
+    description?: string;
+    bedrooms?: string;
+    bathrooms?: string;
+    beds?: string;
+    baths?: string;
+  },
   targetCleaners: number
 ): {
   cleanersCount: number;
@@ -105,8 +118,8 @@ export function convertItemForCleanersCount(
       perCleanerRate,
       soloEquivalentQty: totalPersonHours,
       soloEquivalentRate: perCleanerRate,
-      jobberItemName: item.name,
-      description: item.description || `${item.name} - Tidyups Cleaning Service`,
+      jobberItemName: item.name || 'Cleaning Service',
+      description: item.description || `${item.name || 'Cleaning Service'} - Tidyups Cleaning Service`,
     };
   }
 
@@ -121,7 +134,7 @@ export function convertItemForCleanersCount(
   const newTotal =
     currentTotal > 0 ? Math.round(currentTotal * 100) / 100 : Math.round(newQuantity * newUnitPrice * 100) / 100;
 
-  const baseName = stripSuffix(item.name);
+  const baseName = stripSuffix(item.name || 'Cleaning Service');
   const crewLabel = nextCleaners === 1 ? '1 Cleaner' : `${nextCleaners} Cleaners`;
   const jobberFullName = `${baseName} (${crewLabel})`;
   const bedsBaths = [item.bedrooms || item.beds, item.bathrooms || item.baths]

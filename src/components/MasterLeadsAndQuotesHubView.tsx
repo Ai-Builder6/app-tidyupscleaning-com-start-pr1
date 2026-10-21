@@ -513,9 +513,8 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
     try {
       const result = await syncLeadsToLiveGoogleSheetInDrive({
         spreadsheetId,
-        leads,
       });
-      setLocalBanner(`✓ Master Leads & Quotes Google Sheet formatted with frozen headers & color-coded sections (${result.updatedRows} rows)!`);
+      setLocalBanner(`✓ Master Leads & Quotes Google Sheet formatted with frozen headers & color-coded sections (${result.sheetName})!`);
       setTimeout(() => setLocalBanner(null), 6000);
     } catch (err: any) {
       setLocalBanner(`Google Sheet sync note: ${err?.message || 'Click Open Master Sheet to view.'}`);

@@ -354,6 +354,7 @@ export interface JobberVisit {
   jobberWebUri: string;
   callTranscripts?: any[];
   notes?: string;
+  quoteTotal?: number;
   updatedAt?: string;
   syncedAt?: string;
 }
@@ -404,6 +405,7 @@ export interface JobberQuote {
   lastSmsMessage?: string;
   notes?: string;
   isLocal?: boolean;
+  isLiveSynced?: boolean;
   lineItems?: Array<{ description: string; quantity: number; unitPrice: number; total: number }>;
 }
 

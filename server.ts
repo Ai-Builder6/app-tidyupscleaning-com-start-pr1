@@ -8113,6 +8113,21 @@ function formatPhoneDisplay(phone: string): string {
   return phone;
 }
 
+function normalizePhoneNumber(phone: any): string {
+  return formatPhoneDisplay(String(phone || ""));
+}
+
+function resolveEdmontonCoords(address?: string): { lat: number; lng: number } {
+  const norm = String(address || "").toLowerCase();
+  if (norm.includes("st. albert") || norm.includes("st albert")) return { lat: 53.6385, lng: -113.6268 };
+  if (norm.includes("spruce grove")) return { lat: 53.5465, lng: -113.8980 };
+  if (norm.includes("beaumont")) return { lat: 53.3572, lng: -113.4146 };
+  if (norm.includes("sherwood park")) return { lat: 53.5320, lng: -113.3150 };
+  if (norm.includes("chappelle") || norm.includes("sw")) return { lat: 53.4125, lng: -113.5745 };
+  if (norm.includes("windermere") || norm.includes("ambleside")) return { lat: 53.4342, lng: -113.6045 };
+  return { lat: 53.5412, lng: -113.4988 };
+}
+
 function detectServiceTypeFromText(text: string): "Standard Cleaning" | "Deep Cleaning" | "Move-Out Cleaning" {
   const lower = (text || "").toLowerCase();
   if (lower.includes("move-out") || lower.includes("move out") || lower.includes("move in") || lower.includes("turnover") || lower.includes("tenancy") || lower.includes("possession")) {

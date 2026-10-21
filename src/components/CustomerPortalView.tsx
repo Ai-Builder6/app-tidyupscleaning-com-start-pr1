@@ -273,6 +273,11 @@ const CLEANING_SERVICES: ServiceDetail[] = [
 
 export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   onBookingSubmitted,
+  onNavigateToMap,
+  onOpenPhoneModal,
+  onOpenStaffLogin,
+  onOpenVoiceIntake,
+  onOpenSpamShield,
   isStandaloneCustomerSite = false,
   isCustomerLockPreview = false,
   onToggleCustomerLockPreview,
@@ -435,11 +440,11 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
     const matchedItem = catalogList.find((item) => {
       const nameLower = (item.jobberItemName || item.name || '').toLowerCase();
-      const matchesBed = nameLower.includes(`${bedNum}bed`) || item.bedrooms === bedNum;
-      const matchesBath = nameLower.includes(`${bathNum}bath`) || item.bathrooms === bathNum;
+      const matchesBed = nameLower.includes(`${bedNum}bed`) || Number(item.bedrooms) === bedNum;
+      const matchesBath = nameLower.includes(`${bathNum}bath`) || Number(item.bathrooms) === bathNum;
       const matchesCat = nameLower.includes(categoryKeyword);
       const matchesCrew =
-        (item.cleanerCount || 1) === cleanerCount ||
+        (item.cleanersCount || 1) === cleanerCount ||
         (cleanerCount === 1 && nameLower.includes('1 pro')) ||
         (cleanerCount === 2 && nameLower.includes('2 pro')) ||
         (cleanerCount === 3 && nameLower.includes('3 pro'));

@@ -165,7 +165,7 @@ function resolveCleanerLiveLocation(
   const activeTicket = tickets.find(
     (t) => t.assignedTechId === tech.id && (t.status === 'IN_PROGRESS' || t.status === 'ASSIGNED')
   );
-  if (activeTicket && (!targetDateIso || targetDateIso === getEdmontonToday())) {
+  if (activeTicket && (!targetDateIso || targetDateIso === getEdmontonToday().dateString)) {
     return {
       lat: activeTicket.location.lat,
       lng: activeTicket.location.lng,
@@ -522,7 +522,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
   const [locationMode, setLocationMode] = useState<LocationToggleMode>('BOTH');
 
   // Schedule Date & Day-of-Week Selector for Quick Map / Radar
-  const [selectedScheduleDate, setSelectedScheduleDate] = useState<string>(() => getEdmontonToday());
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState<string>(() => getEdmontonToday().dateString);
   const [showScheduleEventsOnMap, setShowScheduleEventsOnMap] = useState<boolean>(true);
   const [rightSidebarTab, setRightSidebarTab] = useState<'CLEANERS' | 'SCHEDULE_EVENTS'>('CLEANERS');
 
@@ -535,7 +535,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
 
   // Build 14-day strip (This Week Mon-Sun + Next Week Mon-Sun) anchored around Edmonton Today
   const twoWeekScheduleDays = useMemo(() => {
-    const todayStr = getEdmontonToday();
+    const todayStr = getEdmontonToday().dateString;
     const [ty, tm, td] = todayStr.split('-').map(Number);
     const todayUtc = new Date(Date.UTC(ty, tm - 1, td));
     const dayOfWeek = todayUtc.getUTCDay(); // 0=Sun..6=Sat
@@ -1051,9 +1051,9 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => setSelectedScheduleDate(getEdmontonToday())}
+                onClick={() => setSelectedScheduleDate(getEdmontonToday().dateString)}
                 className={`px-2.5 py-1 rounded-xl text-[11px] font-black cursor-pointer transition-all ${
-                  selectedScheduleDate === getEdmontonToday()
+                  selectedScheduleDate === getEdmontonToday().dateString
                     ? 'bg-emerald-500 text-slate-950 shadow-xs'
                     : 'bg-white/10 hover:bg-white/20 text-white'
                 }`}
@@ -1062,9 +1062,9 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setSelectedScheduleDate(shiftDateStr(getEdmontonToday(), 1))}
+                onClick={() => setSelectedScheduleDate(shiftDateStr(getEdmontonToday().dateString, 1))}
                 className={`px-2.5 py-1 rounded-xl text-[11px] font-black cursor-pointer transition-all ${
-                  selectedScheduleDate === shiftDateStr(getEdmontonToday(), 1)
+                  selectedScheduleDate === shiftDateStr(getEdmontonToday().dateString, 1)
                     ? 'bg-amber-400 text-slate-950 shadow-xs'
                     : 'bg-white/10 hover:bg-white/20 text-white'
                 }`}
