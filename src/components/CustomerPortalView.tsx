@@ -31,6 +31,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Tag,
+  FileText,
+  HelpCircle,
+  X,
 } from 'lucide-react';
 import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 import { ServiceTicket } from '../types/dispatch';
@@ -292,6 +295,63 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     }
     return 'Website (tidyupscleaning.com)';
   }, []);
+
+  // Detect if visitor arrived directly on /privacy-policy, /terms, /t&c, or ?legal=privacy|terms
+  const [activeLegalModal, setActiveLegalModal] = useState<'PRIVACY' | 'TERMS' | 'SUPPORT' | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const path = window.location.pathname.toLowerCase();
+    const search = window.location.search.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
+    if (
+      path.includes('privacy') ||
+      search.includes('legal=privacy') ||
+      search.includes('page=privacy') ||
+      hash.includes('privacy')
+    ) {
+      return 'PRIVACY';
+    }
+    if (
+      path.includes('terms') ||
+      path.includes('t&c') ||
+      path.includes('tos') ||
+      search.includes('legal=terms') ||
+      search.includes('page=terms') ||
+      hash.includes('terms')
+    ) {
+      return 'TERMS';
+    }
+    if (path.includes('support') || search.includes('legal=support') || hash.includes('support')) {
+      return 'SUPPORT';
+    }
+    return null;
+  });
+
+  const handleOpenLegalModal = (tab: 'PRIVACY' | 'TERMS' | 'SUPPORT' | null) => {
+    setActiveLegalModal(tab);
+    if (typeof window !== 'undefined') {
+      try {
+        const currentUrl = new URL(window.location.href);
+        if (tab === 'PRIVACY') {
+          window.history.replaceState({}, '', `/privacy-policy${currentUrl.search}`);
+        } else if (tab === 'TERMS') {
+          window.history.replaceState({}, '', `/terms${currentUrl.search}`);
+        } else if (tab === 'SUPPORT') {
+          window.history.replaceState({}, '', `/support${currentUrl.search}`);
+        } else {
+          const cleanPath =
+            currentUrl.pathname.includes('privacy') ||
+            currentUrl.pathname.includes('terms') ||
+            currentUrl.pathname.includes('t&c') ||
+            currentUrl.pathname.includes('support')
+              ? '/'
+              : currentUrl.pathname;
+          window.history.replaceState({}, '', `${cleanPath}${currentUrl.search}`);
+        }
+      } catch {
+        // Ignore history state errors in sandboxed iframes
+      }
+    }
+  };
 
   const [selectedService, setSelectedService] = useState<CleaningCategory>('standard');
   const [activeBannerIdx, setActiveBannerIdx] = useState<number>(0);
@@ -746,6 +806,26 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
               <button
                 type="button"
+                onClick={() => handleCopyBookingLink('privacy', 'https://book.tidyupscleaning.com/privacy-policy')}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-cyan-400/50 text-cyan-300 font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
+                title="Copy Direct Privacy Policy URL for Facebook Ads, Google Ads & Twilio Compliance"
+              >
+                {copiedLinkKey === 'privacy' ? <Check className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                <span>{copiedLinkKey === 'privacy' ? 'Copied Privacy URL!' : '🔒 Copy Privacy URL'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCopyBookingLink('terms', 'https://book.tidyupscleaning.com/terms')}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-pink-400/50 text-pink-300 font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
+                title="Copy Direct Terms & Conditions URL"
+              >
+                {copiedLinkKey === 'terms' ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+                <span>{copiedLinkKey === 'terms' ? 'Copied T&C URL!' : '📄 Copy T&C URL'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleReconnectFacebookAndGoogleLeads}
                 disabled={isReconnectingLeads}
                 className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-pink-500 to-fuchsia-600 hover:from-pink-400 hover:to-fuchsia-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
@@ -858,6 +938,26 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <Phone className="w-3.5 h-3.5 text-slate-950" />
               <span>(780) 718-5092</span>
             </a>
+
+            <button
+              type="button"
+              onClick={() => handleOpenLegalModal('PRIVACY')}
+              className="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-pink-50 border border-slate-300 hover:border-pink-400 text-slate-800 font-black text-xs flex items-center gap-1 transition-all cursor-pointer"
+              title="View Privacy Policy"
+            >
+              <Lock className="w-3.5 h-3.5 text-pink-600" />
+              <span>Privacy Policy</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleOpenLegalModal('TERMS')}
+              className="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-cyan-50 border border-slate-300 hover:border-cyan-400 text-slate-800 font-black text-xs flex items-center gap-1 transition-all cursor-pointer"
+              title="View Terms & Conditions (T&C)"
+            >
+              <FileText className="w-3.5 h-3.5 text-cyan-600" />
+              <span>T&amp;C</span>
+            </button>
 
             <button
               type="button"
@@ -1560,6 +1660,45 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                     />
                   </div>
 
+                  {/* Terms & Conditions and Privacy Policy Consent Notice */}
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 leading-relaxed flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      By submitting your booking request, you agree to 833 TidyUps Cleaning Service Inc.&apos;s{' '}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenLegalModal('TERMS')}
+                        className="font-black text-pink-600 hover:text-pink-700 underline cursor-pointer"
+                      >
+                        Terms &amp; Conditions (T&amp;C)
+                      </button>{' '}
+                      and{' '}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenLegalModal('PRIVACY')}
+                        className="font-black text-cyan-700 hover:text-cyan-800 underline cursor-pointer"
+                      >
+                        Privacy Policy
+                      </button>{' '}
+                      (including SMS/email appointment updates &amp; Jobber scheduling).
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenLegalModal('PRIVACY')}
+                        className="px-2 py-1 rounded-lg bg-white border border-slate-300 hover:border-cyan-500 text-[10px] font-black text-slate-700 cursor-pointer"
+                      >
+                        🔒 Privacy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenLegalModal('TERMS')}
+                        className="px-2 py-1 rounded-lg bg-white border border-slate-300 hover:border-pink-500 text-[10px] font-black text-slate-700 cursor-pointer"
+                      >
+                        📄 T&amp;C
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Submit Button */}
                   <button
                     type="submit"
@@ -1719,45 +1858,448 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       </section>
 
       {/* ─────────────────────────────────────────────────────────────────────────────
-          4. CUSTOMER-ONLY FOOTER (STRICTLY PUBLIC — LINKS TO MAIN WEBSITE & PHONES)
+          4. OFFICIAL PRIVACY POLICY, TERMS & CONDITIONS (T&C) & CUSTOMER SUPPORT BAR
          ───────────────────────────────────────────────────────────────────────────── */}
-      <footer className="bg-slate-950 text-slate-300 border-t-4 border-pink-500 py-8 px-4 sm:px-6 lg:px-8 mt-8">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-3">
-            <img
-              src={OFFICIAL_LOGO_URL}
-              alt="833 Tidyups Logo"
-              className="w-10 h-10 object-contain"
-            />
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 pb-4">
+        <div className="bg-white rounded-3xl border-2 border-cyan-300 shadow-md p-5 sm:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-pink-500 via-fuchsia-600 to-cyan-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
             <div>
-              <p className="font-black text-white">
-                833 TidyUps Cleaning Service Inc. • Established 2012
-              </p>
-              <p className="text-[11px] text-slate-400">
-                Serving Edmonton, St. Albert, Sherwood Park, Spruce Grove, Leduc &amp; Beaumont
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm sm:text-base font-black text-slate-900">
+                  Official Privacy Policy &amp; Terms and Conditions (T&amp;C)
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase">
+                  PIPEDA &amp; Alberta Verified
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Transparent customer privacy protection, 24-Hour Clean Guarantee terms, cancellation policy &amp; Jobber billing standards for <strong>book.tidyupscleaning.com</strong>.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4 font-bold">
-            <a
-              href="https://tidyupscleaning.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleOpenLegalModal('PRIVACY')}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
             >
-              <span>Main Website: tidyupscleaning.com</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-            <a href="tel:18338439877" className="text-pink-400 hover:text-pink-300 font-mono">
-              1-833-TIDYUPS (833-843-9877)
-            </a>
-            <a href="tel:7807185092" className="text-amber-300 hover:text-amber-200 font-mono">
-              (780) 718-5092
-            </a>
+              <Lock className="w-3.5 h-3.5" />
+              <span>Read Privacy Policy</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleOpenLegalModal('TERMS')}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Read Terms &amp; Conditions (T&amp;C)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleOpenLegalModal('SUPPORT')}
+              className="px-3.5 py-2.5 rounded-xl bg-amber-300 hover:bg-amber-200 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>Customer FAQ &amp; Support</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ─────────────────────────────────────────────────────────────────────────────
+          5. CUSTOMER-ONLY FOOTER (STRICTLY PUBLIC — LINKS TO WEBSITE, PRIVACY & T&C)
+         ───────────────────────────────────────────────────────────────────────────── */}
+      <footer className="bg-slate-950 text-slate-300 border-t-4 border-pink-500 py-8 px-4 sm:px-6 lg:px-8 mt-4">
+        <div className="max-w-7xl mx-auto space-y-5">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
+            <div className="flex items-center gap-3">
+              <img
+                src={OFFICIAL_LOGO_URL}
+                alt="833 Tidyups Logo"
+                className="w-10 h-10 object-contain"
+              />
+              <div>
+                <p className="font-black text-white">
+                  833 TidyUps Cleaning Service Inc. • Established 2012
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Serving Edmonton, St. Albert, Sherwood Park, Spruce Grove, Leduc &amp; Beaumont
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-4 font-bold">
+              <a
+                href="https://tidyupscleaning.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+              >
+                <span>Main Website: tidyupscleaning.com</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <a href="tel:18338439877" className="text-pink-400 hover:text-pink-300 font-mono">
+                1-833-TIDYUPS (833-843-9877)
+              </a>
+              <a href="tel:7807185092" className="text-amber-300 hover:text-amber-200 font-mono">
+                (780) 718-5092
+              </a>
+            </div>
+          </div>
+
+          {/* Bottom Legal Links Bar */}
+          <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-400">
+            <div>
+              © {new Date().getFullYear()} 833 TidyUps Cleaning Service Inc. All rights reserved. • 8306 Chappelle Way SW, Edmonton, AB T6W 4L3
+            </div>
+            <div className="flex flex-wrap items-center gap-4 font-bold">
+              <button
+                type="button"
+                onClick={() => handleOpenLegalModal('PRIVACY')}
+                className="text-cyan-300 hover:text-white underline cursor-pointer flex items-center gap-1"
+              >
+                <Lock className="w-3 h-3" />
+                <span>Privacy Policy (/privacy-policy)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenLegalModal('TERMS')}
+                className="text-pink-300 hover:text-white underline cursor-pointer flex items-center gap-1"
+              >
+                <FileText className="w-3 h-3" />
+                <span>Terms &amp; Conditions (/terms)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenLegalModal('SUPPORT')}
+                className="text-amber-300 hover:text-white underline cursor-pointer flex items-center gap-1"
+              >
+                <HelpCircle className="w-3 h-3" />
+                <span>Customer Support &amp; FAQ (/support)</span>
+              </button>
+            </div>
           </div>
         </div>
       </footer>
+
+      {/* ─────────────────────────────────────────────────────────────────────────────
+          6. BUILT-IN PRIVACY POLICY, TERMS & CONDITIONS (T&C) & SUPPORT MODAL / PAGE
+             Works both via clicking links AND direct URLs (/privacy-policy, /terms)
+         ───────────────────────────────────────────────────────────────────────────── */}
+      {activeLegalModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-white rounded-3xl border-4 border-cyan-400 shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden my-auto">
+            {/* Modal Top Header */}
+            <div className="bg-gradient-to-r from-slate-950 via-purple-950 to-slate-900 text-white px-5 py-4 border-b-4 border-pink-500 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-3">
+                <img
+                  src={OFFICIAL_LOGO_URL}
+                  alt="833 Tidyups Logo"
+                  className="w-11 h-11 object-contain"
+                />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base sm:text-lg font-black text-white">
+                      833 TidyUps Cleaning Service Inc.
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-300 text-slate-950 text-[10px] font-black uppercase">
+                      Official Legal &amp; Privacy
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-cyan-300 font-mono">
+                    https://book.tidyupscleaning.com • https://tidyupscleaning.com
+                  </p>
+                </div>
+              </div>
+
+              {/* Switcher Tabs + Close Button */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleOpenLegalModal('PRIVACY')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
+                    activeLegalModal === 'PRIVACY'
+                      ? 'bg-cyan-400 text-slate-950 shadow-sm'
+                      : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                  }`}
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Privacy Policy</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenLegalModal('TERMS')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
+                    activeLegalModal === 'TERMS'
+                      ? 'bg-pink-500 text-white shadow-sm'
+                      : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Terms &amp; Conditions (T&amp;C)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenLegalModal('SUPPORT')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
+                    activeLegalModal === 'SUPPORT'
+                      ? 'bg-amber-300 text-slate-950 shadow-sm'
+                      : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                  }`}
+                >
+                  <HelpCircle className="w-3.5 h-3.5" />
+                  <span>FAQ &amp; Support</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenLegalModal(null)}
+                  className="ml-1 p-2 rounded-xl bg-white/10 hover:bg-rose-600 text-white cursor-pointer transition-all"
+                  title="Close and return to Customer Booking Sheet"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body Content */}
+            <div className="p-5 sm:p-8 overflow-y-auto space-y-6 text-xs sm:text-sm text-slate-700 leading-relaxed flex-1">
+              {activeLegalModal === 'PRIVACY' && (
+                <div className="space-y-5">
+                  <div className="border-b border-slate-200 pb-4">
+                    <span className="inline-block px-2.5 py-0.5 rounded-full bg-cyan-100 text-cyan-800 text-[10px] font-black uppercase tracking-wider mb-1">
+                      Canadian PIPEDA &amp; Alberta PIPA Compliant
+                    </span>
+                    <h3 className="text-xl sm:text-2xl font-black text-slate-900">
+                      Privacy Policy — 833 TidyUps Cleaning Service Inc.
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Effective Date: January 1, 2026 • Applies to <strong>book.tidyupscleaning.com</strong>, <strong>tidyupscleaning.com</strong>, and our Facebook / Google Lead booking forms.
+                    </p>
+                  </div>
+
+                  <section className="space-y-1.5">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      1. Information We Collect When You Book
+                    </h4>
+                    <p>
+                      When you request an instant quote or submit a cleaning booking on <code>book.tidyupscleaning.com</code> or through our social media lead forms, we collect only the information needed to prepare your quote and perform your cleaning service:
+                    </p>
+                    <ul className="list-disc list-inside space-y-1 text-slate-700 pl-1">
+                      <li><strong>Contact Information:</strong> Your full name, phone number, and email address.</li>
+                      <li><strong>Property &amp; Service Details:</strong> Service street address, city/community, home size (bedrooms/bathrooms), chosen cleaning package, and preferred date/time window.</li>
+                      <li><strong>Entry &amp; Special Instructions:</strong> Optional lockbox codes, buzzer numbers, pet notes, or specific cleaning priorities you share with our team.</li>
+                    </ul>
+                  </section>
+
+                  <section className="space-y-1.5">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      2. How We Use Your Information
+                    </h4>
+                    <p>We use your personal information strictly to:</p>
+                    <ul className="list-disc list-inside space-y-1 text-slate-700 pl-1">
+                      <li>Confirm your cleaning appointment, send your official Jobber quote/receipt, and assign your vetted cleaning crew.</li>
+                      <li>Provide arrival ETA notifications and customer support before and after your clean.</li>
+                      <li>Honor our <strong>24-Hour Satisfaction &amp; Move-Out Inspection Guarantee</strong>.</li>
+                    </ul>
+                  </section>
+
+                  <section className="space-y-1.5 bg-cyan-50/70 border border-cyan-200 rounded-2xl p-4">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      3. SMS, Phone &amp; Email Communications Policy (No Third-Party Sharing)
+                    </h4>
+                    <p>
+                      By providing your phone number or email on our booking sheet, you consent to receive booking confirmations, appointment reminders, crew arrival updates, and quote follow-ups from <strong>833 TidyUps Cleaning Service Inc.</strong> via phone, SMS text message, or email.
+                    </p>
+                    <p className="font-bold text-slate-900">
+                      We NEVER sell, rent, trade, or share your mobile phone number, SMS opt-in consent, or personal data with any third parties or affiliates for marketing or promotional purposes. You may reply STOP to any SMS message at any time to opt out.
+                    </p>
+                  </section>
+
+                  <section className="space-y-1.5">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      4. Secure Payment Processing &amp; Data Protection
+                    </h4>
+                    <p>
+                      No credit card is charged upfront when submitting this booking request form. Official quotes, $50 booking deposits, and completed service invoices are processed securely through <strong>Jobber</strong> (PCI-DSS compliant) or via Interac e-Transfer. All customer records are encrypted in transit (TLS 1.3) and restricted strictly to authorized 833 TidyUps dispatch and cleaning personnel.
+                    </p>
+                  </section>
+
+                  <section className="space-y-1.5">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      5. Contact Our Privacy Officer
+                    </h4>
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs space-y-1">
+                      <div className="font-black text-slate-900">833 TidyUps Cleaning Service Inc. — Privacy &amp; Customer Care</div>
+                      <div>Address: 8306 Chappelle Way SW, Edmonton, AB T6W 4L3</div>
+                      <div>Toll-Free Phone: <a href="tel:18338439877" className="text-pink-600 font-bold underline">1-833-TIDYUPS (833-843-9877)</a> • Local: <a href="tel:7807185092" className="text-cyan-700 font-bold underline">(780) 718-5092</a></div>
+                      <div>Email: <a href="mailto:cleaningserviceyeg@gmail.com" className="text-pink-600 font-bold underline">cleaningserviceyeg@gmail.com</a></div>
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              {activeLegalModal === 'TERMS' && (
+                <div className="space-y-5">
+                  <div className="border-b border-slate-200 pb-4">
+                    <span className="inline-block px-2.5 py-0.5 rounded-full bg-pink-100 text-pink-800 text-[10px] font-black uppercase tracking-wider mb-1">
+                      Customer Service Agreement • Province of Alberta
+                    </span>
+                    <h3 className="text-xl sm:text-2xl font-black text-slate-900">
+                      Terms and Conditions (T&amp;C) — 833 TidyUps Cleaning Service Inc.
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Effective Date: January 1, 2026 • Governing Law: Province of Alberta, Canada
+                    </p>
+                  </div>
+
+                  <section className="space-y-1.5">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      1. Scope of Cleaning Services &amp; Instant Estimates
+                    </h4>
+                    <p>
+                      833 TidyUps Cleaning Service Inc. provides residential Standard/Basic Cleans, Deep Cleans, Move-In/Move-Out Turnovers, AirBnB Turnovers, Post-Renovation Cleans, and Commercial Cleaning across Edmonton, St. Albert, Sherwood Park, Spruce Grove, Leduc, Beaumont, and Fort Saskatchewan. Online prices displayed on <code>book.tidyupscleaning.com</code> are calculated from our official Jobber service catalog based on your selected bedrooms, bathrooms, crew size, and add-ons (plus 5% Alberta GST).
+                    </p>
+                  </section>
+
+                  <section className="space-y-1.5">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      2. Booking Confirmation, $50 Deposit &amp; Payment Terms
+                    </h4>
+                    <p>
+                      Submitting a booking request on this page does not charge your card upfront. Once our dispatch team confirms your preferred date and arrival window in Jobber, a <strong>$50 CAD booking deposit</strong> holds your reserved crew slot (applied directly toward your total). The remaining balance is due upon completion of your clean via credit/debit card through Jobber or Interac e-Transfer to <code>cleaningserviceyeg@gmail.com</code>.
+                    </p>
+                  </section>
+
+                  <section className="space-y-1.5">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      3. Property Access, Lockboxes, Pets &amp; Safety
+                    </h4>
+                    <p>
+                      Clients agree to provide safe, unobstructed entry to the property during the scheduled arrival window (via in-person greeting, door keypad, or lockbox code) along with running water and electricity. For everyone&apos;s safety, we kindly ask that pets be secured during cleaning. If our crew is unable to access the home within 30 minutes of arrival, a $50 CAD lockout/trip fee may apply.
+                    </p>
+                  </section>
+
+                  <section className="space-y-1.5">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      4. 24-Hour Cancellation &amp; Rescheduling Policy
+                    </h4>
+                    <p>
+                      We understand plans can change! You may reschedule or cancel your appointment at least <strong>24 hours before</strong> your scheduled arrival window with zero penalty. Cancellations or reschedules requested with less than 24 hours&apos; notice may be subject to a $50 CAD late cancellation fee to compensate the assigned cleaning crew.
+                    </p>
+                  </section>
+
+                  <section className="space-y-1.5 bg-amber-50 border border-amber-300 rounded-2xl p-4">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      5. The 833 TidyUps 24-Hour Clean &amp; Move-Out Guarantee
+                    </h4>
+                    <p>
+                      Your satisfaction is guaranteed. If you, your realtor, or your landlord notice any item included in your booked package checklist that was missed, simply contact us within <strong>24 hours of service completion</strong> at <strong>1-833-TIDYUPS (833-843-9877)</strong> or <strong>(780) 718-5092</strong> and our team will return to re-clean the area free of charge.
+                    </p>
+                  </section>
+
+                  <section className="space-y-1.5">
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      6. Insurance, WCB Coverage &amp; Liability
+                    </h4>
+                    <p>
+                      833 TidyUps Cleaning Service Inc. maintains full $5M Commercial General Liability Insurance, WCB Alberta coverage, and background-verified staff. While our teams exercise the highest care, we are not responsible for pre-existing damage, unstable fixtures, or unsealed surfaces.
+                    </p>
+                  </section>
+                </div>
+              )}
+
+              {activeLegalModal === 'SUPPORT' && (
+                <div className="space-y-5">
+                  <div className="border-b border-slate-200 pb-4">
+                    <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black uppercase tracking-wider mb-1">
+                      Edmonton &amp; Area Customer Care
+                    </span>
+                    <h3 className="text-xl sm:text-2xl font-black text-slate-900">
+                      Customer Support &amp; Frequently Asked Questions
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Open 7 Days a Week • 7:00 AM – 8:00 PM MST • Same-Day &amp; Next-Day Bookings Available
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <a
+                      href="tel:18338439877"
+                      className="p-4 rounded-2xl bg-pink-50 border-2 border-pink-300 hover:border-pink-500 transition-all block"
+                    >
+                      <div className="text-[10px] font-black uppercase text-pink-700">Toll-Free Booking Line</div>
+                      <div className="text-base font-black text-slate-950 font-mono mt-0.5">1-833-TIDYUPS</div>
+                      <div className="text-xs font-bold text-slate-600">(833) 843-9877</div>
+                    </a>
+
+                    <a
+                      href="tel:7807185092"
+                      className="p-4 rounded-2xl bg-cyan-50 border-2 border-cyan-300 hover:border-cyan-500 transition-all block"
+                    >
+                      <div className="text-[10px] font-black uppercase text-cyan-800">Edmonton Local Office</div>
+                      <div className="text-base font-black text-slate-950 font-mono mt-0.5">(780) 718-5092</div>
+                      <div className="text-xs font-bold text-slate-600">Call or Text Dispatch</div>
+                    </a>
+
+                    <a
+                      href="mailto:cleaningserviceyeg@gmail.com"
+                      className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 hover:border-amber-500 transition-all block"
+                    >
+                      <div className="text-[10px] font-black uppercase text-amber-900">Customer Care Email</div>
+                      <div className="text-xs font-black text-slate-950 mt-1 break-all">cleaningserviceyeg@gmail.com</div>
+                      <div className="text-xs font-bold text-slate-600 mt-0.5">Fast Replies &amp; Quotes</div>
+                    </a>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <h4 className="font-black text-slate-900 text-sm">Do your cleaners bring all supplies and equipment?</h4>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Yes! Every 833 TidyUps team arrives fully stocked with commercial HEPA vacuums, microfiber mop systems, eco-friendly sanitizers, and kitchen/bathroom detailing supplies.
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <h4 className="font-black text-slate-900 text-sm">Do I need to be home during the clean?</h4>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Not at all! Most customers provide a door keypad code, lockbox code, or buzzer instruction in the Special Notes box when booking. All cleaners are background-checked and insured.
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <h4 className="font-black text-slate-900 text-sm">What happens right after I click &quot;Confirm &amp; Request Booking&quot;?</h4>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Your booking goes straight into our live dispatch schedule and Jobber system. You receive an instant confirmation Reference ID on screen, and our office confirms your exact arrival window!
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-100 border-t border-slate-200 px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="text-xs font-bold text-slate-600">
+                Questions? Call <a href="tel:18338439877" className="text-pink-600 font-black underline">1-833-TIDYUPS (833-843-9877)</a>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleOpenLegalModal(null)}
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-pink-600 to-cyan-600 hover:opacity-95 text-white font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+              >
+                <span>← Back to Customer Booking Sheet</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

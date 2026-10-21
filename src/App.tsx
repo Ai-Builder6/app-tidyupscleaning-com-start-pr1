@@ -1332,11 +1332,13 @@ export function App() {
         setScheduledJobsSubTab('UNSCHEDULED');
       } else if (path === '/staff' || hash === '#staff') {
         setIsStaffModalOpen(true);
-      } else if (path === '/support' || path === '/t&c' || path === '/privacy-policy') {
-        if (path === '/t&c') setActiveLegalTab('TERMS');
-        else if (path === '/privacy-policy') setActiveLegalTab('PRIVACY');
+      } else if (path === '/support' || path === '/t&c' || path === '/terms' || path === '/privacy-policy' || path === '/privacy') {
+        if (path === '/t&c' || path === '/terms') setActiveLegalTab('TERMS');
+        else if (path === '/privacy-policy' || path === '/privacy') setActiveLegalTab('PRIVACY');
         else setActiveLegalTab('SUPPORT');
-        setActiveTopView('LEGAL');
+        if (!isStandaloneBookingDomain) {
+          setActiveTopView('LEGAL');
+        }
       }
     }
 
