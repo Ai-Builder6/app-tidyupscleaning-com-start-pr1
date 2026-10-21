@@ -316,9 +316,43 @@ export function App() {
   const [chatRecipient, setChatRecipient] = useState<AppUser | null>(null);
   const [cleanerShowMap, setCleanerShowMap] = useState<boolean>(false);
 
-  // Authentication state: defaults to true so the dispatcher console & voice intake header links are immediately accessible
+  // Detect if visitor is on the dedicated customer booking domain (book.tidyupscleaning.com) or /book URL
+  const [isStandaloneBookingDomain] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const host = window.location.hostname.toLowerCase();
+      const path = window.location.pathname.toLowerCase();
+      const search = window.location.search.toLowerCase();
+      if (
+        host.startsWith('book.') ||
+        path === '/book' ||
+        path.startsWith('/book/') ||
+        search.includes('mode=customer') ||
+        search.includes('booking=1')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  // Allows the owner inside the staff app to test the locked 1-page customer view
+  const [isCustomerLockPreview, setIsCustomerLockPreview] = useState<boolean>(false);
+
+  // Authentication state: false on book.tidyupscleaning.com so customers never see staff tools; true on app.tidyupscleaning.com
   const [isStaffAuthenticated, setIsStaffAuthenticated] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
+      const host = window.location.hostname.toLowerCase();
+      const path = window.location.pathname.toLowerCase();
+      const search = window.location.search.toLowerCase();
+      if (
+        host.startsWith('book.') ||
+        path === '/book' ||
+        path.startsWith('/book/') ||
+        search.includes('mode=customer') ||
+        search.includes('booking=1')
+      ) {
+        return false;
+      }
       try {
         const stored = localStorage.getItem('tidyups_staff_authenticated');
         if (stored === 'false') return false;
@@ -1919,7 +1953,13 @@ export function App() {
       }}
     >
       <div id="cleaning-dispatch-app" className="w-screen h-screen bg-slate-50 text-slate-900 font-sans select-none overflow-x-auto overflow-y-auto">
-        <div className="min-w-[1380px] min-h-full h-full flex flex-col">
+        <div
+          className={`${
+            isStandaloneBookingDomain || isCustomerLockPreview || activeTopView === 'CUSTOMER_PORTAL'
+              ? 'w-full'
+              : 'min-w-[1380px]'
+          } min-h-full h-full flex flex-col`}
+        >
         {/* Quota banner suppressed so map operates cleanly without warnings */}
 
         {/* Full-Screen Zen Mode Exit Pill */}
@@ -1936,8 +1976,8 @@ export function App() {
           </div>
         )}
 
-        {/* Customer Portal Top Bar (for Public Customers & Non-Staff Visitors) */}
-        {!isZenMode && !isStaffAuthenticated && (
+        {/* Customer Portal Top Bar (Hidden on book.tidyupscleaning.com and Customer Lock Mode since CustomerPortalView has its own dedicated 833 TidyUps header) */}
+        {!isZenMode && !isStaffAuthenticated && !isStandaloneBookingDomain && !isCustomerLockPreview && activeTopView !== 'CUSTOMER_PORTAL' && (
           <header
             id="customer-header"
             className="h-16 px-3 sm:px-6 bg-white border-b border-slate-200 flex items-center justify-between flex-shrink-0 z-20 shadow-xs gap-3"
@@ -2046,8 +2086,8 @@ export function App() {
           </header>
         )}
 
-        {/* Global Top Application Navigation Bar (Only for Authenticated Staff) */}
-        {!isZenMode && isStaffAuthenticated && (
+        {/* Global Top Application Navigation Bar (Only for Authenticated Staff & Hidden in Customer Lock Mode) */}
+        {!isZenMode && isStaffAuthenticated && !isStandaloneBookingDomain && !isCustomerLockPreview && (
           <header
             id="global-header"
             className="h-14 min-h-[56px] landscape:max-md:h-11 landscape:max-md:min-h-[44px] px-2 sm:px-3 md:px-4 lg:px-5 bg-white border-b border-slate-200 flex items-center justify-between flex-shrink-0 z-20 shadow-xs gap-1.5 sm:gap-2.5 md:gap-3 overflow-x-auto"
@@ -2678,41 +2718,56 @@ export function App() {
           </header>
         )}
 
-        {/* Unauthenticated public visitors are restricted to the Customer Booking Portal, Support/Legal, or Spam Shield */}
-        {!isStaffAuthenticated && activeTopView !== 'LEGAL' && activeTopView !== 'SPAM_SHIELD' ? (
+        {/* Standalone Customer Booking Domain (book.tidyupscleaning.com) or Unauthenticated Visitors or Customer Portal Tab */}
+        {isStandaloneBookingDomain || isCustomerLockPreview || (!isStaffAuthenticated && activeTopView !== 'LEGAL' && activeTopView !== 'SPAM_SHIELD') || activeTopView === 'CUSTOMER_PORTAL' ? (
           <CustomerPortalView
             projectId={activeBrandId}
-            onBookingSubmitted={(ticket) => {
+            isStandaloneCustomerSite={isStandaloneBookingDomain}
+            isCustomerLockPreview={isCustomerLockPreview}
+            onToggleCustomerLockPreview={(locked) => setIsCustomerLockPreview(locked)}
+            serviceCatalog={serviceCatalog}
+            onLeadsReconnected={(reconnected) => {
+              if (Array.isArray(reconnected.leads)) setLeadsList(reconnected.leads);
+              if (Array.isArray(reconnected.clients)) setClientsList(reconnected.clients);
+              if (Array.isArray(reconnected.quotes)) setQuotesList(dedupeQuotesList(reconnected.quotes));
+            }}
+            onBookingSubmitted={(ticket, fullPayload) => {
               setTickets((prev) => [ticket, ...prev]);
               saveStateToStore([ticket, ...tickets]);
-            }}
-            onNavigateToMap={() => setIsRoleModalOpen(true)}
-            onOpenPhoneModal={() => setIsQuoModalOpen(true)}
-            onOpenStaffLogin={() => setIsRoleModalOpen(true)}
-            onOpenSpamShield={handleOpenSpamShield}
-            onOpenVoiceIntake={() => {
-              setIsStaffAuthenticated(true);
-              setActiveTopView('QUICK_QUOTE');
-            }}
-          />
-        ) : activeTopView === 'CUSTOMER_PORTAL' ? (
-          <CustomerPortalView
-            projectId={activeBrandId}
-            onBookingSubmitted={(ticket) => {
-              setTickets((prev) => [ticket, ...prev]);
-              saveStateToStore([ticket, ...tickets]);
+              if (fullPayload?.lead) {
+                setLeadsList((prev) => [fullPayload.lead, ...prev]);
+              }
+              if (fullPayload?.client) {
+                setClientsList((prev) => [fullPayload.client, ...prev]);
+                saveClientToFirestore(fullPayload.client).catch(() => {});
+              }
+              if (fullPayload?.quote) {
+                setQuotesList((prev) => dedupeQuotesList([fullPayload.quote, ...prev]));
+                saveQuoteToFirestore(fullPayload.quote).catch(() => {});
+              }
+              if (fullPayload?.visit) {
+                setScheduledJobsList((prev) => [fullPayload.visit, ...prev]);
+                saveScheduledVisitToFirestore(fullPayload.visit).catch(() => {});
+              }
             }}
             onNavigateToMap={() => {
+              if (isStandaloneBookingDomain) return;
               if (isStaffAuthenticated) {
                 setActiveTopView('MAP');
               } else {
                 setIsRoleModalOpen(true);
               }
             }}
-            onOpenPhoneModal={() => setIsQuoModalOpen(true)}
-            onOpenStaffLogin={() => setIsRoleModalOpen(true)}
-            onOpenSpamShield={handleOpenSpamShield}
-            onOpenVoiceIntake={() => setActiveTopView('QUICK_QUOTE')}
+            onOpenPhoneModal={() => {
+              if (!isStandaloneBookingDomain) setIsQuoModalOpen(true);
+            }}
+            onOpenStaffLogin={() => {
+              if (!isStandaloneBookingDomain) setIsRoleModalOpen(true);
+            }}
+            onOpenSpamShield={!isStandaloneBookingDomain ? handleOpenSpamShield : undefined}
+            onOpenVoiceIntake={() => {
+              if (!isStandaloneBookingDomain) setActiveTopView('QUICK_QUOTE');
+            }}
           />
         ) : activeTopView === 'ADDRESS_SEARCH' ? (
           <QuickMapScheduleRadarView
@@ -3287,8 +3342,8 @@ export function App() {
         </main>
         )}
 
-        {/* Global Quick-Link Footer Bar (Buttons moved to Right-Hand Side by default + Management & Block Spam Caller + Rearrangeable Left-to-Right) */}
-        {!isZenMode && (
+        {/* Global Quick-Link Footer Bar (Hidden on book.tidyupscleaning.com and Customer Lock Preview so customers cannot access staff tools) */}
+        {!isZenMode && !isStandaloneBookingDomain && !isCustomerLockPreview && (
           <footer
             id="global-footer"
             className={`min-h-[44px] py-1.5 bg-slate-900 text-slate-300 flex flex-wrap items-center px-3 sm:px-5 justify-between gap-2 text-xs shrink-0 font-medium z-30 border-t border-slate-700 shadow-lg ${

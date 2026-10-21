@@ -267,7 +267,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const [isCreatingDriveSheet, setIsCreatingDriveSheet] = useState(false);
   const [isSyncingDriveSheet, setIsSyncingDriveSheet] = useState(false);
   const [isDownloadingFile, setIsDownloadingFile] = useState<'XLSX' | 'CSV' | null>(null);
-  const [showAdsConnectPanel, setShowAdsConnectPanel] = useState(false);
+  const [showAdsConnectPanel, setShowAdsConnectPanel] = useState(true);
+  const [isReconnectingSheets, setIsReconnectingSheets] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [confirmDriveSyncModal, setConfirmDriveSyncModal] = useState(false);
 
@@ -504,6 +505,39 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     navigator.clipboard.writeText(text);
     setCopiedField(key);
     setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const handleReconnectAndPullSheets = async () => {
+    setIsReconnectingSheets(true);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/leads/reconnect-sheets?project=${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-project-id': projectId },
+        body: JSON.stringify({ sheetUrl: googleSheetUrl }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (Array.isArray(data.leads)) {
+          setLeadsList(data.leads);
+          if (onLeadsUpdated) onLeadsUpdated(data.leads);
+        }
+        if (Array.isArray(data.clients) && onClientsUpdated) {
+          onClientsUpdated(data.clients);
+        }
+        if (Array.isArray(data.quotes) && onQuotesUpdated) {
+          onQuotesUpdated(data.quotes);
+        }
+        setNotice(
+          data.message ||
+            '✓ Reconnected Facebook Lead Ads, Google Ads Webhooks & Customer Booking Domain (book.tidyupscleaning.com)!'
+        );
+      }
+    } catch (err: any) {
+      setNotice(`Reconnect error: ${err?.message}`);
+    } finally {
+      setIsReconnectingSheets(false);
+    }
   };
 
   const handleSendTestWebhookLead = async (platform: 'Facebook Leads' | 'Google Leads') => {
@@ -1171,20 +1205,35 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
           </div>
         </div>
 
-        {/* Collapsible Facebook Lead Ads & Google Ads Connection Panel */}
+        {/* Collapsible Facebook Lead Ads, Google Ads & book.tidyupscleaning.com Connection Panel */}
         {showAdsConnectPanel && (
           <div className="mt-3 pt-3 border-t border-slate-800 bg-[#0d111c] rounded-xl p-4 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-2">
                   <Globe className="w-4 h-4 text-blue-400" />
-                  <span>Connect Facebook Lead Ads &amp; Google Ads to Your Active Sheet</span>
+                  <span>
+                    Reconnect Facebook Lead Ads, Google Ads &amp; Customer Booking Site (book.tidyupscleaning.com)
+                  </span>
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Use these exact details in Meta Lead Ads, Google Ads Lead Form Extensions, Zapier, or Make.com to stream new ad leads straight into your Google Sheet and this dashboard.
+                  Send Facebook Ads &amp; Google Ads traffic directly to <strong className="text-cyan-300">book.tidyupscleaning.com</strong> or connect your Meta / Google Ads Webhooks &amp; Google Sheets below so every lead is captured automatically.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleReconnectAndPullSheets}
+                  disabled={isReconnectingSheets}
+                  className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-[11px] font-black flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isReconnectingSheets ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isReconnectingSheets
+                      ? 'Reconnecting & Pulling Sheet...'
+                      : '🔄 Reconnect FB & Google Leads + Pull Sheet'}
+                  </span>
+                </button>
                 <button
                   type="button"
                   onClick={() => handleSendTestWebhookLead('Facebook Leads')}
@@ -1202,11 +1251,50 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-              {/* 1. Active Spreadsheet ID */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+              {/* 1. Direct Customer Booking Site & Ad Landing URLs */}
+              <div className="p-3 rounded-xl bg-[#131724] border border-cyan-500/40 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-cyan-300">
+                    1. Customer Booking Domain (Ad Landing Page)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyHelper('bookUrl', 'https://book.tidyupscleaning.com')}
+                    className="text-[11px] text-cyan-400 hover:underline font-bold cursor-pointer"
+                  >
+                    {copiedField === 'bookUrl' ? 'Copied!' : 'Copy URL'}
+                  </button>
+                </div>
+                <div className="font-mono text-[11px] text-cyan-200 bg-[#0b0e17] px-2.5 py-1.5 rounded border border-slate-800 truncate">
+                  https://book.tidyupscleaning.com
+                </div>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyHelper('fbBookUrl', 'https://book.tidyupscleaning.com/?source=facebook')
+                    }
+                    className="px-2 py-0.5 rounded bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-[10px] font-bold text-blue-200 cursor-pointer"
+                  >
+                    {copiedField === 'fbBookUrl' ? 'Copied FB URL!' : 'Copy FB Ad Link'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyHelper('googBookUrl', 'https://book.tidyupscleaning.com/?source=google')
+                    }
+                    className="px-2 py-0.5 rounded bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-[10px] font-bold text-emerald-200 cursor-pointer"
+                  >
+                    {copiedField === 'googBookUrl' ? 'Copied Google URL!' : 'Copy Google Ad Link'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Active Spreadsheet ID */}
               <div className="p-3 rounded-xl bg-[#131724] border border-slate-800 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-400">1. Active Spreadsheet ID</span>
+                  <span className="text-[11px] font-bold text-slate-400">2. Active Spreadsheet ID</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -1231,11 +1319,11 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 </p>
               </div>
 
-              {/* 2. Direct Inbound Webhook URL */}
+              {/* 3. Direct Inbound Webhook URL */}
               <div className="p-3 rounded-xl bg-[#131724] border border-slate-800 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-400">
-                    2. Direct FB / Google Ads Webhook URL
+                    3. Direct FB / Google Ads Webhook URL
                   </span>
                   <button
                     type="button"
@@ -1249,15 +1337,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   {webhookUrl}
                 </div>
                 <p className="text-[10px] text-slate-400">
-                  Paste in Google Ads Lead Form Webhook or Zapier/Make POST action.
+                  Supports Meta hub.challenge GET verification &amp; Google Ads POST.
                 </p>
               </div>
 
-              {/* 3. 20-Column Lead Schema */}
+              {/* 4. 20-Column Lead Schema */}
               <div className="p-3 rounded-xl bg-[#131724] border border-slate-800 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-400">
-                    3. 20-Column Ad Lead Headers
+                    4. 20-Column Ad Lead Headers
                   </span>
                   <button
                     type="button"
