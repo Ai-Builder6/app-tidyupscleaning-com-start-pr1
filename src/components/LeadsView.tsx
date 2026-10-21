@@ -1256,24 +1256,24 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               <div className="p-3 rounded-xl bg-[#131724] border border-cyan-500/40 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-cyan-300">
-                    1. Customer Booking Domain (Ad Landing Page)
+                    1. Locked Customer Booking Page (/book)
                   </span>
                   <button
                     type="button"
-                    onClick={() => handleCopyHelper('bookUrl', 'https://book.tidyupscleaning.com')}
+                    onClick={() => handleCopyHelper('bookUrl', 'https://app.tidyupscleaning.com/book')}
                     className="text-[11px] text-cyan-400 hover:underline font-bold cursor-pointer"
                   >
                     {copiedField === 'bookUrl' ? 'Copied!' : 'Copy URL'}
                   </button>
                 </div>
                 <div className="font-mono text-[11px] text-cyan-200 bg-[#0b0e17] px-2.5 py-1.5 rounded border border-slate-800 truncate">
-                  https://book.tidyupscleaning.com
+                  https://app.tidyupscleaning.com/book
                 </div>
                 <div className="flex items-center gap-1.5 pt-0.5">
                   <button
                     type="button"
                     onClick={() =>
-                      handleCopyHelper('fbBookUrl', 'https://book.tidyupscleaning.com/?source=facebook')
+                      handleCopyHelper('fbBookUrl', 'https://app.tidyupscleaning.com/book?source=facebook')
                     }
                     className="px-2 py-0.5 rounded bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-[10px] font-bold text-blue-200 cursor-pointer"
                   >
@@ -1282,7 +1282,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      handleCopyHelper('googBookUrl', 'https://book.tidyupscleaning.com/?source=google')
+                      handleCopyHelper('googBookUrl', 'https://app.tidyupscleaning.com/book?source=google')
                     }
                     className="px-2 py-0.5 rounded bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-[10px] font-bold text-emerald-200 cursor-pointer"
                   >

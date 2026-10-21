@@ -331,21 +331,18 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     if (typeof window !== 'undefined') {
       try {
         const currentUrl = new URL(window.location.href);
+        const pathLower = currentUrl.pathname.toLowerCase();
+        const isBookSubpath = pathLower === '/book' || pathLower.startsWith('/book/');
+        const basePrefix = isBookSubpath ? '/book' : '';
         if (tab === 'PRIVACY') {
-          window.history.replaceState({}, '', `/privacy-policy${currentUrl.search}`);
+          window.history.replaceState({}, '', `${basePrefix}/privacy-policy${currentUrl.search}`);
         } else if (tab === 'TERMS') {
-          window.history.replaceState({}, '', `/terms${currentUrl.search}`);
+          window.history.replaceState({}, '', `${basePrefix}/terms${currentUrl.search}`);
         } else if (tab === 'SUPPORT') {
-          window.history.replaceState({}, '', `/support${currentUrl.search}`);
+          window.history.replaceState({}, '', `${basePrefix}/support${currentUrl.search}`);
         } else {
-          const cleanPath =
-            currentUrl.pathname.includes('privacy') ||
-            currentUrl.pathname.includes('terms') ||
-            currentUrl.pathname.includes('t&c') ||
-            currentUrl.pathname.includes('support')
-              ? '/'
-              : currentUrl.pathname;
-          window.history.replaceState({}, '', `${cleanPath}${currentUrl.search}`);
+          const fallbackRoot = isBookSubpath ? '/book' : '/';
+          window.history.replaceState({}, '', `${fallbackRoot}${currentUrl.search}`);
         }
       } catch {
         // Ignore history state errors in sandboxed iframes
@@ -761,32 +758,32 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           <div className="max-w-7xl mx-auto flex flex-col xl:flex-row xl:items-center justify-between gap-3">
             <div className="flex items-start sm:items-center gap-3 flex-wrap">
               <span className="px-2.5 py-1 rounded-full bg-gradient-to-r from-cyan-400 to-teal-400 text-slate-950 text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
-                <Globe className="w-3.5 h-3.5" />
-                <span>book.tidyupscleaning.com Ready</span>
+                <Lock className="w-3.5 h-3.5" />
+                <span>Locked Customer Page (/book)</span>
               </span>
               <div className="text-xs text-slate-200">
-                <strong className="text-amber-300">Customer-Only 1-Page Booking Site:</strong> Customers sent to{' '}
+                <strong className="text-amber-300">Customer-Only Locked Booking Link:</strong> Send customers to{' '}
                 <code className="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono font-bold">
-                  book.tidyupscleaning.com
+                  https://app.tidyupscleaning.com/book
                 </code>{' '}
-                are <strong>locked strictly to this 1-page booking sheet</strong> (they cannot see or use the rest of your app), while every booking &amp; Facebook/Google lead goes straight into your <strong>Master Leads &amp; Quotes Table</strong>!
+                — visitors on <code>/book</code> are <strong>100% blocked from the rest of your app</strong> and can only use this 1-page booking sheet, while all bookings &amp; leads sync straight into your <strong>Master Leads &amp; Quotes Table</strong>!
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => handleCopyBookingLink('main', 'https://book.tidyupscleaning.com')}
+                onClick={() => handleCopyBookingLink('main', 'https://app.tidyupscleaning.com/book')}
                 className="px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
-                title="Copy https://book.tidyupscleaning.com to send to customers"
+                title="Copy https://app.tidyupscleaning.com/book to send to customers"
               >
                 {copiedLinkKey === 'main' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedLinkKey === 'main' ? 'Copied book.tidyupscleaning.com!' : 'Copy Customer Link (book.tidyupscleaning.com)'}</span>
+                <span>{copiedLinkKey === 'main' ? 'Copied /book Link!' : 'Copy Customer Link (app.tidyupscleaning.com/book)'}</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => handleCopyBookingLink('fb', 'https://book.tidyupscleaning.com/?source=facebook')}
+                onClick={() => handleCopyBookingLink('fb', 'https://app.tidyupscleaning.com/book?source=facebook')}
                 className="px-2.5 py-1.5 rounded-xl bg-[#1877F2] hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
                 title="Copy Facebook Ad Landing URL — auto-tags bookings under Facebook Leads"
               >
@@ -796,7 +793,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => handleCopyBookingLink('google', 'https://book.tidyupscleaning.com/?source=google')}
+                onClick={() => handleCopyBookingLink('google', 'https://app.tidyupscleaning.com/book?source=google')}
                 className="px-2.5 py-1.5 rounded-xl bg-[#0F9D58] hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
                 title="Copy Google Ad Landing URL — auto-tags bookings under Google Leads"
               >
@@ -806,7 +803,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => handleCopyBookingLink('privacy', 'https://book.tidyupscleaning.com/privacy-policy')}
+                onClick={() => handleCopyBookingLink('privacy', 'https://app.tidyupscleaning.com/book/privacy-policy')}
                 className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-cyan-400/50 text-cyan-300 font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
                 title="Copy Direct Privacy Policy URL for Facebook Ads, Google Ads & Twilio Compliance"
               >
@@ -816,7 +813,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => handleCopyBookingLink('terms', 'https://book.tidyupscleaning.com/terms')}
+                onClick={() => handleCopyBookingLink('terms', 'https://app.tidyupscleaning.com/book/terms')}
                 className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-pink-400/50 text-pink-300 font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
                 title="Copy Direct Terms & Conditions URL"
               >
