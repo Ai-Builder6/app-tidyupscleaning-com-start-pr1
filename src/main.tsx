@@ -1,7 +1,66 @@
-import React, {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
+import React, { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { APIProvider } from '@vis.gl/react-google-maps';
 import App from './App.tsx';
+import { CustomerPortalView } from './components/CustomerPortalView';
+import {
+  saveClientToFirestore,
+  saveQuoteToFirestore,
+  saveScheduledVisitToFirestore,
+} from './services/firestoreSync';
 import './index.css';
+
+function isDedicatedCustomerBookingRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = (window.location.hostname || '').toLowerCase();
+  const path = (window.location.pathname || '').toLowerCase();
+  const search = (window.location.search || '').toLowerCase();
+  if (
+    (window as any).__FORCE_CUSTOMER_BOOKING_ONLY__ ||
+    path === '/book' ||
+    path.startsWith('/book/') ||
+    path === '/customer-booking' ||
+    path.startsWith('/customer-booking/') ||
+    search.includes('mode=customer') ||
+    search.includes('booking=1') ||
+    host.startsWith('book.') ||
+    host.includes('book.tidyupscleaning')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+const StandaloneCustomerBookingPage: React.FC = () => {
+  const apiKey =
+    import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyC4kxdVgVTNm5ppd8IuK7rqq-Rz_EV31Ns';
+  return (
+    <APIProvider
+      apiKey={apiKey}
+      region="CA"
+      language="en"
+      solutionChannel="gmp_mcp_codeassist_v1_aistudio"
+    >
+      <div className="w-screen h-screen overflow-y-auto overflow-x-hidden bg-slate-50 text-slate-900 font-sans">
+        <CustomerPortalView
+          projectId="tidyups"
+          isStandaloneCustomerSite={true}
+          onBookingSubmitted={(_ticket, fullPayload) => {
+            if (fullPayload?.client) {
+              saveClientToFirestore(fullPayload.client).catch(() => {});
+            }
+            if (fullPayload?.quote) {
+              saveQuoteToFirestore(fullPayload.quote).catch(() => {});
+            }
+            if (fullPayload?.visit) {
+              saveScheduledVisitToFirestore(fullPayload.visit).catch(() => {});
+            }
+          }}
+        />
+      </div>
+    </APIProvider>
+  );
+};
 
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -138,8 +197,9 @@ if (typeof window !== 'undefined') {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <RootErrorBoundary>
-      <App />
+      {isDedicatedCustomerBookingRoute() ? <StandaloneCustomerBookingPage /> : <App />}
     </RootErrorBoundary>
-  </StrictMode>,
+  </StrictMode>
 );
+
 

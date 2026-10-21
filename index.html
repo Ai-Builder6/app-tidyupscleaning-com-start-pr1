@@ -3,13 +3,45 @@
   <head>
     <meta charset="UTF-8" />
     <script>
-      // 1. Immediately unregister any stale Service Workers & clear old Workbox precaches to prevent blank white pages after deploys
+      // 1. Detect dedicated Customer-Only Booking Page (/book, /customer-booking, ?booking=1, or book.* domain) before React mounts
       (function() {
         try {
+          var host = (window.location.hostname || '').toLowerCase();
+          var path = (window.location.pathname || '').toLowerCase();
+          var search = (window.location.search || '').toLowerCase();
+          if (
+            path === '/book' ||
+            path.indexOf('/book/') === 0 ||
+            path === '/customer-booking' ||
+            path.indexOf('/customer-booking/') === 0 ||
+            search.indexOf('mode=customer') !== -1 ||
+            search.indexOf('booking=1') !== -1 ||
+            host.indexOf('book.') === 0 ||
+            host.indexOf('book.tidyupscleaning') !== -1
+          ) {
+            window.__FORCE_CUSTOMER_BOOKING_ONLY__ = true;
+            document.title = '833 TidyUps Cleaning Service — Online Customer Booking';
+          }
+
           if ('serviceWorker' in navigator) {
             navigator.serviceWorker.getRegistrations().then(function(registrations) {
-              for (var i = 0; i < registrations.length; i++) {
-                registrations[i].unregister();
+              if (registrations && registrations.length > 0) {
+                var unregisterPromises = [];
+                for (var i = 0; i < registrations.length; i++) {
+                  unregisterPromises.push(registrations[i].unregister());
+                }
+                Promise.all(unregisterPromises).then(function() {
+                  if ('caches' in window && window.caches) {
+                    return caches.keys().then(function(keys) {
+                      return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+                    });
+                  }
+                }).then(function() {
+                  if (!sessionStorage.getItem('tidyups_sw_purged_v2')) {
+                    sessionStorage.setItem('tidyups_sw_purged_v2', '1');
+                    window.location.reload();
+                  }
+                }).catch(function() {});
               }
             }).catch(function() {});
           }
