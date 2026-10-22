@@ -6827,12 +6827,16 @@ app.post("/api/quick-quote/save", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Public Customer-Facing Booking Intake Endpoint (For book.tidyupscleaning.com)
-// Automatically saves to:
+// Public Customer-Facing Booking Intake Endpoint
+// Powers both:
+//   - https://app.tidyupscleaning.com/booking (Simple 3-Option Form: Move-Out, Basic, Deep)
+//   - https://app.tidyupscleaning.com/book    (Interactive Quote Calculator Variation)
+//   - In-App "Book Online" Popup Form
+// Automatically uses the canonical Jobber Service Catalog (matchCatalogItem) and saves to:
 // 1. Master Leads & Quotes Table / Clean Google Sheet (store.adLeads)
 // 2. Clients Database (store.clients)
-// 3. Jobber Quotes Ledger (store.quotes)
-// 4. Schedule Visits (store.scheduledVisits)
+// 3. Jobber Quotes Ledger (store.quotes) with exact catalog QTY × Unit Price line items
+// 4. Schedule Visits & Unscheduled Jobs (store.scheduledVisits & store.unscheduledJobs)
 // 5. Dispatch Tickets / Intakes (store.tickets)
 // ─────────────────────────────────────────────────────────────────────────────
 app.post("/api/public/book", async (req, res) => {
@@ -6858,18 +6862,35 @@ app.post("/api/public/book", async (req, res) => {
       specialInstructions,
       heardAbout,
       utmSource,
+      bookingFormVariant,
     } = req.body || {};
 
     if (!customerName || !customerPhone || !address) {
       return res.status(400).json({ error: "Name, phone, and address are required." });
     }
 
+    // Normalize the 3 core customer service options ("Move out", "Basic", "Deep")
+    const rawServiceStr = String(serviceType || "Move-Out Cleaning").trim();
+    const lowerService = rawServiceStr.toLowerCase();
+    const canonicalServiceLabel =
+      lowerService.includes("move")
+        ? "Move-Out Cleaning"
+        : lowerService.includes("deep")
+        ? "Deep Cleaning"
+        : lowerService.includes("post") || lowerService.includes("reno") || lowerService.includes("construction")
+        ? "Post-Construction Cleaning"
+        : "Basic Cleaning";
+
+    // Map "Basic Cleaning" to "Standard Cleaning" for catalog lookup while keeping clear label
+    const catalogLookupService =
+      canonicalServiceLabel === "Basic Cleaning" ? "Standard Cleaning" : canonicalServiceLabel;
+
     const cleanPhone = normalizePhoneNumber(String(customerPhone));
     const ticketId = `ticket-${Date.now().toString(36)}`;
     const randomSuffix = Math.floor(10000 + Math.random() * 90000);
-    const jobberJobId = `JOB-${randomSuffix}`;
-    const quoteNumber = `QT-${Math.floor(4385 + Math.random() * 500)}`;
-    const quoteId = `quote_local_${Date.now()}`;
+    let jobberJobId = `JOB-${randomSuffix}`;
+    let quoteNumber = `QT-${Math.floor(4385 + Math.random() * 500)}`;
+    let quoteId = `quote_local_${Date.now()}`;
 
     // Geocode or determine accurate coordinates in Edmonton
     const coords = resolveEdmontonCoords(address);
@@ -6898,47 +6919,182 @@ app.post("/api/public/book", async (req, res) => {
     const assignedCrew = picked.name;
 
     const curStore = loadStore(projectId) || loadStore("tidyups");
-    const catalog = curStore?.serviceCatalog || CANONICAL_SERVICE_CATALOG;
-    const matchedCatalog = matchCatalogItem(serviceType, bedrooms, bathrooms, catalog);
+    const catalog: ServiceCatalogItem[] =
+      Array.isArray(curStore?.serviceCatalog) && curStore.serviceCatalog.length > 0
+        ? curStore.serviceCatalog
+        : CANONICAL_SERVICE_CATALOG;
+
+    const requestedCrewNum = Number(cleanerCount) >= 1 && Number(cleanerCount) <= 3 ? Number(cleanerCount) : undefined;
+    const matchedCatalog = matchCatalogItem(
+      catalogLookupService,
+      bedrooms || "3 Bedrooms",
+      bathrooms || "2 Bathrooms",
+      catalog,
+      requestedCrewNum
+    );
+
+    const resolvedCrewCount = matchedCatalog?.cleanersCount || requestedCrewNum || 2;
+    const crewLabel = `${resolvedCrewCount} Cleaner${resolvedCrewCount > 1 ? "s" : ""}`;
+    const itemQty = matchedCatalog?.quantity || matchedCatalog?.baseHours || 3;
+    const itemUnitPrice = matchedCatalog?.unitPrice || 105;
+    const catalogBaseTotal =
+      matchedCatalog?.total ||
+      matchedCatalog?.basePrice ||
+      Math.round(itemQty * itemUnitPrice * 100) / 100;
+
+    // Match any selected add-ons directly from the Service Catalog
+    const addonsList = Array.isArray(selectedAddons) ? selectedAddons : [];
+    const addonLineItems: Array<{
+      name: string;
+      description: string;
+      quantity: number;
+      unitPrice: number;
+      total: number;
+      taxable: boolean;
+    }> = [];
+
+    for (const addonRaw of addonsList) {
+      const addonStr = String(addonRaw || "").trim();
+      if (!addonStr) continue;
+      const foundCatalogAddon = catalog.find(
+        (c) =>
+          c.isAddon &&
+          (c.id.toLowerCase() === addonStr.toLowerCase() ||
+            c.name.toLowerCase().includes(addonStr.toLowerCase()) ||
+            c.shortName.toLowerCase().includes(addonStr.toLowerCase()))
+      );
+      if (foundCatalogAddon) {
+        addonLineItems.push({
+          name: foundCatalogAddon.jobberItemName || foundCatalogAddon.name,
+          description: foundCatalogAddon.description || foundCatalogAddon.name,
+          quantity: foundCatalogAddon.quantity || 1,
+          unitPrice: foundCatalogAddon.unitPrice || foundCatalogAddon.total || 35,
+          total: foundCatalogAddon.total || foundCatalogAddon.basePrice || 35,
+          taxable: foundCatalogAddon.taxable !== false,
+        });
+      }
+    }
+
+    const addonsSubtotal = addonLineItems.reduce((sum, item) => sum + item.total, 0);
+    const freqLabel = frequency || "One-Time";
+    const discountMultiplier =
+      String(freqLabel).includes("15%")
+        ? 0.85
+        : String(freqLabel).includes("10%")
+        ? 0.9
+        : String(freqLabel).includes("5%")
+        ? 0.95
+        : 1.0;
+
+    const discountedBaseTotal = Math.round(catalogBaseTotal * discountMultiplier * 100) / 100;
+    const computedSubtotal = Math.round((discountedBaseTotal + addonsSubtotal) * 100) / 100;
 
     const baseSub =
-      Number(estimatedSubtotal) > 0
-        ? Number(estimatedSubtotal)
-        : matchedCatalog?.basePrice || 210;
+      Number(estimatedSubtotal) > 0 ? Number(estimatedSubtotal) : computedSubtotal;
     const totalWithTax =
       Number(estimatedTotal) > 0
         ? Number(estimatedTotal)
         : Math.round(baseSub * 1.05 * 100) / 100;
     const taxAmount = Math.round((totalWithTax - baseSub) * 100) / 100;
+    const depositRequired = matchedCatalog?.depositRequired || 100;
 
-    const addonsList = Array.isArray(selectedAddons) ? selectedAddons : [];
-    const crewLabel = cleanerCount ? `${cleanerCount} Cleaner${Number(cleanerCount) > 1 ? "s" : ""}` : "1 Pro Cleaner";
-    const freqLabel = frequency || "One-Time";
     const reqDate = preferredDate || new Date().toISOString().slice(0, 10);
+    const routePathLabel = bookingFormVariant === "CALCULATOR" ? "app.tidyupscleaning.com/book" : "app.tidyupscleaning.com/booking";
 
     // Determine source tab for Master Leads & Quotes Table (Facebook Leads, Google Leads, or Website Booking)
-    const rawOriginSource = String(utmSource || heardAbout || "book.tidyupscleaning.com");
-    const { source: resolvedSource, sourceTab: resolvedSourceTab } = resolveCleanSheetTab(rawOriginSource);
+    const rawOriginSource = String(utmSource || heardAbout || routePathLabel);
+    const { sourceTab: resolvedSourceTab } = resolveCleanSheetTab(rawOriginSource);
 
     const fullDetailsNote = [
-      `Booked on book.tidyupscleaning.com (${freqLabel} • ${crewLabel})`,
+      `Online Booking (${routePathLabel} • ${canonicalServiceLabel} • ${crewLabel})`,
+      `Home Size: ${bedrooms || "3 Bedrooms"}, ${bathrooms || "2 Bathrooms"}`,
+      `Catalog Package: ${matchedCatalog?.jobberItemName || canonicalServiceLabel} (${itemQty} hrs × $${itemUnitPrice.toFixed(2)} = $${catalogBaseTotal.toFixed(2)})`,
       `Preferred Date: ${reqDate} (${preferredTime || "Morning 8:00 AM - 12:00 PM"})`,
-      addonsList.length > 0 ? `Add-ons: ${addonsList.join(", ")}` : "",
+      addonsLineSummary(addonLineItems, addonsList),
       specialInstructions ? `Customer Notes: ${specialInstructions}` : "",
       heardAbout ? `Source: ${heardAbout}` : "",
     ]
       .filter(Boolean)
       .join(" | ");
 
+    function addonsLineSummary(
+      items: Array<{ name: string; total: number }>,
+      rawIds: string[]
+    ): string {
+      if (items.length > 0) {
+        return `Add-ons: ${items.map((i) => `${i.name} ($${i.total.toFixed(2)})`).join(", ")}`;
+      }
+      if (rawIds.length > 0) {
+        return `Add-ons: ${rawIds.join(", ")}`;
+      }
+      return "";
+    }
+
+    const quoteLineItems = [
+      {
+        name:
+          matchedCatalog?.jobberItemName ||
+          `${bedrooms || "3Bed"} ${bathrooms || "2Bath"} ${canonicalServiceLabel} (${crewLabel})`,
+        description:
+          matchedCatalog?.description ||
+          `${canonicalServiceLabel} for ${bedrooms || "3 Bedrooms"}, ${bathrooms || "2 Bathrooms"} (${crewLabel})`,
+        quantity: itemQty,
+        unitPrice:
+          discountMultiplier < 1
+            ? Math.round(itemUnitPrice * discountMultiplier * 100) / 100
+            : itemUnitPrice,
+        total: discountedBaseTotal,
+        taxable: true,
+      },
+      ...addonLineItems,
+    ];
+
+    // Push Quote to Jobber if connected so the quote is immediately live in Jobber
+    let jobberWebUri = "https://secure.getjobber.com/quotes";
+    let clientHubUri: string | undefined;
+    let jobberClientId: string | undefined;
+    try {
+      const pushRes = await pushQuoteToJobber(
+        {
+          clientName: customerName,
+          clientPhone: cleanPhone,
+          clientEmail: customerEmail || "",
+          serviceAddress: `${address}, ${city || "Edmonton"}, AB`,
+          service: `${canonicalServiceLabel} (${bedrooms || "3 Bedrooms"}, ${bathrooms || "2 Bathrooms"})`,
+          total: totalWithTax,
+          depositRequired,
+          notes: fullDetailsNote,
+          lineItems: quoteLineItems.map((li) => ({
+            description: `${li.name} — ${li.description}`,
+            quantity: li.quantity,
+            unitPrice: li.unitPrice,
+            total: li.total,
+          })),
+        },
+        jobberConfig.accessToken,
+        getJobberCreds()
+      );
+      if (pushRes?.jobberQuoteId) quoteId = pushRes.jobberQuoteId;
+      if (pushRes?.quoteNumber) quoteNumber = pushRes.quoteNumber;
+      if (pushRes?.jobberWebUri) jobberWebUri = pushRes.jobberWebUri;
+      if (pushRes?.clientHubUri) clientHubUri = pushRes.clientHubUri;
+      if (pushRes?.jobberClientId) jobberClientId = pushRes.jobberClientId;
+    } catch (e) {
+      // Continues with local quote ID if Jobber API is offline
+    }
+
+    const totalSoloHours = Math.max(2, Math.round(itemQty * resolvedCrewCount));
+    const estDurationMinutes = Math.max(120, Math.round(itemQty * 60));
+
     const newTicket = {
       id: ticketId,
       customerName,
       customerPhone: cleanPhone,
       customerEmail: customerEmail || "",
-      equipmentType: serviceType || "Move-Out Cleaning",
+      equipmentType: canonicalServiceLabel,
       equipmentModel: `${bedrooms || "3 Bedrooms"} • ${bathrooms || "2 Bathrooms"} (${crewLabel})`,
       status: "ASSIGNED",
-      urgency: String(serviceType || "").toLowerCase().includes("move") ? "HIGH" : "MEDIUM",
+      urgency: canonicalServiceLabel === "Move-Out Cleaning" ? "HIGH" : "MEDIUM",
       location: {
         address,
         city: city || "Edmonton",
@@ -6947,49 +7103,43 @@ app.post("/api/public/book", async (req, res) => {
       },
       assignedTechnicianId: assignedTech,
       issueDescription: fullDetailsNote,
-      estimatedDurationMinutes: String(serviceType || "").toLowerCase().includes("move") ? 240 : 180,
+      estimatedDurationMinutes: estDurationMinutes,
       slaDeadline: reqDate,
       createdAt: new Date().toISOString(),
       jobberJobId,
-      source: "book.tidyupscleaning.com",
+      source: routePathLabel,
     };
 
     const newQuote = {
       id: quoteId,
       quoteNumber,
-      title: `${serviceType || "Residential Cleaning"} — ${bedrooms || "3 Bedrooms"}, ${bathrooms || "2 Bathrooms"}`,
+      title: `${canonicalServiceLabel} — ${bedrooms || "3 Bedrooms"}, ${bathrooms || "2 Bathrooms"}`,
       clientName: customerName,
       clientPhone: cleanPhone,
       clientEmail: customerEmail || "",
-      service: serviceType || "Residential Cleaning",
-      serviceAddress: address,
+      service: `${canonicalServiceLabel} (${bedrooms || "3 Bedrooms"}, ${bathrooms || "2 Bathrooms"})`,
+      serviceAddress: `${address}, ${city || "Edmonton"}`,
       bedrooms: bedrooms || "3 Bedrooms",
       bathrooms: bathrooms || "2 Bathrooms",
-      quoteStatus: "AWAITING_RESPONSE",
+      quoteStatus: "AWAITING_RESPONSE" as const,
       subtotal: baseSub,
       tax: taxAmount,
       total: totalWithTax,
-      depositRequired: 50,
+      depositRequired,
       createdAt: new Date().toISOString(),
       scheduledDate: reqDate,
       scheduledTime: preferredTime || "Morning (8:00 AM - 12:00 PM)",
       requestedDate: reqDate,
-      verdict: "Good lead",
+      verdict: "Good lead" as const,
       notes: fullDetailsNote,
-      isLocal: true,
+      isLocal: !String(quoteId).startsWith("Z2lkOi8v"),
       source: rawOriginSource,
+      jobberWebUri,
+      clientHubUri,
+      jobberClientId,
       googleSheetSynced: true,
       googleSheetUrl: googleSheetsSyncState.sheetUrl,
-      lineItems: [
-        {
-          name: matchedCatalog?.jobberItemName || `${bedrooms || "3Bed"} ${bathrooms || "2Bath"} ${serviceType || "Cleaning"} (${crewLabel})`,
-          description: fullDetailsNote,
-          quantity: 1,
-          unitPrice: baseSub,
-          total: baseSub,
-          taxable: true,
-        },
-      ],
+      lineItems: quoteLineItems,
     };
 
     const newLead = {
@@ -7000,7 +7150,7 @@ app.post("/api/public/book", async (req, res) => {
       address,
       city: city || "Edmonton",
       postalCode: postalCode || "",
-      serviceRequested: `${serviceType || "Residential Cleaning"} (${crewLabel})`,
+      serviceRequested: `${canonicalServiceLabel} (${bedrooms || "3 Bedrooms"}, ${bathrooms || "2 Bathrooms"})`,
       bedrooms: bedrooms || "3 Bedrooms",
       bathrooms: bathrooms || "2 Bathrooms",
       dateOfServiceRequested: reqDate,
@@ -7008,13 +7158,14 @@ app.post("/api/public/book", async (req, res) => {
         ? "Facebook Lead Ads"
         : resolvedSourceTab === "Google Leads"
         ? "Google Ads / Search"
-        : "Website Booking (book.tidyupscleaning.com)") as any,
+        : `Online Booking (${routePathLabel})`) as any,
       sourceTab: resolvedSourceTab,
-      campaignName: `book.tidyupscleaning.com (${heardAbout || "Direct Customer Booking"})`,
+      campaignName: `${routePathLabel} (${heardAbout || "Direct Online Booking"})`,
       dateReceived: new Date().toISOString(),
-      status: "New",
-      verdict: "Good lead",
-      isJobberSynced: false,
+      status: "Quoted" as any,
+      verdict: "Good lead" as const,
+      isJobberSynced: Boolean(jobberClientId),
+      jobberClientId,
       quoteId,
       quoteNumber,
       quotedAmount: totalWithTax,
@@ -7024,7 +7175,7 @@ app.post("/api/public/book", async (req, res) => {
     };
 
     const newClient = {
-      id: `cli-book-${Date.now().toString(36)}`,
+      id: jobberClientId || `cli-book-${Date.now().toString(36)}`,
       name: customerName,
       phone: cleanPhone,
       email: customerEmail || "",
@@ -7032,33 +7183,68 @@ app.post("/api/public/book", async (req, res) => {
       city: city || "Edmonton",
       province: "AB",
       postalCode: postalCode || "",
-      verdict: "Good lead",
-      tags: ["book.tidyupscleaning.com", "online-booking"],
-      isJobberLinked: false,
+      verdict: "Good lead" as const,
+      tags: [routePathLabel, "online-booking", canonicalServiceLabel.toLowerCase().replace(/\s+/g, "-")],
+      isJobberLinked: Boolean(jobberClientId),
+      jobberClientId,
       totalJobs: 1,
       latestServiceDate: reqDate,
       notes: fullDetailsNote,
-      source: "book.tidyupscleaning.com",
+      source: routePathLabel,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
+    const startHour = String(preferredTime || "").toLowerCase().includes("afternoon")
+      ? 13
+      : String(preferredTime || "").toLowerCase().includes("evening")
+      ? 16
+      : 9;
+    const endHour = Math.min(20, startHour + Math.ceil(itemQty));
+
     const newVisit = {
       id: `visit-book-${Date.now().toString(36)}`,
       visitNumber: jobberJobId,
-      title: `${serviceType || "Cleaning"} — ${customerName}`,
+      title: `${canonicalServiceLabel} — ${customerName} (${bedrooms || "3 Bed"}, ${bathrooms || "2 Bath"})`,
       clientName: customerName,
       clientPhone: cleanPhone,
-      serviceAddress: address,
+      clientEmail: customerEmail || "",
+      serviceAddress: `${address}, ${city || "Edmonton"}, AB`,
       lat,
       lng,
-      startAt: `${reqDate}T09:00:00.000Z`,
-      endAt: `${reqDate}T12:00:00.000Z`,
+      startAt: `${reqDate}T${String(startHour).padStart(2, "0")}:00:00.000Z`,
+      endAt: `${reqDate}T${String(endHour).padStart(2, "0")}:00:00.000Z`,
       assignedCleaners: [assignedCrew.replace(/\s*\(.*?\)/, "")],
-      serviceType: serviceType || "Residential Cleaning",
+      serviceType: canonicalServiceLabel,
       status: "SCHEDULED",
       totalAmount: totalWithTax,
+      quoteNumber,
       notes: fullDetailsNote,
+      lineItems: quoteLineItems,
+    };
+
+    const newUnscheduledJob: UnscheduledJobItem = {
+      id: `job-book-${Date.now().toString(36)}`,
+      jobNumber: jobberJobId,
+      clientName: customerName,
+      clientPhone: cleanPhone,
+      clientEmail: customerEmail || "",
+      serviceAddress: `${address}, ${city || "Edmonton"}, AB`,
+      serviceType: (canonicalServiceLabel === "Basic Cleaning" ? "Standard Cleaning" : canonicalServiceLabel) as any,
+      totalAmount: totalWithTax,
+      status: "UNSCHEDULED",
+      requestedWindow: `${reqDate} • ${preferredTime || "Morning (8:00 AM - 12:00 PM)"}`,
+      scheduledDate: reqDate,
+      scheduledTime: preferredTime || "Morning (8:00 AM - 12:00 PM)",
+      notes: `${fullDetailsNote} | Linked Quote: ${quoteNumber} ($${totalWithTax.toFixed(2)})`,
+      jobberWebUri: "https://secure.getjobber.com/work_orders",
+      lineItems: quoteLineItems.map((li) => ({
+        description: `${li.name} — ${li.description}`,
+        quantity: li.quantity,
+        unitPrice: li.unitPrice,
+        total: li.total,
+      })),
+      createdAt: new Date().toISOString(),
     };
 
     // Auto-record to Google Sheets format
@@ -7073,6 +7259,7 @@ app.post("/api/public/book", async (req, res) => {
       curStore.adLeads = [newLead as any, ...(curStore.adLeads || [])];
       curStore.clients = [newClient as any, ...(curStore.clients || [])];
       curStore.scheduledVisits = [newVisit as any, ...(curStore.scheduledVisits || [])];
+      curStore.unscheduledJobs = [newUnscheduledJob as any, ...(curStore.unscheduledJobs || [])];
       curStore.lastSavedAt = new Date().toISOString();
       saveStore(curStore, projectId);
       saveStore(curStore, "tidyups");
@@ -7085,11 +7272,13 @@ app.post("/api/public/book", async (req, res) => {
       lead: newLead,
       client: newClient,
       visit: newVisit,
+      unscheduledJob: newUnscheduledJob,
+      matchedCatalogItem: matchedCatalog,
       jobberJobId,
       quoteNumber,
       assignedCrew,
       sheetRow,
-      message: `Booking created for ${customerName} (#${jobberJobId} / Quote ${quoteNumber}) and synced to your Master Leads & Quotes Table!`,
+      message: `Booking & Quote created for ${customerName} (${quoteNumber} / #${jobberJobId}) using official catalog item "${matchedCatalog?.jobberItemName || canonicalServiceLabel}"!`,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to process booking." });

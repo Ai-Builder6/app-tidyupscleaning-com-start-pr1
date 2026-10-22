@@ -37,7 +37,12 @@ import {
 } from 'lucide-react';
 import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 import { ServiceTicket } from '../types/dispatch';
-import { ServiceCatalogItem, CANONICAL_SERVICE_CATALOG } from '../data/serviceCatalogData';
+import {
+  ServiceCatalogItem,
+  CANONICAL_SERVICE_CATALOG,
+  matchCatalogItem,
+} from '../data/serviceCatalogData';
+import { PublicBookingModal } from './PublicBookingModal';
 
 export interface CustomerBookingSubmissionPayload {
   ticket: ServiceTicket;
@@ -45,6 +50,7 @@ export interface CustomerBookingSubmissionPayload {
   lead?: any;
   client?: any;
   visit?: any;
+  unscheduledJob?: any;
 }
 
 interface CustomerPortalViewProps {
@@ -62,13 +68,7 @@ interface CustomerPortalViewProps {
   onLeadsReconnected?: (data: { leads?: any[]; clients?: any[]; quotes?: any[] }) => void;
 }
 
-export type CleaningCategory =
-  | 'standard'
-  | 'deep'
-  | 'move-out'
-  | 'airbnb'
-  | 'commercial'
-  | 'post-renovation';
+export type CleaningCategory = 'move-out' | 'standard' | 'deep';
 
 interface ServiceDetail {
   id: CleaningCategory;
@@ -92,20 +92,20 @@ const OFFICIAL_COMPANY_BANNERS = [
   {
     id: 'banner-3',
     src: '/assets/aistudio/833_Banner_003_16385828.png',
-    title: '833 TidyUps Cleaning Service — Residential, Deep & Move-Out Specialists',
-    caption: 'Standard & Deep Cleans • Move In & Move Out • AirBnBs Across Edmonton & Area',
+    title: 'TidyUps Cleaning Service — Move-Out, Basic & Deep Cleaning Specialists',
+    caption: 'Move-Out • Basic • Deep Cleaning Across Edmonton & Area',
   },
   {
     id: 'banner-4',
     src: '/assets/aistudio/833_Banner_004_-_Copy__2__3861ba3f.png',
-    title: '1-833-TIDYUPS (833-843-9877) — Vetted Professional Cleaning Crew',
-    caption: 'Commercial & Residential • Move In/Out • Deep Cleans • AirBnB Turnovers',
+    title: 'TidyUps Cleaning Service — Vetted Professional Cleaning Crew',
+    caption: 'Move-Out Turnovers • Basic Maintenance • Deep Cleans • tidyupscleaning.com',
   },
   {
     id: 'banner-1',
     src: '/assets/aistudio/833_Banner_001_de5f6067.png',
     title: 'Hotel-Grade Kitchen, Bathroom & Whole-Home Detailing',
-    caption: 'Direct Line: 780-718-5092 • Toll-Free: 833-843-9877 • tidyupscleaning.com',
+    caption: 'Book Online at app.tidyupscleaning.com/booking • tidyupscleaning.com',
   },
   {
     id: 'banner-5',
@@ -116,24 +116,48 @@ const OFFICIAL_COMPANY_BANNERS = [
 ];
 
 const ADDON_OPTIONS = [
-  { id: 'oven', label: 'Inside Oven Deep Degrease', price: 35, icon: '🔥' },
-  { id: 'fridge', label: 'Inside Fridge Sanitize', price: 35, icon: '❄️' },
-  { id: 'cabinets', label: 'Inside Kitchen Cabinets', price: 45, icon: '🗄️' },
-  { id: 'windows', label: 'Interior Window Glass & Tracks', price: 40, icon: '🪟' },
-  { id: 'baseboards', label: 'Hand-Wash All Baseboards & Trim', price: 35, icon: '✨' },
-  { id: 'laundry', label: '1 Load Laundry Wash & Fold', price: 30, icon: '🧺' },
+  { id: 'Inside Oven Cleaning', label: 'Inside Oven Deep Degrease', price: 45, icon: '🔥' },
+  { id: 'Inside Fridge Cleaning', label: 'Inside Fridge Sanitize', price: 45, icon: '❄️' },
+  { id: 'Inside Cabinets & Drawers', label: 'Inside Kitchen Cabinets', price: 55, icon: '🗄️' },
+  { id: 'Interior Windows & Tracks', label: 'Interior Window Glass & Tracks', price: 65, icon: '🪟' },
+  { id: 'Baseboards & Trim Detail', label: 'Hand-Wash All Baseboards & Trim', price: 45, icon: '✨' },
+  { id: 'Laundry Wash & Fold', label: '1 Load Laundry Wash & Fold', price: 35, icon: '🧺' },
 ];
 
 const CLEANING_SERVICES: ServiceDetail[] = [
   {
+    id: 'move-out',
+    name: 'Move-Out Cleaning',
+    shortName: 'Move-Out Cleaning',
+    badge: 'Landlord & Realtor Checklist',
+    tagline: 'Inspection-ready turnkey reset for tenants, landlords, home buyers, and realtors.',
+    startingPrice: 'Official Catalog Rate',
+    recommendedFor: 'Lease-end inspections, home sales, possession day move-ins',
+    duration: 'Synced to Catalog Hours',
+    icon: Key,
+    accentGradient: 'from-amber-500 via-orange-500 to-pink-600',
+    lightBg: 'from-amber-50 to-pink-50',
+    borderActive: 'border-amber-500 ring-amber-400/30',
+    checklist: [
+      'Full interior oven degrease & rack scrubbing',
+      'Interior & exterior refrigerator and freezer sanitization',
+      'All kitchen & bathroom cabinets and drawers wiped inside & out',
+      'Baseboards, doors, closets & trim scrubbed throughout',
+      'Full bathroom tile grout & shower glass descaling',
+      'Interior window glass, tracks & sills wiped clean',
+      'Light fixtures, switch plates & outlet covers detailed',
+      'Complete HEPA vacuuming & edge-to-edge floor mopping',
+    ],
+  },
+  {
     id: 'standard',
-    name: 'Standard / Basic Residential Cleaning',
-    shortName: 'Basic / Standard Clean',
-    badge: 'Most Popular • 1, 2 or 3 Cleaners',
+    name: 'Basic Cleaning',
+    shortName: 'Basic Cleaning',
+    badge: 'Standard Maintenance Clean',
     tagline: 'Bright, spotless upkeep that keeps your home fresh, sanitized, and stress-free.',
-    startingPrice: '$145.50',
-    recommendedFor: 'Busy families, professionals & regular weekly/bi-weekly/monthly care',
-    duration: '3 - 4.5 Hours',
+    startingPrice: 'Official Catalog Rate',
+    recommendedFor: 'Busy families, professionals & regular residential maintenance care',
+    duration: 'Synced to Catalog Hours',
     icon: Brush,
     accentGradient: 'from-cyan-500 via-teal-500 to-emerald-500',
     lightBg: 'from-cyan-50 to-teal-50',
@@ -151,13 +175,13 @@ const CLEANING_SERVICES: ServiceDetail[] = [
   },
   {
     id: 'deep',
-    name: 'Deep Cleaning & Full Sanitization',
+    name: 'Deep Cleaning',
     shortName: 'Deep Cleaning',
-    badge: 'Top Seasonal Pick',
+    badge: 'Top-to-Bottom Detail Scrub',
     tagline: 'Intensive top-to-bottom scrub targeting built-up grime, soap scale, and neglected corners.',
-    startingPrice: '$210.00',
-    recommendedFor: 'Spring/Fall refresh, first-time cleans, homes uncleaned for 60+ days',
-    duration: '4 - 6 Hours',
+    startingPrice: 'Official Catalog Rate',
+    recommendedFor: 'Spring/Fall refresh, first-time cleans, homes needing extra detail',
+    duration: 'Synced to Catalog Hours',
     icon: Sparkles,
     accentGradient: 'from-pink-500 via-fuchsia-500 to-purple-600',
     lightBg: 'from-pink-50 to-fuchsia-50',
@@ -171,102 +195,6 @@ const CLEANING_SERVICES: ServiceDetail[] = [
       'Ceiling fan blades, light fixtures & air vents hand-dusted',
       'Complete sanitization of all high-touch surfaces',
       'Hardwood, luxury vinyl & tile deep wash',
-    ],
-  },
-  {
-    id: 'move-out',
-    name: 'Move-Out & Move-In Inspection Clean',
-    shortName: 'Move-Out / Move-In',
-    badge: '100% Deposit Guarantee',
-    tagline: 'Inspection-ready turnkey reset for tenants, landlords, home buyers, and realtors.',
-    startingPrice: '$262.50',
-    recommendedFor: 'Lease-end inspections, home sales, possession day move-ins',
-    duration: '5 - 7 Hours (1-3 Cleaners)',
-    icon: Key,
-    accentGradient: 'from-amber-500 via-orange-500 to-pink-600',
-    lightBg: 'from-amber-50 to-pink-50',
-    borderActive: 'border-amber-500 ring-amber-400/30',
-    checklist: [
-      'Full interior oven degrease & rack scrubbing',
-      'Interior & exterior refrigerator and freezer sanitization',
-      'All kitchen & bathroom cabinets and drawers wiped inside & out',
-      'Baseboards, doors, closets & trim scrubbed throughout',
-      'Full bathroom tile grout & shower glass descaling',
-      'Interior window glass, tracks & sills wiped clean',
-      'Light fixtures, switch plates & outlet covers detailed',
-      'Complete HEPA vacuuming & edge-to-edge floor mopping',
-    ],
-  },
-  {
-    id: 'airbnb',
-    name: 'Airbnb & Short-Term Rental Turnovers',
-    shortName: 'Airbnb Turnover',
-    badge: 'Same-Day Fast Turn',
-    tagline: 'Hotel-grade 5-star guest turnaround with fresh linens, staging, and photo verification.',
-    startingPrice: '$169.00',
-    recommendedFor: 'Airbnb Superhosts, VRBO hosts & executive rental managers',
-    duration: '2 - 3.5 Hours (Tight Window)',
-    icon: Home,
-    accentGradient: 'from-teal-500 via-cyan-500 to-blue-600',
-    lightBg: 'from-teal-50 to-sky-50',
-    borderActive: 'border-teal-500 ring-teal-400/30',
-    checklist: [
-      'Same-day check-out to check-in scheduling window',
-      'Hotel-style bed making with fresh linens & towel staging',
-      'Full kitchen sanitization, dishwasher unload & coffee station reset',
-      'Sparkling bathroom disinfection with hospitality presentation',
-      'Restocking guest toiletries, paper products & supplies',
-      'Damage & left-behind item inspection report with photos',
-      'Lockbox code verification & entryway sweep',
-      'Multi-property recurring host scheduling available',
-    ],
-  },
-  {
-    id: 'commercial',
-    name: 'Commercial & Office Cleaning',
-    shortName: 'Commercial / Office',
-    badge: 'Daytime or After-Hours',
-    tagline: 'Spotless offices, clinics, retail storefronts, and common areas for a stellar impression.',
-    startingPrice: '$189.00',
-    recommendedFor: 'Offices, medical/dental clinics, retail stores, showrooms & studios',
-    duration: 'Flexible / Custom Crew',
-    icon: Building2,
-    accentGradient: 'from-blue-600 via-indigo-600 to-purple-600',
-    lightBg: 'from-blue-50 to-indigo-50',
-    borderActive: 'border-blue-500 ring-blue-400/30',
-    checklist: [
-      'Workstations, desks, reception & conference tables sanitized',
-      'Staff breakroom, sink, microwave & fridge upkeep',
-      'Commercial restroom hygiene sanitization & supply restocking',
-      'High-traffic commercial carpet vacuuming & floor mopping',
-      'Entryway glass doors, mirrors & fingerprint removal',
-      'Trash & recycling consolidation and bin relining',
-      'Touchpoint antibacterial wipe-down (handles, POS, railings)',
-      'Secure alarm arming & lock-up compliance',
-    ],
-  },
-  {
-    id: 'post-renovation',
-    name: 'Post-Construction & Renovation Clean',
-    shortName: 'Post-Renovation',
-    badge: 'Fine Drywall Dust Removal',
-    tagline: 'Specialized multi-pass extraction of drywall dust, sawdust, and contractor residue.',
-    startingPrice: '$289.00',
-    recommendedFor: 'Homeowners, builders & designers after remodeling or new builds',
-    duration: '5 - 8 Hours',
-    icon: Award,
-    accentGradient: 'from-fuchsia-600 via-pink-600 to-rose-600',
-    lightBg: 'from-fuchsia-50 to-rose-50',
-    borderActive: 'border-fuchsia-500 ring-fuchsia-400/30',
-    checklist: [
-      'Multi-pass HEPA micro-filtration fine dust extraction',
-      'Wiping drywall dust off walls, baseboards, doors & trim',
-      'Removing manufacturer stickers & protective films from fixtures',
-      'Window tracks, sills & interior glass detailing',
-      'Vacuuming & wiping inside all new cabinets, drawers & closets',
-      'Polishing chrome plumbing fixtures, stone counters & tile',
-      'Scrubbing hard floors to remove construction haze',
-      'HVAC register & air vent cover washing',
     ],
   },
 ];
@@ -355,7 +283,35 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     }
   };
 
-  const [selectedService, setSelectedService] = useState<CleaningCategory>('standard');
+  // Route mode:
+  // - /booking (default for simple 3-option form: Move-Out, Basic, Deep)
+  // - /book    (variation with interactive quote calculator synced to Service Catalog)
+  const [bookingRouteVariant, setBookingRouteVariant] = useState<'SIMPLE_3_OPTION' | 'CALCULATOR'>(() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase();
+      const s = window.location.search.toLowerCase();
+      if (p === '/book' || p.startsWith('/book/') || s.includes('variant=calculator')) {
+        return 'CALCULATOR';
+      }
+      if (p === '/booking' || p.startsWith('/booking/') || s.includes('variant=simple')) {
+        return 'SIMPLE_3_OPTION';
+      }
+    }
+    return 'SIMPLE_3_OPTION';
+  });
+
+  const handleSwitchRouteVariant = (nextVariant: 'SIMPLE_3_OPTION' | 'CALCULATOR') => {
+    setBookingRouteVariant(nextVariant);
+    if (typeof window !== 'undefined') {
+      try {
+        const currentUrl = new URL(window.location.href);
+        const targetPath = nextVariant === 'SIMPLE_3_OPTION' ? '/booking' : '/book';
+        window.history.replaceState({}, '', `${targetPath}${currentUrl.search}`);
+      } catch {}
+    }
+  };
+
+  const [selectedService, setSelectedService] = useState<CleaningCategory>('move-out');
   const [activeBannerIdx, setActiveBannerIdx] = useState<number>(0);
 
   // Booking Sheet Form State
@@ -419,50 +375,35 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isCalendarPopupOpen]);
 
-  // Calculate live price from the 108-item Jobber Service Catalog
+  // Calculate live price directly from the canonical Jobber Service Catalog (matchCatalogItem)
+  // so /book prices NEVER mismatch the official Service Catalog Price List
   const priceCalculation = useMemo(() => {
-    const bedNumMatch = bedrooms.match(/\d+/);
-    const bathNumMatch = bathrooms.match(/\d+/);
-    const bedNum = bedNumMatch ? parseInt(bedNumMatch[0], 10) : 3;
-    const bathNum = bathNumMatch ? parseInt(bathNumMatch[0], 10) : 2;
-
-    const categoryKeyword =
-      selectedService === 'move-out'
-        ? 'move'
-        : selectedService === 'deep'
-        ? 'deep'
-        : 'basic';
-
     const catalogList =
       Array.isArray(serviceCatalog) && serviceCatalog.length > 0
         ? serviceCatalog
         : CANONICAL_SERVICE_CATALOG;
 
-    const matchedItem = catalogList.find((item) => {
-      const nameLower = (item.jobberItemName || item.name || '').toLowerCase();
-      const matchesBed = nameLower.includes(`${bedNum}bed`) || Number(item.bedrooms) === bedNum;
-      const matchesBath = nameLower.includes(`${bathNum}bath`) || Number(item.bathrooms) === bathNum;
-      const matchesCat = nameLower.includes(categoryKeyword);
-      const matchesCrew =
-        (item.cleanersCount || 1) === cleanerCount ||
-        (cleanerCount === 1 && nameLower.includes('1 pro')) ||
-        (cleanerCount === 2 && nameLower.includes('2 pro')) ||
-        (cleanerCount === 3 && nameLower.includes('3 pro'));
-      return matchesBed && matchesBath && matchesCat && matchesCrew;
-    });
+    const lookupServiceLabel =
+      selectedService === 'move-out'
+        ? 'Move-Out Cleaning'
+        : selectedService === 'deep'
+        ? 'Deep Cleaning'
+        : 'Standard Cleaning';
 
-    let basePackagePrice = matchedItem?.basePrice || 0;
-    if (!basePackagePrice) {
-      const baseRatePerHr =
-        selectedService === 'move-out' || selectedService === 'post-renovation'
-          ? 52.5
-          : selectedService === 'deep'
-          ? 52.5
-          : 48.5;
-      const estHours = Math.max(3, bedNum * 1.0 + bathNum * 0.75 + (selectedService === 'move-out' ? 1.5 : 0));
-      const crewDiscount = cleanerCount === 2 ? 0.96 : cleanerCount === 3 ? 0.93 : 1.0;
-      basePackagePrice = Math.round(estHours * baseRatePerHr * crewDiscount * 100) / 100;
-    }
+    const matchedItem = matchCatalogItem(
+      lookupServiceLabel,
+      bedrooms,
+      bathrooms,
+      catalogList,
+      cleanerCount
+    );
+
+    const basePackagePrice =
+      matchedItem?.total ||
+      matchedItem?.basePrice ||
+      315;
+    const itemQty = matchedItem?.quantity || matchedItem?.baseHours || 3;
+    const itemUnitPrice = matchedItem?.unitPrice || 105;
 
     const addonsTotal = selectedAddons.reduce((sum, id) => {
       const found = ADDON_OPTIONS.find((a) => a.id === id);
@@ -486,7 +427,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     return {
       matchedItemName:
         matchedItem?.jobberItemName ||
-        `${bedNum}Bed ${bathNum}Bath ${activeServiceData.shortName} (${cleanerCount} Pro Cleaner${
+        `${bedrooms} ${bathrooms} ${activeServiceData.shortName} (${cleanerCount} Cleaner${
           cleanerCount > 1 ? 's' : ''
         })`,
       basePackagePrice,
@@ -495,9 +436,9 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       subtotal,
       gst,
       total,
-      hoursLabel: matchedItem?.baseHours
-        ? `${matchedItem.baseHours} hrs (${cleanerCount} Cleaner${cleanerCount > 1 ? 's' : ''})`
-        : activeServiceData.duration,
+      hoursLabel: `${itemQty} hrs @ $${itemUnitPrice.toFixed(2)}/hr (${cleanerCount} Cleaner${
+        cleanerCount > 1 ? 's' : ''
+      })`,
     };
   }, [bedrooms, bathrooms, selectedService, cleanerCount, selectedAddons, frequency, serviceCatalog, activeServiceData]);
 
@@ -627,9 +568,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         const cat = (data.serviceCategory || '').toLowerCase();
         if (cat.includes('move')) setSelectedService('move-out');
         else if (cat.includes('deep')) setSelectedService('deep');
-        else if (cat.includes('standard') || cat.includes('basic')) setSelectedService('standard');
-        else if (cat.includes('reno')) setSelectedService('post-renovation');
-        else if (cat.includes('commercial')) setSelectedService('commercial');
+        else setSelectedService('standard');
 
         setVoiceFillStatus(
           `✓ Auto-filled: ${data.customerName || 'Customer'} • ${data.address || city} • ${
@@ -703,7 +642,12 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           customerName: customerName.trim(),
           customerPhone: customerPhone.trim(),
           customerEmail: customerEmail.trim(),
-          serviceType: priceCalculation.matchedItemName,
+          serviceType:
+            selectedService === 'move-out'
+              ? 'Move-Out Cleaning'
+              : selectedService === 'deep'
+              ? 'Deep Cleaning'
+              : 'Basic Cleaning',
           address: fullAddress,
           city,
           postalCode: postalCode.trim(),
@@ -711,19 +655,20 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           bathrooms,
           cleanerCount,
           frequency,
-          selectedAddons: addonLabels,
+          selectedAddons: selectedAddons,
           estimatedSubtotal: priceCalculation.subtotal,
           estimatedTotal: priceCalculation.total,
           preferredDate: preferredDate || new Date().toISOString().slice(0, 10),
           preferredTime,
           specialInstructions: specialInstructions.trim(),
           heardAbout,
+          bookingFormVariant: 'CALCULATOR',
           utmSource:
             heardAbout.includes('Facebook')
               ? 'Facebook Leads'
               : heardAbout.includes('Google')
               ? 'Google Leads'
-              : 'book.tidyupscleaning.com',
+              : 'app.tidyupscleaning.com/book',
         }),
       });
 
@@ -739,19 +684,46 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             lead: data.lead,
             client: data.client,
             visit: data.visit,
+            unscheduledJob: data.unscheduledJob,
           });
         }
       } else {
-        setErrorMessage(data.error || 'Could not submit booking. Please call 1-833-TIDYUPS (833-843-9877).');
+        setErrorMessage(data.error || 'Could not submit booking. Please email booking@tidyupscleaning.com.');
       }
     } catch {
-      setErrorMessage('Network connection error. Please call 1-833-TIDYUPS (833-843-9877) or (780) 718-5092.');
+      setErrorMessage('Network connection error. Please email booking@tidyupscleaning.com.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const showStaffPreviewBanner = !isStandaloneCustomerSite && Boolean(onToggleCustomerLockPreview);
+
+  if (bookingRouteVariant === 'SIMPLE_3_OPTION') {
+    return (
+      <div className="flex-1 h-full w-full overflow-y-auto overflow-x-hidden">
+        <PublicBookingModal
+          isOpen={true}
+          mode="STANDALONE_PAGE"
+          isOwnerViewing={showStaffPreviewBanner && !isCustomerLockPreview}
+          onSwitchToCalculatorMode={() => handleSwitchRouteVariant('CALCULATOR')}
+          onOpenStaffLogin={onOpenStaffLogin}
+          onBookingCreated={(ticket, fullData) => {
+            if (onBookingSubmitted && ticket) {
+              onBookingSubmitted(ticket, {
+                ticket,
+                quote: fullData?.quote,
+                lead: fullData?.lead,
+                client: fullData?.client,
+                visit: fullData?.visit,
+                unscheduledJob: fullData?.unscheduledJob,
+              });
+            }
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 h-full w-full overflow-y-auto overflow-x-hidden bg-gradient-to-b from-cyan-50 via-pink-50/40 to-amber-50/30 font-sans text-slate-900">
@@ -767,43 +739,47 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 <span>Locked Customer Page (/book)</span>
               </span>
               <div className="text-xs text-slate-200">
-                <strong className="text-amber-300">Customer-Only Locked Booking Link:</strong> Send customers to{' '}
+                <strong className="text-amber-300">2 Customer Booking Variations:</strong> Use{' '}
+                <code className="px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono font-bold">
+                  https://app.tidyupscleaning.com/booking
+                </code>{' '}
+                (Simple 3-Option Form: Move-Out, Basic, Deep) or{' '}
                 <code className="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono font-bold">
                   https://app.tidyupscleaning.com/book
                 </code>{' '}
-                — visitors on <code>/book</code> are <strong>100% blocked from the rest of your app</strong> and can only use this 1-page booking sheet, while all bookings &amp; leads sync straight into your <strong>Master Leads &amp; Quotes Table</strong>!
+                (Quote Calculator Variation synced to your Service Catalog Price List).
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
                 type="button"
+                onClick={() => handleSwitchRouteVariant('SIMPLE_3_OPTION')}
+                className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                title="Switch to the Simple 3-Option Booking Form (/booking: Move-Out, Basic, Deep)"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Switch to /booking (3-Option Form)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCopyBookingLink('booking3', 'https://app.tidyupscleaning.com/booking')}
+                className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                title="Copy https://app.tidyupscleaning.com/booking (Simple 3-Option Form)"
+              >
+                {copiedLinkKey === 'booking3' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedLinkKey === 'booking3' ? 'Copied /booking!' : 'Copy /booking Link'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => handleCopyBookingLink('main', 'https://app.tidyupscleaning.com/book')}
                 className="px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
-                title="Copy https://app.tidyupscleaning.com/book to send to customers"
+                title="Copy https://app.tidyupscleaning.com/book (Quote Calculator Variation)"
               >
                 {copiedLinkKey === 'main' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedLinkKey === 'main' ? 'Copied /book Link!' : 'Copy Customer Link (app.tidyupscleaning.com/book)'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleCopyBookingLink('fb', 'https://app.tidyupscleaning.com/book?source=facebook')}
-                className="px-2.5 py-1.5 rounded-xl bg-[#1877F2] hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
-                title="Copy Facebook Ad Landing URL — auto-tags bookings under Facebook Leads"
-              >
-                {copiedLinkKey === 'fb' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedLinkKey === 'fb' ? 'Copied FB Link!' : '🔵 Copy FB Ad Link'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleCopyBookingLink('google', 'https://app.tidyupscleaning.com/book?source=google')}
-                className="px-2.5 py-1.5 rounded-xl bg-[#0F9D58] hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
-                title="Copy Google Ad Landing URL — auto-tags bookings under Google Leads"
-              >
-                {copiedLinkKey === 'google' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedLinkKey === 'google' ? 'Copied Google Link!' : '🟢 Copy Google Ad Link'}</span>
+                <span>{copiedLinkKey === 'main' ? 'Copied /book!' : 'Copy /book (Calculator)'}</span>
               </button>
 
               <button
@@ -926,24 +902,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             </a>
 
             <a
-              href="tel:18338439877"
-              className="px-3 py-2 rounded-xl bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white font-black text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-            >
-              <PhoneCall className="w-3.5 h-3.5 text-amber-300" />
-              <span>1-833-TIDYUPS (833-843-9877)</span>
-            </a>
-
-            <a
-              href="tel:7807185092"
-              className="hidden md:flex px-3 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-            >
-              <Phone className="w-3.5 h-3.5 text-slate-950" />
-              <span>(780) 718-5092</span>
-            </a>
-
-            <a
               href="mailto:booking@tidyupscleaning.com"
-              className="hidden xl:flex px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-400 text-emerald-950 font-black text-xs items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+              className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-400 text-emerald-950 font-black text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
               title="Email Booking & Customer Support: booking@tidyupscleaning.com"
             >
               <Mail className="w-3.5 h-3.5 text-emerald-600" />
@@ -1107,7 +1067,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               </div>
               <div className="flex items-center justify-between px-1 text-[11px] font-extrabold text-slate-700">
                 <span>{OFFICIAL_COMPANY_BANNERS[activeBannerIdx].title}</span>
-                <span className="text-pink-600 font-mono">1-833-TIDYUPS</span>
+                <span className="text-pink-600 font-mono">tidyupscleaning.com</span>
               </div>
             </div>
           </div>
@@ -1134,7 +1094,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {CLEANING_SERVICES.map((s) => {
               const IconComp = s.icon;
               const isSelected = selectedService === s.id;
@@ -1864,16 +1824,13 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 </div>
               </div>
               <div className="pt-2 border-t border-amber-400/60 flex flex-wrap items-center justify-between gap-2 text-xs font-black text-slate-900">
-                <span>Questions? Call our Edmonton office:</span>
-                <div className="flex items-center gap-2">
-                  <a href="tel:18338439877" className="underline hover:text-pink-700 font-mono">
-                    833-843-9877
-                  </a>
-                  <span>•</span>
-                  <a href="tel:7807185092" className="underline hover:text-pink-700 font-mono">
-                    780-718-5092
-                  </a>
-                </div>
+                <span>Questions? Email our Edmonton booking team:</span>
+                <a
+                  href="mailto:booking@tidyupscleaning.com"
+                  className="underline hover:text-pink-700 font-mono"
+                >
+                  booking@tidyupscleaning.com
+                </a>
               </div>
             </div>
           </div>
@@ -1966,12 +1923,6 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               >
                 <span>Main Website: tidyupscleaning.com</span>
                 <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-              <a href="tel:18338439877" className="text-pink-400 hover:text-pink-300 font-mono">
-                1-833-TIDYUPS (833-843-9877)
-              </a>
-              <a href="tel:7807185092" className="text-amber-300 hover:text-amber-200 font-mono">
-                (780) 718-5092
               </a>
               <a href="mailto:booking@tidyupscleaning.com" className="text-emerald-400 hover:text-emerald-300 font-mono">
                 booking@tidyupscleaning.com
@@ -2174,9 +2125,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       5. Contact Our Privacy Officer
                     </h4>
                     <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs space-y-1">
-                      <div className="font-black text-slate-900">833 TidyUps Cleaning Service Inc. — Privacy &amp; Customer Care</div>
+                      <div className="font-black text-slate-900">TidyUps Cleaning Service Inc. — Privacy &amp; Customer Care</div>
                       <div>Address: 8306 Chappelle Way SW, Edmonton, AB T6W 4L3</div>
-                      <div>Toll-Free Phone: <a href="tel:18338439877" className="text-pink-600 font-bold underline">1-833-TIDYUPS (833-843-9877)</a> • Local: <a href="tel:7807185092" className="text-cyan-700 font-bold underline">(780) 718-5092</a></div>
                       <div>Email: <a href="mailto:booking@tidyupscleaning.com" className="text-pink-600 font-bold underline">booking@tidyupscleaning.com</a></div>
                     </div>
                   </section>
@@ -2238,7 +2188,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       5. The 833 TidyUps 24-Hour Clean &amp; Move-Out Guarantee
                     </h4>
                     <p>
-                      Your satisfaction is guaranteed. If you, your realtor, or your landlord notice any item included in your booked package checklist that was missed, simply contact us within <strong>24 hours of service completion</strong> at <strong>1-833-TIDYUPS (833-843-9877)</strong> or <strong>(780) 718-5092</strong> and our team will return to re-clean the area free of charge.
+                      Your satisfaction is guaranteed. If you, your realtor, or your landlord notice any item included in your booked package checklist that was missed, simply contact us within <strong>24 hours of service completion</strong> at <strong>booking@tidyupscleaning.com</strong> and our team will return to re-clean the area free of charge.
                     </p>
                   </section>
 
@@ -2247,7 +2197,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       6. Insurance, WCB Coverage &amp; Liability
                     </h4>
                     <p>
-                      833 TidyUps Cleaning Service Inc. maintains full $5M Commercial General Liability Insurance, WCB Alberta coverage, and background-verified staff. While our teams exercise the highest care, we are not responsible for pre-existing damage, unstable fixtures, or unsealed surfaces.
+                      TidyUps Cleaning Service Inc. maintains full $5M Commercial General Liability Insurance, WCB Alberta coverage, and background-verified staff. While our teams exercise the highest care, we are not responsible for pre-existing damage, unstable fixtures, or unsealed surfaces.
                     </p>
                   </section>
                 </div>
@@ -2267,25 +2217,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <a
-                      href="tel:18338439877"
-                      className="p-4 rounded-2xl bg-pink-50 border-2 border-pink-300 hover:border-pink-500 transition-all block"
-                    >
-                      <div className="text-[10px] font-black uppercase text-pink-700">Toll-Free Booking Line</div>
-                      <div className="text-base font-black text-slate-950 font-mono mt-0.5">1-833-TIDYUPS</div>
-                      <div className="text-xs font-bold text-slate-600">(833) 843-9877</div>
-                    </a>
-
-                    <a
-                      href="tel:7807185092"
-                      className="p-4 rounded-2xl bg-cyan-50 border-2 border-cyan-300 hover:border-cyan-500 transition-all block"
-                    >
-                      <div className="text-[10px] font-black uppercase text-cyan-800">Edmonton Local Office</div>
-                      <div className="text-base font-black text-slate-950 font-mono mt-0.5">(780) 718-5092</div>
-                      <div className="text-xs font-bold text-slate-600">Call or Text Dispatch</div>
-                    </a>
-
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <a
                       href="mailto:booking@tidyupscleaning.com"
                       className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 hover:border-amber-500 transition-all block"
@@ -2293,6 +2225,17 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       <div className="text-[10px] font-black uppercase text-amber-900">Customer Care Email</div>
                       <div className="text-xs font-black text-slate-950 mt-1 break-all">booking@tidyupscleaning.com</div>
                       <div className="text-xs font-bold text-slate-600 mt-0.5">Fast Replies &amp; Quotes</div>
+                    </a>
+
+                    <a
+                      href="https://tidyupscleaning.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-4 rounded-2xl bg-cyan-50 border-2 border-cyan-300 hover:border-cyan-500 transition-all block"
+                    >
+                      <div className="text-[10px] font-black uppercase text-cyan-800">Official Website</div>
+                      <div className="text-xs font-black text-slate-950 mt-1">tidyupscleaning.com</div>
+                      <div className="text-xs font-bold text-slate-600 mt-0.5">Edmonton &amp; Area Cleaning</div>
                     </a>
                   </div>
 
@@ -2323,7 +2266,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             {/* Modal Footer */}
             <div className="bg-slate-100 border-t border-slate-200 px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
               <div className="text-xs font-bold text-slate-600">
-                Questions? Call <a href="tel:18338439877" className="text-pink-600 font-black underline">1-833-TIDYUPS (833-843-9877)</a>
+                Questions? Email <a href="mailto:booking@tidyupscleaning.com" className="text-pink-600 font-black underline">booking@tidyupscleaning.com</a>
               </div>
               <button
                 type="button"

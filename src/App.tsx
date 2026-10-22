@@ -330,12 +330,14 @@ export function App() {
   const [chatRecipient, setChatRecipient] = useState<AppUser | null>(null);
   const [cleanerShowMap, setCleanerShowMap] = useState<boolean>(false);
 
-  // Detect if visitor is on the dedicated customer-only /book path
+  // Detect if visitor is on the dedicated customer-only /booking or /book path
   const [isStandaloneBookingDomain] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const path = window.location.pathname.toLowerCase();
       const search = window.location.search.toLowerCase();
       if (
+        path === '/booking' ||
+        path.startsWith('/booking/') ||
         path === '/book' ||
         path.startsWith('/book/') ||
         search.includes('mode=customer') ||
@@ -356,6 +358,8 @@ export function App() {
       const path = window.location.pathname.toLowerCase();
       const search = window.location.search.toLowerCase();
       if (
+        path === '/booking' ||
+        path.startsWith('/booking/') ||
         path === '/book' ||
         path.startsWith('/book/') ||
         search.includes('mode=customer') ||
@@ -372,7 +376,7 @@ export function App() {
     return false;
   });
 
-  // Automatically open the Login & Password modal on website load when not signed in (unless on /book)
+  // Automatically open the Login & Password modal on website load when not signed in (unless on /booking or /book)
   useEffect(() => {
     if (!isStaffAuthenticated && !isStandaloneBookingDomain) {
       setRoleModalInitialTab('LOGIN');
@@ -2584,20 +2588,7 @@ export function App() {
               <span>{isSyncingEverything ? 'Syncing All...' : 'Sync All (Jobber + Quotes + Invoices + Leads)'}</span>
             </button>
 
-            {/* Vanity Line & Direct Dispatch Badge */}
-            <a
-              href="tel:18338439877"
-              className="hidden 2xl:flex items-center gap-2 px-2.5 py-1 bg-gradient-to-r from-pink-50 to-purple-50 hover:from-pink-100 hover:to-purple-100 border border-pink-200/80 rounded-xl text-xs font-bold text-slate-800 transition-all cursor-pointer shadow-2xs shrink-0 group"
-              title="Call Dispatch Genie Vanity Line: 1-833-TIDYUPS (833-843-9877) or Direct Dispatch: (587) 900-7223"
-            >
-              <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-pink-600 to-purple-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
-                <Phone className="w-3.5 h-3.5 text-white" />
-              </div>
-              <div className="flex flex-col text-left leading-tight">
-                <span className="text-[11px] font-black tracking-tight text-purple-950 font-mono">1-833-TIDYUPS</span>
-                <span className="text-[9px] text-pink-700 font-extrabold font-mono">(833-843-9877) • Dispatch: (587) 900-7223</span>
-              </div>
-            </a>
+
 
             {/* 1-Click Block Caller / Area Code Quick Button (Always Visible in Staff Header) */}
             <button
@@ -2949,6 +2940,10 @@ export function App() {
               if (fullPayload?.visit) {
                 setScheduledJobsList((prev) => [fullPayload.visit, ...prev]);
                 saveScheduledVisitToFirestore(fullPayload.visit).catch(() => {});
+              }
+              if (fullPayload?.unscheduledJob) {
+                setUnscheduledJobsList((prev) => [fullPayload.unscheduledJob, ...prev]);
+                saveUnscheduledJobToFirestore(fullPayload.unscheduledJob).catch(() => {});
               }
             }}
             onNavigateToMap={() => {
@@ -3968,13 +3963,40 @@ export function App() {
           projectId={activeProjectId}
         />
 
-        {/* Public Booking Modal (Option A for bookmycleaning.net) */}
+        {/* Public Booking Modal (3-Option Online Form: Move-Out, Basic, Deep) */}
         <PublicBookingModal
           isOpen={isPublicBookingModalOpen}
           onClose={() => setIsPublicBookingModalOpen(false)}
-          onBookingCreated={(newTicket) => {
+          onBookingCreated={(newTicket, fullPayload) => {
             setTickets((prev) => [newTicket, ...prev]);
             setSelectedTicketId(newTicket.id);
+            saveStateToStore([newTicket, ...tickets]);
+            if (fullPayload?.lead) {
+              setLeadsList((prev) => {
+                const next = [fullPayload.lead, ...prev];
+                saveLeadToFirestore(fullPayload.lead).catch(() => {});
+                return next;
+              });
+            }
+            if (fullPayload?.client) {
+              setClientsList((prev) => [fullPayload.client, ...prev]);
+              saveClientToFirestore(fullPayload.client).catch(() => {});
+            }
+            if (fullPayload?.quote) {
+              setQuotesList((prev) => {
+                const next = dedupeQuotesList([fullPayload.quote, ...prev]);
+                saveQuoteToFirestore(fullPayload.quote).catch(() => {});
+                return next;
+              });
+            }
+            if (fullPayload?.visit) {
+              setScheduledJobsList((prev) => [fullPayload.visit, ...prev]);
+              saveScheduledVisitToFirestore(fullPayload.visit).catch(() => {});
+            }
+            if (fullPayload?.unscheduledJob) {
+              setUnscheduledJobsList((prev) => [fullPayload.unscheduledJob, ...prev]);
+              saveUnscheduledJobToFirestore(fullPayload.unscheduledJob).catch(() => {});
+            }
           }}
         />
 
