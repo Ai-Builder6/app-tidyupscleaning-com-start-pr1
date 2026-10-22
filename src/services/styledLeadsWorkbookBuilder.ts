@@ -1013,17 +1013,11 @@ export async function generateStyledLeadsWorkbookBuffer(params: {
     },
     {
       name: 'Facebook Leads',
-      xml: buildVisualWorksheetXml({
-        title:
-          '🔵 TIDYUPS CLEANING — FACEBOOK LEADS (META AD FORMS)  •  JOBBER ORDER: 1. CLIENT → 2. QUOTE',
-        bannerStyle: 2,
-        tabColorRgb: 'FF1877F2',
-        leads: fbLeads,
-        allLeadsForSummary: leads,
-        quotes,
-        defaultCategory: 'FACEBOOK',
-        resolveJobberWebUri,
-      }),
+      xml: buildTwentyColumnWebhookSheetXml(appLeadHeaders, fbLeads),
+    },
+    {
+      name: 'Google Ads Leads',
+      xml: buildTwentyColumnWebhookSheetXml(appLeadHeaders, googleLeads),
     },
     {
       name: 'ScrubbyBuilder Leads',

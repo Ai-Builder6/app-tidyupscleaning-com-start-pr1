@@ -641,6 +641,21 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
 
       const data = await res.json();
       if (res.ok && data.success) {
+        try {
+          const w = window as any;
+          w.dataLayer = w.dataLayer || [];
+          w.dataLayer.push({
+            event: 'generate_lead',
+            lead_source: heardAbout || 'Online Booking Form',
+            service_type: serviceType,
+            cleaners_count: crewRuleDetails.cleaners,
+            estimated_value: Number(data?.quote?.total || crewRuleDetails.startingSubtotal || 0),
+            currency: 'CAD',
+            quote_number: data?.quoteNumber || '',
+          });
+        } catch {
+          // ignore dataLayer notice
+        }
         setCreatedSummary(data);
         if (onBookingCreated && data.ticket) {
           onBookingCreated(data.ticket, data);
