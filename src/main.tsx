@@ -166,6 +166,21 @@ if (typeof window !== 'undefined') {
 
   window.addEventListener('error', (event: ErrorEvent) => {
     const message = event.message || '';
+    const filename = event.filename || '';
+    if (
+      message.includes('Cannot redefine property: ethereum') ||
+      message.includes('Cannot redefine property') ||
+      filename.startsWith('chrome-extension://') ||
+      filename.startsWith('moz-extension://')
+    ) {
+      if (typeof event.preventDefault === 'function') {
+        event.preventDefault();
+      }
+      if (typeof event.stopImmediatePropagation === 'function') {
+        event.stopImmediatePropagation();
+      }
+      return;
+    }
     if (
       message.includes('ApiTargetBlockedMapError') ||
       message.includes('ApiProjectMapError') ||
@@ -177,11 +192,14 @@ if (typeof window !== 'undefined') {
         event.preventDefault();
       }
     }
-  });
+  }, true);
 
   window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
     const reason = event.reason?.message || String(event.reason || '');
     if (
+      reason.includes('Cannot redefine property: ethereum') ||
+      reason.includes('Cannot redefine property') ||
+      reason.includes('chrome-extension://') ||
       reason.includes('ApiTargetBlockedMapError') ||
       reason.includes('RefererNotAllowedMapError') ||
       reason.includes('ErrorInfo') ||

@@ -3,6 +3,64 @@
   <head>
     <meta charset="UTF-8" />
     <script>
+      // 0. Guard against browser Web3 wallet extensions (e.g., Phantom evmAsk.js / MetaMask) throwing
+      // "TypeError: Cannot redefine property: ethereum" when multiple extensions inject into window
+      (function() {
+        try {
+          var origDefineProperty = Object.defineProperty;
+          if (origDefineProperty) {
+            Object.defineProperty = function(obj, prop, descriptor) {
+              try {
+                if (
+                  obj === window &&
+                  (prop === 'ethereum' || prop === 'solana' || prop === 'phantom' || prop === 'web3') &&
+                  descriptor &&
+                  typeof descriptor === 'object'
+                ) {
+                  var safeDesc = Object.assign({}, descriptor, { configurable: true });
+                  var existing = Object.getOwnPropertyDescriptor(window, prop);
+                  if (existing && existing.configurable === false) {
+                    return obj;
+                  }
+                  return origDefineProperty.call(Object, obj, prop, safeDesc);
+                }
+                return origDefineProperty.call(Object, obj, prop, descriptor);
+              } catch (err) {
+                var msg = String(err && err.message ? err.message : err || '');
+                if (
+                  msg.indexOf('Cannot redefine property') !== -1 ||
+                  prop === 'ethereum' ||
+                  prop === 'solana' ||
+                  prop === 'phantom'
+                ) {
+                  return obj;
+                }
+                throw err;
+              }
+            };
+          }
+
+          window.addEventListener(
+            'error',
+            function(event) {
+              var msg = String((event && event.message) || '');
+              var file = String((event && event.filename) || '');
+              if (
+                msg.indexOf('Cannot redefine property: ethereum') !== -1 ||
+                msg.indexOf('Cannot redefine property') !== -1 ||
+                file.indexOf('chrome-extension://') === 0 ||
+                file.indexOf('moz-extension://') === 0
+              ) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                return false;
+              }
+            },
+            true
+          );
+        } catch (_) {}
+      })();
+
       // 1. Detect dedicated Customer-Only Booking Page (/book, /customer-booking, ?booking=1, or book.* domain) before React mounts
       (function() {
         try {
