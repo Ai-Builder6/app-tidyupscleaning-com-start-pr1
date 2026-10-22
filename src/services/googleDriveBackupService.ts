@@ -394,6 +394,72 @@ export interface LiveDriveSheetResult {
   sheetName: string;
   folder: DriveFolderInfo;
   userEmail?: string | null;
+  pulledRowsCount?: number;
+  newlyImportedLeads?: any[];
+  leads?: any[];
+  clients?: any[];
+  quotes?: any[];
+}
+
+export interface PullGoogleSheetLeadsResult {
+  success: boolean;
+  pulledRowsCount: number;
+  newlyImportedLeads: any[];
+  scannedSheetIds: string[];
+  scannedTabs: string[];
+  discoveredDriveSheetUrl?: string;
+  discoveredDriveSheetName?: string;
+  leads: any[];
+  clients: any[];
+  quotes: any[];
+  message: string;
+}
+
+/**
+ * Pulls any newly added Facebook Lead Ads / Google Ads rows from the user's connected Google Sheet(s)
+ * (supports both private Google Drive spreadsheets via the user's OAuth token and link-shared sheets).
+ */
+export async function pullNewLeadsFromGoogleSheetInDrive(options?: {
+  sheetUrl?: string;
+  projectId?: string;
+  accessToken?: string | null;
+  promptAuthIfNeeded?: boolean;
+}): Promise<PullGoogleSheetLeadsResult> {
+  const projectId = options?.projectId || 'tidyups';
+  let token = options?.accessToken || getAccessTokenSync();
+
+  if (!token && options?.promptAuthIfNeeded) {
+    try {
+      const authRes = await ensureDriveAuthToken();
+      token = authRes.accessToken;
+    } catch {
+      // Continue with public link check if popup closed
+    }
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-project-id': projectId,
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`/api/leads/reconnect-sheets?project=${encodeURIComponent(projectId)}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      sheetUrl: options?.sheetUrl,
+      accessToken: token || undefined,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody?.error || `Failed to pull from Google Sheet (${res.status})`);
+  }
+
+  return res.json();
 }
 
 /**
@@ -432,6 +498,14 @@ export async function createNewCleanLeadsSheetInDrive(options?: {
     } else {
       throw err;
     }
+  }
+
+  // First pull any new rows from existing sheets so we never miss a lead before creating the new sheet
+  let pullSnap: PullGoogleSheetLeadsResult | null = null;
+  try {
+    pullSnap = await pullNewLeadsFromGoogleSheetInDrive({ accessToken: token });
+  } catch {
+    // ignore pre-pull notice
   }
 
   // Fetch the multi-tab XLSX buffer from the server (contains All Clean Leads, FB Leads, Google Leads, Voice & Quick Quotes, Pasted Leads, ScrubbyBuilder Leads)
@@ -502,12 +576,19 @@ export async function createNewCleanLeadsSheetInDrive(options?: {
     sheetName: created.name || sheetName,
     folder,
     userEmail,
+    pulledRowsCount: pullSnap?.pulledRowsCount || 0,
+    newlyImportedLeads: pullSnap?.newlyImportedLeads || [],
+    leads: pullSnap?.leads,
+    clients: pullSnap?.clients,
+    quotes: pullSnap?.quotes,
   };
 }
 
 /**
  * Updates an existing Google Sheet in Google Drive with the latest multi-tab leads data
  * (or creates a new Google Sheet in the user's Drive folder if no existing sheet can be patched).
+ * CRITICAL: Always pulls any newly added Facebook Lead Ads / Google Ads rows from the Google Sheet FIRST
+ * before exporting and patching, so external form submissions are never overwritten!
  */
 export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
   spreadsheetId?: string;
@@ -579,7 +660,7 @@ export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
       `'${folder.id}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`
     );
     const listRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,webViewLink)&orderBy= modifiedTime desc&pageSize=5`,
+      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,webViewLink)&orderBy=modifiedTime desc&pageSize=5`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (listRes.ok) {
@@ -594,6 +675,22 @@ export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
     // ignore folder search error
   }
 
+  // STEP 1 (PULL BEFORE PUSH): Pull any new rows written by Facebook Lead Ads / Google Ads from the sheet FIRST!
+  let pullSnap: PullGoogleSheetLeadsResult | null = null;
+  try {
+    const targetSheetUrlForPull =
+      candidateIds.length > 0
+        ? `https://docs.google.com/spreadsheets/d/${candidateIds[0]}/edit`
+        : undefined;
+    pullSnap = await pullNewLeadsFromGoogleSheetInDrive({
+      sheetUrl: targetSheetUrlForPull,
+      accessToken: token,
+    });
+  } catch {
+    // ignore pre-pull warning
+  }
+
+  // STEP 2 (EXPORT & PATCH): Now export the complete merged multi-tab workbook and update the Google Sheet in Drive
   const xlsxRes = await fetch('/api/leads/export.xlsx?project=tidyups');
   if (xlsxRes.ok && candidateIds.length > 0) {
     const xlsxBlob = await xlsxRes.blob();
@@ -644,6 +741,11 @@ export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
             sheetName,
             folder,
             userEmail,
+            pulledRowsCount: pullSnap?.pulledRowsCount || 0,
+            newlyImportedLeads: pullSnap?.newlyImportedLeads || [],
+            leads: pullSnap?.leads,
+            clients: pullSnap?.clients,
+            quotes: pullSnap?.quotes,
           };
         }
       } catch {

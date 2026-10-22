@@ -75,7 +75,7 @@ import {
   syncAllToFirestore,
   FIRESTORE_DATABASE_ID
 } from './services/firestoreSyncService';
-import { onFirebaseAuthStateChanged } from './lib/firebase';
+import { onFirebaseAuthStateChanged, getAccessTokenSync } from './lib/firebase';
 import { TeamChatDrawer } from './components/TeamChatDrawer';
 import { RoleSelectorModal } from './components/RoleSelectorModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
@@ -1314,9 +1314,13 @@ export function App() {
         setSyncAllStatusMessage('Incremental Delta Syncing: Jobber Quotes, Invoices, Calendar, Clients, Quo Calls & Master Leads...');
       }
       try {
+        const driveToken = getAccessTokenSync();
         const res = await fetch(`/api/sync-everything?project=${activeProjectId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-project-id': activeProjectId },
+          body: JSON.stringify({
+            accessToken: driveToken || undefined,
+          }),
         });
         const data = await res.json();
         if (data?.success) {
@@ -1329,6 +1333,9 @@ export function App() {
               for (const l of data.leads) {
                 if (l && l.id) {
                   const existing = byId.get(String(l.id));
+                  if (!existing) {
+                    saveLeadToFirestore(l).catch(() => {});
+                  }
                   byId.set(String(l.id), existing ? { ...existing, ...l } : l);
                 }
               }

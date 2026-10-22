@@ -30,6 +30,7 @@ import {
   Layers,
   Filter,
   ArrowRight,
+  Upload,
 } from 'lucide-react';
 import { AdLeadItem } from '../types/lead';
 import { Technician, ServiceTicket } from '../types/dispatch';
@@ -38,7 +39,11 @@ import { getEdmontonToday, getCleanerColor } from '../data/jobberCalendarData';
 import { JobberQuote, JobberInvoice, extractJobberNumericId } from '../services/jobberSyncModules';
 import { ClientRecord } from '../types/client';
 import { LEADS_SPREADSHEET_ID } from '../services/leadSheetSync';
-import { syncLeadsToLiveGoogleSheetInDrive } from '../services/googleDriveBackupService';
+import {
+  syncLeadsToLiveGoogleSheetInDrive,
+  pullNewLeadsFromGoogleSheetInDrive,
+} from '../services/googleDriveBackupService';
+import { saveLeadToFirestore, saveClientToFirestore } from '../services/firestoreSyncService';
 import { forwardGeocode } from '../services/geocodingService';
 import { QuickMapScheduleRadarView } from './QuickMapScheduleRadarView';
 
@@ -315,7 +320,10 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
   const [sheetUrl, setSheetUrl] = useState(`https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`);
   const [spreadsheetId, setSpreadsheetId] = useState(LEADS_SPREADSHEET_ID);
   const [isSyncingGoogleDriveSheet, setIsSyncingGoogleDriveSheet] = useState(false);
+  const [isPullingSheetsLeads, setIsPullingSheetsLeads] = useState(false);
+  const [isUploadingSheetFile, setIsUploadingSheetFile] = useState(false);
   const [localBanner, setLocalBanner] = useState<string | null>(null);
+  const sheetUploadInputRef = useRef<HTMLInputElement>(null);
 
   const isCallerPhoneBlocked = (rawPhone?: string, callObj?: any): boolean => {
     if (callObj?.isBlocked || callObj?.status === 'SOLICITOR_BLOCKED') return true;
@@ -516,13 +524,106 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
       const result = await syncLeadsToLiveGoogleSheetInDrive({
         spreadsheetId,
       });
-      setLocalBanner(`✓ Master Leads & Quotes Google Sheet formatted with frozen headers & color-coded sections (${result.sheetName})!`);
+      if (Array.isArray(result.leads) && result.leads.length > 0) {
+        onLeadsUpdated(result.leads);
+      }
+      if (Array.isArray(result.newlyImportedLeads) && result.newlyImportedLeads.length > 0) {
+        for (const lead of result.newlyImportedLeads) {
+          saveLeadToFirestore(lead).catch(() => {});
+        }
+      }
+      setLocalBanner(
+        result.pulledRowsCount && result.pulledRowsCount > 0
+          ? `✓ Pulled ${result.pulledRowsCount} new FB/Sheet lead(s) first, then formatted Master Google Sheet (${result.sheetName})!`
+          : `✓ Master Leads & Quotes Google Sheet formatted with frozen headers & color-coded sections (${result.sheetName})!`
+      );
       setTimeout(() => setLocalBanner(null), 6000);
     } catch (err: any) {
       setLocalBanner(`Google Sheet sync note: ${err?.message || 'Click Open Master Sheet to view.'}`);
       setTimeout(() => setLocalBanner(null), 5000);
     } finally {
       setIsSyncingGoogleDriveSheet(false);
+    }
+  };
+
+  const handlePullLeadsFromSheets = async () => {
+    setIsPullingSheetsLeads(true);
+    try {
+      const data = await pullNewLeadsFromGoogleSheetInDrive({
+        sheetUrl,
+        projectId,
+        promptAuthIfNeeded: true,
+      });
+      if (Array.isArray(data?.leads)) {
+        onLeadsUpdated(data.leads);
+      }
+      if (Array.isArray(data?.clients)) {
+        onClientsUpdated(data.clients);
+      }
+      if (Array.isArray(data?.newlyImportedLeads) && data.newlyImportedLeads.length > 0) {
+        for (const lead of data.newlyImportedLeads) {
+          saveLeadToFirestore(lead).catch(() => {});
+        }
+      }
+      setLocalBanner(
+        data?.message ||
+          `✓ Checked Google Sheets (${data?.pulledRowsCount || 0} new FB/Google lead(s) imported into Master Table & Firestore).`
+      );
+      setTimeout(() => setLocalBanner(null), 7000);
+    } catch (err: any) {
+      setLocalBanner(`Could not pull from Google Sheet: ${err?.message || 'Error'}`);
+      setTimeout(() => setLocalBanner(null), 5000);
+    } finally {
+      setIsPullingSheetsLeads(false);
+    }
+  };
+
+  const handleUploadSheetFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingSheetFile(true);
+    try {
+      const isCsv = file.name.toLowerCase().endsWith('.csv') || file.type === 'text/csv';
+      let bodyPayload: any = { fileName: file.name, project: projectId };
+      if (isCsv) {
+        bodyPayload.csvText = await file.text();
+      } else {
+        const buf = await file.arrayBuffer();
+        let binary = '';
+        const bytes = new Uint8Array(buf);
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        bodyPayload.fileBase64 = window.btoa(binary);
+      }
+      const res = await fetch(`/api/leads/import-sheet-file?project=${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-project-id': projectId },
+        body: JSON.stringify(bodyPayload),
+      });
+      const data = await res.json();
+      if (Array.isArray(data?.leads)) onLeadsUpdated(data.leads);
+      if (Array.isArray(data?.clients)) {
+        onClientsUpdated(data.clients);
+        for (const c of data.clients.slice(0, 15)) {
+          saveClientToFirestore(c).catch(() => {});
+        }
+      }
+      if (Array.isArray(data?.newlyImportedLeads)) {
+        for (const lead of data.newlyImportedLeads) {
+          saveLeadToFirestore(lead).catch(() => {});
+        }
+      }
+      setLocalBanner(
+        data?.message || `✓ Imported ${data?.importedCount || 0} lead(s) from ${file.name} into Master Table & Firestore!`
+      );
+      setTimeout(() => setLocalBanner(null), 7000);
+    } catch (err: any) {
+      setLocalBanner(`File import failed: ${err?.message || 'Could not parse file'}`);
+      setTimeout(() => setLocalBanner(null), 5000);
+    } finally {
+      setIsUploadingSheetFile(false);
+      if (sheetUploadInputRef.current) sheetUploadInputRef.current.value = '';
     }
   };
 
@@ -1171,6 +1272,35 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
               </span>
             </button>
 
+            <button
+              type="button"
+              onClick={handlePullLeadsFromSheets}
+              disabled={isPullingSheetsLeads}
+              className="px-3.5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-500 border border-blue-400/50 text-white font-black text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer disabled:opacity-50"
+              title="Pull any new Facebook Lead Ads or Google Ads rows from your connected Google Sheet (scans all tabs & Drive)"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isPullingSheetsLeads ? 'animate-spin' : ''}`} />
+              <span>{isPullingSheetsLeads ? 'Scanning Google Sheet Tabs...' : '🔄 Pull FB & Sheet Leads'}</span>
+            </button>
+
+            <input
+              ref={sheetUploadInputRef}
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              onChange={handleUploadSheetFile}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => sheetUploadInputRef.current?.click()}
+              disabled={isUploadingSheetFile}
+              className="px-3.5 py-2.5 rounded-2xl bg-indigo-600/90 hover:bg-indigo-500 border border-indigo-400/40 text-white font-extrabold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+              title="Upload a downloaded Facebook Lead Form CSV or Google Sheet (.csv / .xlsx) to import leads immediately"
+            >
+              <Upload className="w-3.5 h-3.5 text-indigo-200" />
+              <span>{isUploadingSheetFile ? 'Importing...' : '📥 Upload FB Form (.CSV/.XLSX)'}</span>
+            </button>
+
             <a
               href={sheetUrl}
               target="_blank"
@@ -1188,10 +1318,10 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
               onClick={handleSyncToGoogleDriveSheet}
               disabled={isSyncingGoogleDriveSheet}
               className="px-3.5 py-2.5 rounded-2xl bg-emerald-800/80 hover:bg-emerald-700 border border-emerald-500/40 text-emerald-100 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-              title="Format & push color-coded sections and frozen headers to Google Drive Sheet"
+              title="Pulls any new sheet rows first, then formats & pushes color-coded sections and frozen headers to Google Drive Sheet"
             >
               <CloudUpload className="w-4 h-4 text-emerald-300" />
-              <span>{isSyncingGoogleDriveSheet ? 'Formatting Sheet...' : 'Push Styled Colors to Google Sheet'}</span>
+              <span>{isSyncingGoogleDriveSheet ? 'Syncing Sheet...' : 'Push Styled Colors to Google Sheet'}</span>
             </button>
           </div>
         </div>

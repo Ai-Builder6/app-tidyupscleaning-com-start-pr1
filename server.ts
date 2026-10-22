@@ -5963,127 +5963,598 @@ app.post("/api/webhooks/google", handleInboundLeadWebhook("Google Leads"));
 app.post("/api/leads/facebook", handleInboundLeadWebhook("Facebook Leads"));
 app.post("/api/leads/google", handleInboundLeadWebhook("Google Leads"));
 
-// POST /api/leads/reconnect-sheets: Reconnects Facebook Leads, Google Leads & Pulls Live Rows from Connected Google Sheets
+// Helper: Parse RFC-4180 CSV text into a 2D array of string cells (preserving quoted commas and newlines)
+function parseCsvTo2DMatrix(csvText: string): string[][] {
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentCell = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < csvText.length; i++) {
+    const ch = csvText[i];
+    const next = csvText[i + 1];
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        currentCell += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        currentCell += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        currentRow.push(currentCell.trim());
+        currentCell = "";
+      } else if (ch === "\r" && next === "\n") {
+        currentRow.push(currentCell.trim());
+        rows.push(currentRow);
+        currentRow = [];
+        currentCell = "";
+        i++;
+      } else if (ch === "\n" || ch === "\r") {
+        currentRow.push(currentCell.trim());
+        rows.push(currentRow);
+        currentRow = [];
+        currentCell = "";
+      } else {
+        currentCell += ch;
+      }
+    }
+  }
+  if (currentCell.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentCell.trim());
+    rows.push(currentRow);
+  }
+  return rows.filter((r) => r.some((c) => String(c || "").trim().length > 0));
+}
+
+// Helper: Extract new leads from any 2D sheet matrix (supports TidyUps 20-col styled table, ScrubbyBuilder 20-col table, and native Facebook/Meta Lead Ads & Google Ads sheets)
+function extractLeadsFromSheetMatrix(params: {
+  matrix: any[][];
+  tabName: string;
+  spreadsheetId: string;
+  store: any;
+  newlyImportedLeads: any[];
+}): number {
+  const { matrix, tabName, spreadsheetId, store, newlyImportedLeads } = params;
+  if (!Array.isArray(matrix) || matrix.length === 0 || !store) return 0;
+  if (!Array.isArray(store.adLeads)) store.adLeads = [];
+  if (!Array.isArray(store.clients)) store.clients = [];
+
+  // Identify header row dynamically (TidyUps puts banner on Row 1, KPI bar on Row 2, and headers on Row 3; Meta/ScrubbyBuilder puts headers on Row 1)
+  let headerRowIdx = -1;
+  let headerCols: string[] = [];
+
+  for (let r = 0; r < Math.min(matrix.length, 15); r++) {
+    const rowCells = (matrix[r] || []).map((c: any) =>
+      String(c ?? "")
+        .replace(/^"|"$/g, "")
+        .trim()
+        .toLowerCase()
+    );
+    const nonEmptyCount = rowCells.filter(Boolean).length;
+    if (nonEmptyCount < 2) continue;
+
+    // Skip executive banner or KPI summary bar
+    if (
+      rowCells[0]?.startsWith("✨") ||
+      rowCells[0]?.startsWith("📊") ||
+      rowCells[0]?.includes("tidyups cleaning —") ||
+      rowCells[0]?.includes("tab leads:")
+    ) {
+      continue;
+    }
+
+    const headerScore = rowCells.filter((h) =>
+      /^(date|created_time|id|sheet tab|source|source_tab|lead source|client name|full_name|first_name|first name|last_name|last name|customer|name|phone|phone_number|mobile|email|email address|street address|street_address|address|service|service package|bedrooms|bathrooms|platform|ad_name|form_name)$/i.test(
+        h.replace(/\s*\(.*?\)\s*/g, "").trim()
+      )
+    ).length;
+
+    if (headerScore >= 2) {
+      headerRowIdx = r;
+      headerCols = rowCells;
+      break;
+    }
+  }
+
+  // Fallback if no explicit header row matched
+  if (headerRowIdx === -1) {
+    headerRowIdx = 0;
+    headerCols = (matrix[0] || []).map((c: any) =>
+      String(c ?? "")
+        .replace(/^"|"$/g, "")
+        .trim()
+        .toLowerCase()
+    );
+  }
+
+  let addedFromTab = 0;
+
+  for (let i = headerRowIdx + 1; i < matrix.length; i++) {
+    const rawRow = matrix[i] || [];
+    const cols = rawRow.map((c: any) => String(c ?? "").replace(/^"|"$/g, "").trim());
+    if (cols.every((c) => !c)) continue;
+
+    const firstCellUpper = (cols[0] || "").toUpperCase();
+    const secondCellLower = (cols[1] || "").toLowerCase();
+
+    // Skip decorative banners, footers, and channel color legend rows
+    if (
+      cols[0]?.startsWith("✨") ||
+      cols[0]?.startsWith("📊") ||
+      firstCellUpper.includes("TOTALS / SUMMARY") ||
+      firstCellUpper.includes("CHANNEL COLOR KEY") ||
+      secondCellLower.includes("badge +") ||
+      secondCellLower.includes("active rows:") ||
+      (firstCellUpper === "DATE" && secondCellLower === "sheet tab")
+    ) {
+      continue;
+    }
+
+    const getByHeader = (...names: string[]) => {
+      for (const n of names) {
+        const nLow = n.toLowerCase();
+        const exactIdx = headerCols.findIndex(
+          (h) => h === nLow || h.replace(/\s*\(.*?\)\s*/g, "").trim() === nLow
+        );
+        if (exactIdx >= 0 && cols[exactIdx]) return cols[exactIdx];
+        const partialIdx = headerCols.findIndex((h) => h.includes(nLow));
+        if (partialIdx >= 0 && cols[partialIdx]) return cols[partialIdx];
+      }
+      return "";
+    };
+
+    const rowExternalId = getByHeader("id", "lead_id");
+    const rowQuoteNumber = getByHeader("jobber quote #", "jobber_quote_number", "quote #", "quote_number");
+
+    const firstName = getByHeader("first_name", "first name", "firstname");
+    const lastName = getByHeader("last_name", "last name", "lastname");
+    let rawName =
+      getByHeader("client name", "full_name", "full name", "customer_name", "customer name", "name", "what_is_your_name") ||
+      `${firstName} ${lastName}`.trim();
+
+    // Clean up Meta dummy test lead syntax like "<test lead: dummy data for full_name>" so it looks clean & recognizable
+    const isMetaDummyTest =
+      rawName.toLowerCase().includes("test lead") ||
+      cols.some((c) => c.toLowerCase().includes("<test lead"));
+    if (rawName.startsWith("<test lead")) {
+      rawName = "Facebook Ad Test Lead";
+    }
+
+    // Meta Lead Ads often prefixes phone numbers with "p:" (e.g. "p:+17805550199")
+    const rawPhoneCandidate = (
+      getByHeader("phone number", "phone_number", "phone", "mobile", "cell", "contact_phone") ||
+      cols.find((c) => /(?:p:)?\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i.test(c)) ||
+      ""
+    )
+      .replace(/^p:/i, "")
+      .replace(/^tel:/i, "")
+      .trim();
+    const rawPhone = normalizePhoneNumber(rawPhoneCandidate);
+
+    const rawEmail = (
+      getByHeader("email address", "email", "user_email", "e-mail") ||
+      cols.find((c) => /\S+@\S+\.\S+/.test(c)) ||
+      ""
+    ).trim();
+
+    if (!rawName && !rawPhone && !rawEmail && !isMetaDummyTest) continue;
+    if (
+      rawName.toLowerCase().includes("devon clark") ||
+      rawName.toLowerCase() === "client name" ||
+      rawName.toLowerCase() === "full_name"
+    ) {
+      continue;
+    }
+
+    const rawAddr =
+      getByHeader("street address", "street_address", "property_address", "address", "street") ||
+      "Edmonton, AB";
+    const rawCity = getByHeader("city", "municipality") || "Edmonton";
+    const rawPostal = getByHeader("postal code", "post_code", "postal_code", "zip_code", "postal") || "";
+    const rawService =
+      getByHeader("service package", "service_requested", "service", "cleaning_type", "type_of_cleaning", "package") ||
+      "Residential Cleaning";
+    const rawBed = getByHeader("bedrooms", "bedroom", "how_many_bedrooms", "bed") || "3 Bedrooms";
+    const rawBath = getByHeader("bathrooms", "bathroom", "how_many_bathrooms", "bath") || "2 Bathrooms";
+
+    const platformCol = getByHeader("platform", "ad_name", "form_name");
+    const rawSourceCell =
+      getByHeader("sheet tab", "source_tab", "lead source", "source") ||
+      (platformCol ? `Facebook Lead Ads (${platformCol})` : "") ||
+      tabName ||
+      "FB Leads";
+
+    // If this row came from the "Facebook Leads" tab, or a Facebook Form tab, or has Meta columns (ad_name/form_name/platform=fb/ig), classify as FB Leads
+    const inferredSourceInput =
+      /facebook|fb|meta|instagram|\big\b|form/i.test(`${tabName} ${rawSourceCell} ${platformCol}`) || isMetaDummyTest
+        ? "FB Leads"
+        : rawSourceCell;
+
+    const { source, sourceTab } = resolveCleanSheetTab(inferredSourceInput);
+
+    const rawCreatedDate =
+      getByHeader("date", "created_time", "timestamp", "date_received") || new Date().toISOString();
+    const requestedDate =
+      getByHeader("requested date", "date_of_service_requested", "preferred_date").slice(0, 10) ||
+      rawCreatedDate.slice(0, 10) ||
+      new Date().toISOString().slice(0, 10);
+
+    const rawQuotedNum = parseFloat(
+      String(getByHeader("quoted total", "quoted_amount", "total", "price") || "").replace(/[^0-9.]/g, "")
+    );
+    const quotedAmount = !isNaN(rawQuotedNum) && rawQuotedNum > 0 ? rawQuotedNum : 221.07;
+
+    const rawNotes =
+      getByHeader("notes", "message", "comments", "special_instructions", "ad_name", "form_name") ||
+      `Pulled from Google Sheet (${tabName || "Main Tab"})`;
+
+    const normPhone10 = rawPhone.replace(/\D/g, "").slice(-10);
+    const normNameLower = (rawName || "").trim().toLowerCase();
+
+    // Smart deduplication:
+    // 1. If the sheet row has an existing Jobber Quote # (e.g. QT-4379) or internal lead ID (lead-clean-...) that is already in store.adLeads, skip it.
+    // 2. Otherwise, only skip if an existing lead in the SAME sourceTab (or with the same external ID) already matches both name & phone.
+    // This ensures that if the owner tests a Facebook Lead Ad using their own phone/name (which might exist on an old Voice quote), the new Facebook Lead still imports into FB Leads!
+    const alreadyExists = (store.adLeads || []).some((l: any) => {
+      if (rowExternalId && (l.id === rowExternalId || l.externalLeadId === rowExternalId)) {
+        return true;
+      }
+      if (rowQuoteNumber && rowQuoteNumber.startsWith("QT-") && l.quoteNumber === rowQuoteNumber) {
+        return true;
+      }
+      const lPhone10 = String(l.phone || "").replace(/\D/g, "").slice(-10);
+      const lNameLower = String(l.customerName || "").trim().toLowerCase();
+      const sameTab = (l.sourceTab || "") === sourceTab;
+
+      if (rowQuoteNumber && lPhone10 && normPhone10 && lPhone10 === normPhone10 && lNameLower === normNameLower) {
+        return true;
+      }
+      if (sameTab) {
+        if (normPhone10 && lPhone10 === normPhone10 && normNameLower && lNameLower === normNameLower) {
+          return true;
+        }
+        if (!normPhone10 && normNameLower && lNameLower === normNameLower && String(l.email || "").toLowerCase() === rawEmail.toLowerCase()) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (!alreadyExists) {
+      const importedLead = {
+        id:
+          rowExternalId && String(rowExternalId).startsWith("lead-")
+            ? rowExternalId
+            : `lead-sheet-${Date.now().toString(36)}-${newlyImportedLeads.length + 1}`,
+        externalLeadId: rowExternalId || undefined,
+        customerName: rawName || (isMetaDummyTest ? "Facebook Ad Test Lead" : "Facebook / Sheet Lead"),
+        phone: rawPhone,
+        email: rawEmail,
+        address: rawAddr,
+        city: rawCity,
+        postalCode: rawPostal,
+        serviceRequested: rawService,
+        bedrooms: /^\d+$/.test(rawBed) ? `${rawBed} Bedrooms` : rawBed,
+        bathrooms: /^\d+(\.\d+)?$/.test(rawBath) ? `${rawBath} Bathrooms` : rawBath,
+        dateOfServiceRequested: requestedDate,
+        source: source as any,
+        sourceTab,
+        campaignName: `${sourceTab} — Google Sheet (${tabName || "Live Tab"})`,
+        dateReceived: rawCreatedDate.includes("T") ? rawCreatedDate : new Date().toISOString(),
+        status: getByHeader("status") || "New",
+        verdict: (getByHeader("verdict") || "Good lead") as any,
+        isJobberSynced: Boolean(rowQuoteNumber && rowQuoteNumber.startsWith("QT-")),
+        quoteNumber: rowQuoteNumber || undefined,
+        quotedAmount,
+        notes: rawNotes,
+        googleSheetSynced: true,
+        googleSheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
+      };
+
+      store.adLeads.unshift(importedLead as any);
+      newlyImportedLeads.push(importedLead);
+      addedFromTab++;
+
+      // Also ensure client record exists in store.clients
+      const clientExists = store.clients.some(
+        (c: any) =>
+          (normPhone10 && String(c.phone || "").replace(/\D/g, "").slice(-10) === normPhone10) ||
+          (normNameLower && String(c.name || "").trim().toLowerCase() === normNameLower)
+      );
+      if (!clientExists) {
+        store.clients.unshift({
+          id: `cli-sheet-${Date.now().toString(36)}-${newlyImportedLeads.length}`,
+          name: importedLead.customerName,
+          phone: rawPhone || "(780) 555-0199",
+          email: rawEmail,
+          address: `${rawAddr}, ${rawCity}, AB ${rawPostal}`.trim(),
+          city: rawCity,
+          province: "AB",
+          postalCode: rawPostal,
+          verdict: "Good lead",
+          tags: [sourceTab.toLowerCase().replace(/\s+/g, "-"), "google-sheet-sync"],
+          isJobberLinked: false,
+          totalJobs: 0,
+          latestServiceDate: requestedDate,
+          notes: rawNotes,
+          source: sourceTab,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as any);
+      }
+    }
+  }
+
+  return addedFromTab;
+}
+
+// Helper: Parse an entire .xlsx workbook buffer across ALL worksheet tabs
+function extractLeadsFromXlsxBuffer(
+  buffer: Buffer,
+  spreadsheetId: string,
+  store: any,
+  newlyImportedLeads: any[]
+): { pulledCount: number; scannedTabs: string[] } {
+  const scannedTabs: string[] = [];
+  let pulledCount = 0;
+  try {
+    const wb = XLSX.read(buffer, { type: "buffer" });
+    // Prioritize Facebook Leads / ScrubbyBuilder Leads / Form tabs first so newly added FB rows get their specific tab attribution before Master Leads
+    const orderedSheetNames = [...(wb.SheetNames || [])].sort((a, b) => {
+      const aScore = /facebook|fb|form|scrubby|google/i.test(a) ? 0 : 1;
+      const bScore = /facebook|fb|form|scrubby|google/i.test(b) ? 0 : 1;
+      return aScore - bScore;
+    });
+
+    for (const sheetName of orderedSheetNames) {
+      const ws = wb.Sheets[sheetName];
+      if (!ws) continue;
+      scannedTabs.push(sheetName);
+      const matrix = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: "" });
+      pulledCount += extractLeadsFromSheetMatrix({
+        matrix,
+        tabName: sheetName,
+        spreadsheetId,
+        store,
+        newlyImportedLeads,
+      });
+    }
+  } catch (err: any) {
+    console.warn("XLSX workbook parse notice:", err?.message);
+  }
+  return { pulledCount, scannedTabs };
+}
+
+// Core helper: Pulls new rows from all connected Google Sheets (via authenticated Google Drive API export, public XLSX export, and gviz CSV fallback)
+async function pullLeadsFromConnectedGoogleSheets(
+  store: any,
+  options?: {
+    customSheetUrl?: string;
+    accessToken?: string;
+    xlsxBase64?: string;
+    csvText?: string;
+    fileName?: string;
+  }
+): Promise<{
+  pulledRowsCount: number;
+  newlyImportedLeads: any[];
+  scannedSheetIds: string[];
+  scannedTabs: string[];
+  discoveredDriveSheetUrl?: string;
+  discoveredDriveSheetName?: string;
+}> {
+  const newlyImportedLeads: any[] = [];
+  const scannedTabsSet = new Set<string>();
+  let discoveredDriveSheetUrl: string | undefined;
+  let discoveredDriveSheetName: string | undefined;
+
+  const customSheetUrl = options?.customSheetUrl || googleSheetsSyncState.sheetUrl;
+  const extractedId =
+    customSheetUrl?.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1] ||
+    googleSheetsSyncState.createdDriveSheetId ||
+    googleSheetsSyncState.spreadsheetId ||
+    LEADS_SPREADSHEET_ID;
+
+  const sheetIdsSet = new Set<string>(
+    [
+      extractedId,
+      googleSheetsSyncState.createdDriveSheetId,
+      googleSheetsSyncState.spreadsheetId,
+      LEADS_SPREADSHEET_ID,
+      SECONDARY_LEADS_SPREADSHEET_ID,
+    ].filter((id) => Boolean(id && !String(id).includes("clean_sheet") && String(id).length >= 20))
+  );
+
+  // 1. If a direct file buffer or CSV text was provided (e.g. uploaded or client-fetched), parse it immediately
+  if (options?.xlsxBase64) {
+    const buf = Buffer.from(options.xlsxBase64, "base64");
+    const { scannedTabs } = extractLeadsFromXlsxBuffer(buf, extractedId, store, newlyImportedLeads);
+    scannedTabs.forEach((t) => scannedTabsSet.add(t));
+  }
+  if (options?.csvText) {
+    const matrix = parseCsvTo2DMatrix(options.csvText);
+    const tabHint = options?.fileName?.toLowerCase().includes("fb") || options?.fileName?.toLowerCase().includes("facebook")
+      ? "Facebook Leads"
+      : "Uploaded CSV";
+    scannedTabsSet.add(tabHint);
+    extractLeadsFromSheetMatrix({
+      matrix,
+      tabName: tabHint,
+      spreadsheetId: extractedId,
+      store,
+      newlyImportedLeads,
+    });
+  }
+
+  // 2. If user's Google OAuth accessToken is provided, also discover any recently modified Lead/TidyUps/Facebook sheets in their Google Drive!
+  const token = (options?.accessToken || "").trim();
+  if (token) {
+    try {
+      const q = encodeURIComponent(
+        `mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`
+      );
+      const listRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,webViewLink,modifiedTime)&orderBy=modifiedTime desc&pageSize=12`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        for (const f of listData?.files || []) {
+          const fname = String(f?.name || "");
+          if (
+            f?.id &&
+            (/tidyups|lead|facebook|\bfb\b|ad|form|clean|scrubby/i.test(fname) || sheetIdsSet.has(f.id))
+          ) {
+            sheetIdsSet.add(f.id);
+            if (!discoveredDriveSheetUrl && /tidyups|lead|facebook|\bfb\b/i.test(fname)) {
+              discoveredDriveSheetUrl = `https://docs.google.com/spreadsheets/d/${f.id}/edit`;
+              discoveredDriveSheetName = fname;
+            }
+          }
+        }
+      }
+    } catch (driveListErr: any) {
+      console.warn("Drive recent sheets lookup notice:", driveListErr?.message);
+    }
+  }
+
+  const sheetIdsToCheck = Array.from(sheetIdsSet);
+
+  for (const sid of sheetIdsToCheck) {
+    let parsedViaXlsx = false;
+
+    // Strategy A: Authenticated Google Drive API full multi-tab .xlsx export (works on private user Drive sheets!)
+    if (token) {
+      try {
+        const exportRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+            sid
+          )}/export?mimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (exportRes.ok) {
+          const arrBuf = await exportRes.arrayBuffer();
+          const buf = Buffer.from(arrBuf);
+          if (buf.length > 100) {
+            const { scannedTabs } = extractLeadsFromXlsxBuffer(buf, sid, store, newlyImportedLeads);
+            scannedTabs.forEach((t) => scannedTabsSet.add(t));
+            parsedViaXlsx = true;
+          }
+        }
+      } catch {
+        // Fallback to public export
+      }
+    }
+
+    // Strategy B: Public Google Sheets .xlsx export (parses ALL tabs if sheet is link-shared)
+    if (!parsedViaXlsx) {
+      try {
+        const pubXlsxUrl = `https://docs.google.com/spreadsheets/d/${sid}/export?format=xlsx`;
+        const pubRes = await fetch(pubXlsxUrl, { method: "GET", redirect: "follow" });
+        const contentType = String(pubRes.headers.get("content-type") || "").toLowerCase();
+        if (
+          pubRes.ok &&
+          (contentType.includes("spreadsheet") ||
+            contentType.includes("excel") ||
+            contentType.includes("octet-stream"))
+        ) {
+          const arrBuf = await pubRes.arrayBuffer();
+          const buf = Buffer.from(arrBuf);
+          if (buf.length > 100 && buf[0] === 0x50 && buf[1] === 0x4b) {
+            const { scannedTabs } = extractLeadsFromXlsxBuffer(buf, sid, store, newlyImportedLeads);
+            scannedTabs.forEach((t) => scannedTabsSet.add(t));
+            parsedViaXlsx = true;
+          }
+        }
+      } catch {
+        // Fallback to CSV tab queries
+      }
+    }
+
+    // Strategy C: Public gviz CSV export across all common tab names
+    if (!parsedViaXlsx) {
+      for (const tabName of [
+        "Facebook Leads",
+        "FB Leads",
+        "ScrubbyBuilder Leads",
+        "Google Leads",
+        "Master Leads & Quotes",
+        "Voice & Quick Quotes",
+        "Pasted Leads",
+        "Form 1",
+        "Sheet1",
+        "Leads",
+        "",
+      ]) {
+        try {
+          const csvUrl = tabName
+            ? `https://docs.google.com/spreadsheets/d/${sid}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`
+            : `https://docs.google.com/spreadsheets/d/${sid}/gviz/tq?tqx=out:csv`;
+          const resp = await fetch(csvUrl, { method: "GET" });
+          if (!resp.ok) continue;
+          const text = await resp.text();
+          if (
+            !text ||
+            text.trim().startsWith("<!DOCTYPE") ||
+            text.trim().startsWith("<html") ||
+            text.includes("accounts.google.com/ServiceLogin")
+          ) {
+            continue;
+          }
+          const matrix = parseCsvTo2DMatrix(text);
+          if (matrix.length <= 1) continue;
+          scannedTabsSet.add(tabName || "Default Tab");
+          extractLeadsFromSheetMatrix({
+            matrix,
+            tabName: tabName || "FB Leads",
+            spreadsheetId: sid,
+            store,
+            newlyImportedLeads,
+          });
+        } catch {
+          // Continue checking remaining tabs
+        }
+      }
+    }
+  }
+
+  return {
+    pulledRowsCount: newlyImportedLeads.length,
+    newlyImportedLeads,
+    scannedSheetIds: sheetIdsToCheck,
+    scannedTabs: Array.from(scannedTabsSet),
+    discoveredDriveSheetUrl,
+    discoveredDriveSheetName,
+  };
+}
+
+// POST /api/leads/reconnect-sheets: Reconnects Facebook Leads, Google Leads & Pulls Live Rows from Connected Google Sheets (Private Drive or Link-Shared)
 app.post("/api/leads/reconnect-sheets", async (req, res) => {
   const projectId = getProjectId(req);
   const store = loadStore(projectId);
   const customSheetUrl = req.body?.sheetUrl || googleSheetsSyncState.sheetUrl;
-  const extractedId =
-    customSheetUrl?.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1] ||
-    googleSheetsSyncState.spreadsheetId ||
-    LEADS_SPREADSHEET_ID;
+  const authHeader = String(req.headers.authorization || "");
+  const accessToken =
+    req.body?.accessToken ||
+    (authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "");
 
-  const sheetIdsToCheck = Array.from(
-    new Set([extractedId, LEADS_SPREADSHEET_ID, SECONDARY_LEADS_SPREADSHEET_ID].filter(Boolean))
-  );
+  const pullResult = await pullLeadsFromConnectedGoogleSheets(store, {
+    customSheetUrl,
+    accessToken,
+    xlsxBase64: req.body?.xlsxBase64,
+    csvText: req.body?.csvText,
+    fileName: req.body?.fileName,
+  });
 
-  let pulledRowsCount = 0;
-  const newlyImportedLeads: any[] = [];
-
-  for (const sid of sheetIdsToCheck) {
-    for (const tabName of ["Facebook Leads", "FB Leads", "Google Leads", "ScrubbyBuilder Leads", ""]) {
-      try {
-        const csvUrl = tabName
-          ? `https://docs.google.com/spreadsheets/d/${sid}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`
-          : `https://docs.google.com/spreadsheets/d/${sid}/gviz/tq?tqx=out:csv`;
-        const resp = await fetch(csvUrl, { method: "GET" });
-        if (!resp.ok) continue;
-        const text = await resp.text();
-        if (!text || text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) continue;
-
-        const lines = text
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean);
-        if (lines.length <= 1) continue;
-
-        const headerCols = lines[0]
-          .split(",")
-          .map((c) => c.replace(/^"|"$/g, "").trim().toLowerCase());
-
-        for (let i = 1; i < Math.min(lines.length, 60); i++) {
-          const cols = lines[i].split(",").map((c) => c.replace(/^"|"$/g, "").trim());
-          if (cols.every((c) => !c)) continue;
-
-          const getByHeader = (...names: string[]) => {
-            for (const n of names) {
-              const idx = headerCols.findIndex((h) => h.includes(n));
-              if (idx >= 0 && cols[idx]) return cols[idx];
-            }
-            return "";
-          };
-
-          const firstName = getByHeader("first_name", "first name");
-          const lastName = getByHeader("last_name", "last name");
-          const rawName =
-            getByHeader("client name", "customer", "full_name", "name") ||
-            `${firstName} ${lastName}`.trim();
-          const rawPhone = normalizePhoneNumber(
-            getByHeader("phone", "mobile", "cell") ||
-              cols.find((c) => /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/.test(c)) ||
-              ""
-          );
-          const rawEmail =
-            getByHeader("email") || cols.find((c) => /\S+@\S+\.\S+/.test(c)) || "";
-          const rawAddr =
-            getByHeader("address", "street") || "Edmonton, AB";
-          const rawService =
-            getByHeader("service", "package") || "Residential Cleaning";
-          const rawBed = getByHeader("bedroom", "bed") || "3 Bedrooms";
-          const rawBath = getByHeader("bathroom", "bath") || "2 Bathrooms";
-          const rawSource =
-            getByHeader("source_tab", "source", "sheet tab", "platform") ||
-            tabName ||
-            "FB Leads";
-
-          if (!rawName && !rawPhone) continue;
-          if (rawName.toLowerCase().includes("devon clark") || rawName.toLowerCase().includes("client name")) continue;
-
-          const exists = (store?.adLeads || []).some(
-            (l: any) =>
-              (rawPhone &&
-                String(l.phone || "").replace(/\D/g, "").slice(-10) ===
-                  rawPhone.replace(/\D/g, "").slice(-10)) ||
-              (rawName &&
-                String(l.customerName || "").trim().toLowerCase() === rawName.toLowerCase())
-          );
-
-          if (!exists && store) {
-            const { source, sourceTab } = resolveCleanSheetTab(rawSource);
-            const importedLead = {
-              id: `lead-sheet-${Date.now().toString(36)}-${pulledRowsCount}`,
-              customerName: rawName || "Google Sheet Lead",
-              phone: rawPhone,
-              email: rawEmail,
-              address: rawAddr,
-              city: getByHeader("city") || "Edmonton",
-              postalCode: getByHeader("post_code", "postal") || "",
-              serviceRequested: rawService,
-              bedrooms: /\d+$/.test(rawBed) ? `${rawBed} Bedrooms` : rawBed,
-              bathrooms: /\d+$/.test(rawBath) ? `${rawBath} Bathrooms` : rawBath,
-              dateOfServiceRequested:
-                getByHeader("date", "created_time").slice(0, 10) ||
-                new Date().toISOString().slice(0, 10),
-              source: source as any,
-              sourceTab,
-              campaignName: `${sourceTab} — Google Sheet Sync`,
-              dateReceived: new Date().toISOString(),
-              status: "New",
-              verdict: "Good lead" as const,
-              isJobberSynced: false,
-              quotedAmount: 221.07,
-              notes: getByHeader("message", "notes") || `Pulled from Google Sheet (${sid.slice(0, 8)}...)`,
-              googleSheetSynced: true,
-              googleSheetUrl: `https://docs.google.com/spreadsheets/d/${sid}/edit`,
-            };
-            store.adLeads.unshift(importedLead as any);
-            newlyImportedLeads.push(importedLead);
-            pulledRowsCount++;
-          }
-        }
-      } catch {
-        // Continue checking remaining tabs/sheets
-      }
+  if (pullResult.discoveredDriveSheetUrl && !googleSheetsSyncState.createdDriveSheetUrl) {
+    googleSheetsSyncState.createdDriveSheetUrl = pullResult.discoveredDriveSheetUrl;
+    if (pullResult.discoveredDriveSheetName) {
+      googleSheetsSyncState.createdDriveSheetName = pullResult.discoveredDriveSheetName;
     }
   }
 
@@ -6095,8 +6566,12 @@ app.post("/api/leads/reconnect-sheets", async (req, res) => {
 
   res.json({
     success: true,
-    pulledRowsCount,
-    newlyImportedLeads,
+    pulledRowsCount: pullResult.pulledRowsCount,
+    newlyImportedLeads: pullResult.newlyImportedLeads,
+    scannedSheetIds: pullResult.scannedSheetIds,
+    scannedTabs: pullResult.scannedTabs,
+    discoveredDriveSheetUrl: pullResult.discoveredDriveSheetUrl,
+    discoveredDriveSheetName: pullResult.discoveredDriveSheetName,
     leads: store?.adLeads || [],
     clients: store?.clients || [],
     quotes: store?.quotes || [],
@@ -6104,12 +6579,77 @@ app.post("/api/leads/reconnect-sheets", async (req, res) => {
       facebook: "https://app.tidyupscleaning.com/api/webhooks/facebook",
       google: "https://app.tidyupscleaning.com/api/webhooks/google",
       universal: "https://app.tidyupscleaning.com/api/leads/webhook",
-      customerBookingSite: "https://book.tidyupscleaning.com",
+      customerBookingSite: "https://app.tidyupscleaning.com/booking",
     },
     message:
-      pulledRowsCount > 0
-        ? `✓ Reconnected Facebook & Google Leads and pulled ${pulledRowsCount} new lead row(s) from your Google Sheet!`
-        : `✓ Reconnected Facebook & Google Lead Webhooks + Customer Booking Site (book.tidyupscleaning.com)! All ${store?.adLeads?.length || 0} leads are active and synced.`,
+      pullResult.pulledRowsCount > 0
+        ? `✓ Pulled ${pullResult.pulledRowsCount} new lead row(s) (${pullResult.newlyImportedLeads
+            .map((l) => l.customerName)
+            .slice(0, 3)
+            .join(", ")}) from your Google Sheet (${pullResult.scannedTabs.length || 1} tabs scanned) into Master Leads & Quotes!`
+        : `✓ Checked ${pullResult.scannedSheetIds.length} Google Sheet(s)${
+            pullResult.scannedTabs.length > 0 ? ` (${pullResult.scannedTabs.join(", ")})` : ""
+          }. All ${store?.adLeads?.length || 0} leads are in sync! (Tip: If your Facebook test lead is only inside Facebook's Instant Form and not yet written to the Google Sheet, connect Google Sheets inside Meta Instant Forms CRM setup or upload the form CSV/XLSX).`,
+  });
+});
+
+// POST /api/leads/import-sheet-file: Direct 1-Click Upload of any Facebook Lead Form CSV/XLSX or Google Sheet export
+app.post("/api/leads/import-sheet-file", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  const { xlsxBase64, csvText, fileName } = req.body || {};
+  if (!xlsxBase64 && !csvText) {
+    return res.status(400).json({ error: "Please provide a .csv or .xlsx file to import." });
+  }
+
+  const newlyImportedLeads: any[] = [];
+  const sid = googleSheetsSyncState.spreadsheetId || LEADS_SPREADSHEET_ID;
+  let scannedTabs: string[] = [];
+
+  if (xlsxBase64) {
+    const buf = Buffer.from(String(xlsxBase64), "base64");
+    const resXlsx = extractLeadsFromXlsxBuffer(buf, sid, store, newlyImportedLeads);
+    scannedTabs = resXlsx.scannedTabs;
+  } else if (csvText) {
+    const matrix = parseCsvTo2DMatrix(String(csvText));
+    const tabName =
+      String(fileName || "").toLowerCase().includes("fb") ||
+      String(fileName || "").toLowerCase().includes("facebook")
+        ? "Facebook Leads"
+        : "FB Leads";
+    scannedTabs = [tabName];
+    extractLeadsFromSheetMatrix({
+      matrix,
+      tabName,
+      spreadsheetId: sid,
+      store,
+      newlyImportedLeads,
+    });
+  }
+
+  if (store) {
+    repairAndSyncStoreData(store);
+    store.lastSavedAt = new Date().toISOString();
+    saveStore(store, projectId);
+  }
+
+  res.json({
+    success: true,
+    pulledRowsCount: newlyImportedLeads.length,
+    newlyImportedLeads,
+    scannedTabs,
+    leads: store?.adLeads || [],
+    clients: store?.clients || [],
+    quotes: store?.quotes || [],
+    message:
+      newlyImportedLeads.length > 0
+        ? `✓ Imported ${newlyImportedLeads.length} new lead(s) (${newlyImportedLeads
+            .map((l) => l.customerName)
+            .slice(0, 4)
+            .join(", ")}) from "${fileName || "Sheet"}"!`
+        : `✓ Scanned "${fileName || "Sheet"}" (${scannedTabs.join(", ")}) — all ${
+            store?.adLeads?.length || 0
+          } rows are already in your Master Leads table!`,
   });
 });
 
@@ -9738,6 +10278,20 @@ app.post("/api/sync-everything", async (req, res) => {
       );
     } catch (jobberErr: any) {
       console.warn("Jobber comprehensive sync note during sync-everything:", jobberErr?.message);
+    }
+
+    // 2.5 Pull any new Facebook Lead Ads / Google Ads rows from connected Google Sheets (Drive + public link)
+    try {
+      const authHeader = String(req.headers.authorization || "");
+      const accessToken =
+        req.body?.accessToken ||
+        (authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "");
+      await pullLeadsFromConnectedGoogleSheets(currentStore, {
+        customSheetUrl: req.body?.sheetUrl || googleSheetsSyncState.sheetUrl,
+        accessToken,
+      });
+    } catch (sheetPullErr: any) {
+      console.warn("Google Sheet pull note during sync-everything:", sheetPullErr?.message);
     }
 
     // 3. Reconcile & repair Master Leads, Quotes, Visits, Invoices, Clients, and Blocked/Screened Calls

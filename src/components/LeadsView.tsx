@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Users,
   Search,
@@ -18,6 +18,7 @@ import {
   ShieldAlert,
   FileSpreadsheet,
   Download,
+  Upload,
   Trash2,
   UserPlus,
   FileCheck,
@@ -42,8 +43,10 @@ import {
   TIDYUPS_DRIVE_FOLDER_NAME,
   createNewCleanLeadsSheetInDrive,
   syncLeadsToLiveGoogleSheetInDrive,
+  pullNewLeadsFromGoogleSheetInDrive,
   downloadFileFromApiWithoutNavigation,
 } from '../services/googleDriveBackupService';
+import { saveLeadToFirestore, saveClientToFirestore } from '../services/firestoreSyncService';
 
 export type CleanSheetTab =
   | 'ALL'
@@ -269,6 +272,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const [isDownloadingFile, setIsDownloadingFile] = useState<'XLSX' | 'CSV' | null>(null);
   const [showAdsConnectPanel, setShowAdsConnectPanel] = useState(true);
   const [isReconnectingSheets, setIsReconnectingSheets] = useState(false);
+  const [isUploadingSheetFile, setIsUploadingSheetFile] = useState(false);
+  const sheetFileInputRef = useRef<HTMLInputElement | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [confirmDriveSyncModal, setConfirmDriveSyncModal] = useState(false);
 
@@ -444,7 +449,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     }
   };
 
-  // Confirmed handler: Sync all current rows directly to the live Google Sheet in Google Drive
+  // Confirmed handler: Sync all current rows directly to the live Google Sheet in Google Drive (pulls any new FB/Google sheet rows first!)
   const handleConfirmedSyncToDriveSheet = async () => {
     setConfirmDriveSyncModal(false);
     setIsSyncingDriveSheet(true);
@@ -458,8 +463,21 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         setCreatedDriveSheetUrl(res.sheetUrl);
         setCreatedDriveSheetName(res.sheetName);
       }
+      if (Array.isArray(res.leads)) {
+        setLeadsList(res.leads);
+        if (onLeadsUpdated) onLeadsUpdated(res.leads);
+      }
+      if (Array.isArray(res.newlyImportedLeads)) {
+        for (const nl of res.newlyImportedLeads) {
+          saveLeadToFirestore(nl).catch(() => {});
+        }
+      }
+      const pulledMsg =
+        res.pulledRowsCount && res.pulledRowsCount > 0
+          ? ` (First pulled ${res.pulledRowsCount} new Facebook/Google row(s) from the sheet so nothing was overwritten!)`
+          : '';
       setNotice(
-        `✓ Synced ${leadsList.length} lead row(s) across all tabs directly into your live Google Sheet in Google Drive!`
+        `✓ Synced ${(res.leads || leadsList).length} lead row(s) across all tabs directly into your live Google Sheet in Google Drive!${pulledMsg}`
       );
     } catch (err: any) {
       setNotice(`Could not sync to Google Sheet in Drive: ${err?.message || 'Check Google Drive authorization.'}`);
@@ -507,17 +525,20 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const handleReconnectAndPullSheets = async () => {
+  const handleReconnectAndPullSheets = async (promptAuth = true) => {
     setIsReconnectingSheets(true);
-    setNotice(null);
+    if (promptAuth) setNotice(null);
     try {
-      const res = await fetch(`/api/leads/reconnect-sheets?project=${projectId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-project-id': projectId },
-        body: JSON.stringify({ sheetUrl: googleSheetUrl }),
+      const data = await pullNewLeadsFromGoogleSheetInDrive({
+        sheetUrl: googleSheetUrl,
+        projectId,
+        promptAuthIfNeeded: promptAuth,
       });
-      const data = await res.json();
       if (data.success) {
+        if (data.discoveredDriveSheetUrl && !createdDriveSheetUrl) {
+          setCreatedDriveSheetUrl(data.discoveredDriveSheetUrl);
+          if (data.discoveredDriveSheetName) setCreatedDriveSheetName(data.discoveredDriveSheetName);
+        }
         if (Array.isArray(data.leads)) {
           setLeadsList(data.leads);
           if (onLeadsUpdated) onLeadsUpdated(data.leads);
@@ -528,15 +549,82 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         if (Array.isArray(data.quotes) && onQuotesUpdated) {
           onQuotesUpdated(data.quotes);
         }
-        setNotice(
-          data.message ||
-            '✓ Reconnected Facebook Lead Ads, Google Ads Webhooks & Customer Booking Domain (book.tidyupscleaning.com)!'
-        );
+        if (Array.isArray(data.newlyImportedLeads) && data.newlyImportedLeads.length > 0) {
+          for (const nl of data.newlyImportedLeads) {
+            saveLeadToFirestore(nl).catch(() => {});
+          }
+          if (Array.isArray(data.clients)) {
+            for (const cl of data.clients.slice(0, data.newlyImportedLeads.length)) {
+              saveClientToFirestore(cl).catch(() => {});
+            }
+          }
+        }
+        if (promptAuth || (data.pulledRowsCount && data.pulledRowsCount > 0)) {
+          setNotice(
+            data.message ||
+              '✓ Pulled latest Facebook Lead Ads & Google Ads rows from your connected Google Sheet!'
+          );
+        }
       }
     } catch (err: any) {
-      setNotice(`Reconnect error: ${err?.message}`);
+      if (promptAuth) {
+        setNotice(`Reconnect error: ${err?.message}`);
+      }
     } finally {
       setIsReconnectingSheets(false);
+    }
+  };
+
+  const handleUploadSheetFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingSheetFile(true);
+    setNotice(null);
+    try {
+      const isCsv = file.name.toLowerCase().endsWith('.csv') || file.type === 'text/csv';
+      let payload: Record<string, any> = { fileName: file.name };
+
+      if (isCsv) {
+        const csvText = await file.text();
+        payload.csvText = csvText;
+      } else {
+        const arrayBuffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        payload.xlsxBase64 = btoa(binary);
+      }
+
+      const res = await fetch(`/api/leads/import-sheet-file?project=${encodeURIComponent(projectId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-project-id': projectId },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data?.success) {
+        if (Array.isArray(data.leads)) {
+          setLeadsList(data.leads);
+          if (onLeadsUpdated) onLeadsUpdated(data.leads);
+        }
+        if (Array.isArray(data.clients) && onClientsUpdated) {
+          onClientsUpdated(data.clients);
+        }
+        if (Array.isArray(data.newlyImportedLeads)) {
+          for (const nl of data.newlyImportedLeads) {
+            saveLeadToFirestore(nl).catch(() => {});
+          }
+        }
+        setNotice(data.message || `✓ Imported leads from ${file.name}!`);
+      } else {
+        setNotice(`Import error: ${data?.error || 'Could not parse file'}`);
+      }
+    } catch (err: any) {
+      setNotice(`File import failed: ${err?.message}`);
+    } finally {
+      setIsUploadingSheetFile(false);
+      if (sheetFileInputRef.current) sheetFileInputRef.current.value = '';
     }
   };
 
@@ -1221,17 +1309,39 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={sheetFileInputRef}
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={handleUploadSheetFile}
+                  className="hidden"
+                />
                 <button
                   type="button"
-                  onClick={handleReconnectAndPullSheets}
+                  onClick={() => handleReconnectAndPullSheets(true)}
                   disabled={isReconnectingSheets}
                   className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-[11px] font-black flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                  title="Reads all tabs of your connected Google Sheet in Google Drive (including private Drive sheets) and pulls any new Facebook or Google Ads leads into the app"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isReconnectingSheets ? 'animate-spin' : ''}`} />
                   <span>
                     {isReconnectingSheets
-                      ? 'Reconnecting & Pulling Sheet...'
-                      : '🔄 Reconnect FB & Google Leads + Pull Sheet'}
+                      ? 'Scanning Google Sheet Tabs...'
+                      : '🔄 Pull New FB & Google Leads from Sheet'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => sheetFileInputRef.current?.click()}
+                  disabled={isUploadingSheetFile}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                  title="Upload a downloaded Facebook Lead Form (.csv / .xlsx) or Google Sheet file to import new leads in 1 click"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>
+                    {isUploadingSheetFile
+                      ? 'Importing File...'
+                      : '📥 Upload FB Form / Sheet (.CSV / .XLSX)'}
                   </span>
                 </button>
                 <button
@@ -1248,6 +1358,45 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 >
                   + Test Google Ad Lead
                 </button>
+              </div>
+            </div>
+
+            {/* Why Facebook Form Leads Might Not Be in the Sheet Yet — Actionable 3-Way Guide */}
+            <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-500/40 text-[11px] text-blue-100 space-y-1.5">
+              <div className="font-extrabold text-blue-300 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  Why a Facebook Ad Test Lead Shows on Your Facebook Form But Not Yet in the App:
+                </span>
+              </div>
+              <p className="text-slate-300 leading-relaxed">
+                If you pasted your Google Sheet link into the <strong>&ldquo;Website URL / Claim Link&rdquo;</strong> button at the end of a Facebook Instant Form, Facebook only opens that link for the customer — <strong>Facebook does not automatically write form answers into a link</strong> unless you use one of these 3 methods:
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1">
+                <div className="p-2 rounded-lg bg-[#0b0e17]/90 border border-blue-500/30">
+                  <div className="font-extrabold text-cyan-300">
+                    Option A (Best — Direct 3-Option Booking):
+                  </div>
+                  <div className="text-slate-300 mt-0.5">
+                    Use <code className="text-cyan-200 font-mono">https://app.tidyupscleaning.com/booking?source=facebook</code> as your Facebook Ad link. Customers pick <strong>Move-Out, Basic, or Deep</strong> and appear in your App, Jobber &amp; Sheet automatically!
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-[#0b0e17]/90 border border-blue-500/30">
+                  <div className="font-extrabold text-emerald-300">
+                    Option B (Meta Instant Form → Google Sheet):
+                  </div>
+                  <div className="text-slate-300 mt-0.5">
+                    In Meta Ads Manager → <strong>Instant Form → CRM Setup → Google Sheets</strong>, connect your Google Account &amp; pick <code className="text-emerald-200 font-mono">TidyUps Clean Leads &amp; Ads Hub</code> (tab: <strong>Facebook Leads</strong>), then click <strong>🔄 Pull New FB &amp; Google Leads from Sheet</strong> above.
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-[#0b0e17]/90 border border-blue-500/30">
+                  <div className="font-extrabold text-indigo-300">
+                    Option C (Direct Webhook or 1-Click CSV Upload):
+                  </div>
+                  <div className="text-slate-300 mt-0.5">
+                    In Meta CRM Webhooks, paste <code className="text-indigo-200 font-mono">https://app.tidyupscleaning.com/api/webhooks/facebook</code> — or download your Facebook Form leads (<code>.csv</code>/<code>.xlsx</code>) and click <strong>📥 Upload FB Form / Sheet</strong> above!
+                  </div>
+                </div>
               </div>
             </div>
 
