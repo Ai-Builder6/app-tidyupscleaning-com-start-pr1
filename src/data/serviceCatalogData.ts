@@ -90,8 +90,26 @@ export function convertItemForCleanersCount(
       item.category === 'HOURLY' ||
       /Hourly Rate|Crew Rate/i.test(item.name || '')
   );
+  const catUpper = String(item.category || '').toUpperCase();
+  const nameLower = String(item.name || '').toLowerCase();
+  const isMoveOut = catUpper === 'MOVE_OUT' || nameLower.includes('move out') || nameLower.includes('moveout') || nameLower.includes('move-out');
+  const isDeepClean = catUpper === 'DEEP_CLEAN' || (nameLower.includes('deep') && !isHourlyOrAddon);
+  const isBasicClean = catUpper === 'STANDARD_CLEAN' || nameLower.includes('initial basic') || nameLower.includes('basic cleaning') || nameLower.includes('standard cleaning');
+
   const currentCleaners = Math.max(1, Number(item.cleanersCount) || 1);
-  const nextCleaners = isHourlyOrAddon ? currentCleaners : Math.max(1, Number(targetCleaners) || 1);
+  let nextCleaners = isHourlyOrAddon ? currentCleaners : Math.max(1, Number(targetCleaners) || 1);
+
+  // Enforce owner crew rules:
+  // - Basic Cleaning: 1 cleaner
+  // - Deep Cleaning: minimum 2 cleaners
+  if (!isHourlyOrAddon) {
+    if (isBasicClean && targetCleaners === undefined) {
+      nextCleaners = 1;
+    } else if (isDeepClean && nextCleaners < 2) {
+      nextCleaners = 2;
+    }
+  }
+
   const currentQty = Number(item.quantity) || 1;
   const currentUnitPrice = Number(item.unitPrice) || 0;
   const currentTotal =
@@ -100,7 +118,7 @@ export function convertItemForCleanersCount(
       : Math.round(currentQty * currentUnitPrice * 100) / 100;
 
   // Per-cleaner rate & solo equivalent
-  const perCleanerRate = Math.round((currentUnitPrice / currentCleaners) * 100) / 100;
+  const perCleanerRate = Math.round((currentUnitPrice / currentCleaners) * 100) / 100 || 52.5;
   const totalPersonHours = Math.round(currentQty * currentCleaners * 100) / 100;
 
   const stripSuffix = (name: string) =>
@@ -123,16 +141,32 @@ export function convertItemForCleanersCount(
     };
   }
 
-  const newQuantity =
+  let newQuantity =
     currentCleaners === nextCleaners
       ? currentQty
       : Math.round((totalPersonHours / nextCleaners) * 100) / 100;
+
+  // Enforce strict minimum hours rules:
+  // - Move-Out: minimum 3 hrs with 2 cleaners; if 1 cleaner, starts at 6 hrs minimum
+  // - Deep Clean: minimum 2 hrs with 2 cleaners
+  if (isMoveOut) {
+    if (nextCleaners === 1 && newQuantity < 6) {
+      newQuantity = 6;
+    } else if (nextCleaners >= 2 && newQuantity < 3) {
+      newQuantity = 3;
+    }
+  } else if (isDeepClean) {
+    if (nextCleaners >= 2 && newQuantity < 2) {
+      newQuantity = 2;
+    }
+  }
+
   const newUnitPrice =
     currentCleaners === nextCleaners
       ? currentUnitPrice
       : Math.round(perCleanerRate * nextCleaners * 100) / 100;
-  const newTotal =
-    currentTotal > 0 ? Math.round(currentTotal * 100) / 100 : Math.round(newQuantity * newUnitPrice * 100) / 100;
+  const computedTotal = Math.round(newQuantity * newUnitPrice * 100) / 100;
+  const newTotal = Math.max(currentTotal > 0 ? Math.round(currentTotal * 100) / 100 : 0, computedTotal);
 
   const baseName = stripSuffix(item.name || 'Cleaning Service');
   const crewLabel = nextCleaners === 1 ? '1 Cleaner' : `${nextCleaners} Cleaners`;
@@ -150,7 +184,7 @@ export function convertItemForCleanersCount(
     unitPrice: newUnitPrice,
     total: newTotal,
     perCleanerRate,
-    soloEquivalentQty: totalPersonHours,
+    soloEquivalentQty: Math.round(newQuantity * nextCleaners * 100) / 100,
     soloEquivalentRate: perCleanerRate,
     jobberItemName: jobberFullName,
     description: jobberDesc,
@@ -2210,7 +2244,20 @@ export function matchCatalogItem(
     (explicitCrewMatch ? parseInt(explicitCrewMatch[1], 10) : undefined);
 
   const finalizeMatchedItem = (matched: ServiceCatalogItem): ServiceCatalogItem => {
-    const targetCrew = requestedCrew || matched.cleanersCount || 2;
+    let defaultCrew = matched.cleanersCount || 2;
+    if (matched.category === 'STANDARD_CLEAN') {
+      defaultCrew = 1;
+    } else if (matched.category === 'DEEP_CLEAN') {
+      defaultCrew = Math.max(2, defaultCrew);
+    } else if (matched.category === 'MOVE_OUT') {
+      defaultCrew = 2;
+    }
+    let targetCrew = requestedCrew || defaultCrew;
+    if (matched.category === 'STANDARD_CLEAN') {
+      targetCrew = 1;
+    } else if (matched.category === 'DEEP_CLEAN' && targetCrew < 2) {
+      targetCrew = 2;
+    }
     const conv = convertItemForCleanersCount(matched, targetCrew);
     return {
       ...matched,

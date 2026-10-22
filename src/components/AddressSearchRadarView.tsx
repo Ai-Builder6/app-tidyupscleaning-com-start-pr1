@@ -606,6 +606,9 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
   const [filterMode, setFilterMode] = useState<'ALL' | 'TOP_5' | 'AVAILABLE' | 'SOLO' | 'TEAM'>('ALL');
   const [skillFilter, setSkillFilter] = useState<'ALL' | 'Standard Cleaning' | 'Deep Cleaning' | 'Move-Out Cleaning'>('ALL');
   const [copiedCleanerId, setCopiedCleanerId] = useState<string | null>(null);
+  const [selectedSingleHubTechId, setSelectedSingleHubTechId] = useState<string>('ALL'); // 'ALL' | 'OFF' | tech.id
+  const [selectedSingleVanTechId, setSelectedSingleVanTechId] = useState<string>('ALL'); // 'ALL' | 'OFF' | tech.id
+  const [selectedSameDayJobOriginId, setSelectedSameDayJobOriginId] = useState<string>(''); // job.id for Same-Day Job -> Pin distance
 
   // Edit cleaner home hub modal
   const [editingHubCleaner, setEditingHubCleaner] = useState<Technician | null>(null);
@@ -952,27 +955,33 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
             </div>
           </div>
 
-          {/* Location Mode Toggle Switch (Home vs Live vs Both) */}
+          {/* Location Mode Toggle Switch (Home vs Live vs Both) + All vs 1 Filter */}
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="bg-slate-100 p-1 rounded-2xl border border-slate-300 flex items-center gap-1 shadow-inner">
+            <div className="bg-slate-100 p-1 rounded-2xl border border-slate-300 flex items-center gap-1 shadow-inner flex-wrap">
               <span className="text-[10px] font-extrabold text-slate-500 uppercase px-2 tracking-wider">
                 Start From:
               </span>
               <button
-                onClick={() => setLocationMode('HOME')}
+                onClick={() => {
+                  setLocationMode('HOME');
+                  if (selectedSingleHubTechId === 'OFF') setSelectedSingleHubTechId('ALL');
+                }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                   locationMode === 'HOME'
                     ? 'bg-purple-600 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                 }`}
-                title="Route from cleaner's Home Address"
+                title="Route from cleaner's Home Address (Hub)"
               >
                 <Home className="w-3.5 h-3.5" />
-                <span>Home Hubs</span>
+                <span>🏠 Home Hubs</span>
               </button>
 
               <button
-                onClick={() => setLocationMode('LIVE')}
+                onClick={() => {
+                  setLocationMode('LIVE');
+                  if (selectedSingleVanTechId === 'OFF') setSelectedSingleVanTechId('ALL');
+                }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                   locationMode === 'LIVE'
                     ? 'bg-pink-600 text-white shadow-xs'
@@ -981,21 +990,134 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                 title="Route from cleaner's Live Scheduled Job / Van Location"
               >
                 <Car className="w-3.5 h-3.5" />
-                <span>Live / Job Sites</span>
+                <span>🚐 Live Vans / Jobs</span>
               </button>
 
               <button
-                onClick={() => setLocationMode('BOTH')}
+                onClick={() => {
+                  setLocationMode('BOTH');
+                  if (selectedSingleHubTechId === 'OFF') setSelectedSingleHubTechId('ALL');
+                  if (selectedSingleVanTechId === 'OFF') setSelectedSingleVanTechId('ALL');
+                }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                   locationMode === 'BOTH'
                     ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                 }`}
-                title="Display both Home and Live locations side-by-side with closest badge"
+                title="Display both Home Hubs and Live Vans side-by-side"
               >
                 <ArrowRightLeft className="w-3.5 h-3.5" />
                 <span>Compare Both</span>
               </button>
+            </div>
+
+            {/* All 15 Hubs vs Single Hub Selector */}
+            <div className="flex items-center gap-1 bg-purple-50 border border-purple-200 rounded-xl px-2 py-1">
+              <Home className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+              <select
+                value={selectedSingleHubTechId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedSingleHubTechId(val);
+                  if (val !== 'ALL' && val !== 'OFF') {
+                    const found = rankedCleaners.find((c) => c.technician.id === val);
+                    if (found) {
+                      setSelectedCleanerId(found.technician.id);
+                      handleFocusLocation(
+                        found.homePoint.lat,
+                        found.homePoint.lng,
+                        14,
+                        `${found.technician.name} (Home Hub)`,
+                        found.homePoint.address,
+                        found.technician.id,
+                        'HOME'
+                      );
+                    }
+                  }
+                }}
+                className="bg-transparent text-[11px] font-extrabold text-purple-900 focus:outline-none cursor-pointer"
+                title="Show All 15 Cleaners' Home Hubs, Just 1 Cleaner's Home Hub, or Turn Off Home Hubs"
+              >
+                <option value="ALL">🏠 All {technicians.length} Home Hubs (ON)</option>
+                <option value="OFF">🚫 Hide Home Hubs (OFF)</option>
+                {rankedCleaners.map((c) => (
+                  <option key={`hub-opt-${c.technician.id}`} value={c.technician.id}>
+                    🏠 Just 1 Hub: {c.technician.name} ({c.homePoint.drivingDistanceKm} km)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* All 15 Live Vans vs Single Live Van Selector */}
+            <div className="flex items-center gap-1 bg-pink-50 border border-pink-200 rounded-xl px-2 py-1">
+              <Car className="w-3.5 h-3.5 text-pink-600 shrink-0" />
+              <select
+                value={selectedSingleVanTechId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedSingleVanTechId(val);
+                  if (val !== 'ALL' && val !== 'OFF') {
+                    const found = rankedCleaners.find((c) => c.technician.id === val);
+                    if (found) {
+                      setSelectedCleanerId(found.technician.id);
+                      handleFocusLocation(
+                        found.livePoint.lat,
+                        found.livePoint.lng,
+                        14,
+                        `${found.technician.name} (Live Van)`,
+                        found.livePoint.address,
+                        found.technician.id,
+                        'LIVE'
+                      );
+                    }
+                  }
+                }}
+                className="bg-transparent text-[11px] font-extrabold text-pink-900 focus:outline-none cursor-pointer"
+                title="Show All 15 Live Van Locations, Just 1 Live Van, or Turn Off Live Vans"
+              >
+                <option value="ALL">🚐 All {technicians.length} Live Vans (ON)</option>
+                <option value="OFF">🚫 Hide Live Vans (OFF)</option>
+                {rankedCleaners.map((c) => (
+                  <option key={`van-opt-${c.technician.id}`} value={c.technician.id}>
+                    🚐 Just 1 Live: {c.technician.name} ({c.livePoint.drivingDistanceKm} km)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Same-Day Scheduled Job -> Dropped Pin Distance Selector */}
+            <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-300 rounded-xl px-2.5 py-1">
+              <Calendar className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <select
+                value={selectedSameDayJobOriginId}
+                onChange={(e) => setSelectedSameDayJobOriginId(e.target.value)}
+                className="bg-transparent text-[11px] font-extrabold text-amber-950 focus:outline-none cursor-pointer max-w-[230px]"
+                title="Measure distance from a Same-Day Scheduled Job directly to the Caller's Dropped Pin (Stop 1)"
+              >
+                <option value="">📅 Same-Day Job → Pin ({jobsOnSelectedDate.length} on {selectedScheduleDate})</option>
+                {jobsOnSelectedDate.map((j) => {
+                  const primaryStop = clientStops[0];
+                  const distKm = primaryStop ? calculateDistanceKm(j.lat, j.lng, primaryStop.lat, primaryStop.lng) : 0;
+                  const drive = calculateDriveEstimates(distKm);
+                  return (
+                    <option key={`sameday-opt-${j.id}`} value={j.id}>
+                      {j.clientName} ({j.serviceAddress.split(',')[0]}) → {drive.drivingDistanceKm} km (~{drive.driveMinutes}m)
+                    </option>
+                  );
+                })}
+              </select>
+              {selectedSameDayJobOriginId && (() => {
+                const originJob = jobsOnSelectedDate.find((j) => j.id === selectedSameDayJobOriginId);
+                const primaryStop = clientStops[0];
+                if (!originJob || !primaryStop) return null;
+                const distKm = calculateDistanceKm(originJob.lat, originJob.lng, primaryStop.lat, primaryStop.lng);
+                const drive = calculateDriveEstimates(distKm);
+                return (
+                  <span className="px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 font-mono text-[10px] font-black whitespace-nowrap">
+                    Job → Pin: {drive.drivingDistanceKm} km (~{drive.driveMinutes}m)
+                  </span>
+                );
+              })()}
             </div>
 
             {/* Quick Metrics Bar */}
@@ -1411,9 +1533,12 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                   </AdvancedMarker>
                 ))}
 
-                {/* Plot Cleaner Home Pins (if HOME or BOTH mode) */}
+                {/* Plot Cleaner Home Pins (if HOME or BOTH mode, respecting All vs Single Hub toggle) */}
                 {(locationMode === 'HOME' || locationMode === 'BOTH') &&
-                  rankedCleaners.map((cleaner) => {
+                  selectedSingleHubTechId !== 'OFF' &&
+                  rankedCleaners
+                    .filter((c) => selectedSingleHubTechId === 'ALL' || c.technician.id === selectedSingleHubTechId)
+                    .map((cleaner) => {
                     const tech = cleaner.technician;
                     const isTop1 = cleaner.rank === 1 && locationMode === 'HOME';
 
@@ -1443,7 +1568,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                             <Home className="w-2.5 h-2.5 text-purple-600" />
                             <span>{tech.name.split(' ')[0]}</span>
                             <span className="font-mono text-[9px] text-purple-700 bg-purple-100 px-1 rounded">
-                              {cleaner.totalRouteDistanceKm}km
+                              {cleaner.homePoint.drivingDistanceKm}km
                             </span>
                             {isTop1 && <Award className="w-2.5 h-2.5 text-amber-300" />}
                           </div>
@@ -1462,9 +1587,12 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                     );
                   })}
 
-                {/* Plot Cleaner Live / Job Pins (if LIVE or BOTH mode) */}
+                {/* Plot Cleaner Live / Job Pins (if LIVE or BOTH mode, respecting All vs Single Van toggle) */}
                 {(locationMode === 'LIVE' || locationMode === 'BOTH') &&
-                  rankedCleaners.map((cleaner) => {
+                  selectedSingleVanTechId !== 'OFF' &&
+                  rankedCleaners
+                    .filter((c) => selectedSingleVanTechId === 'ALL' || c.technician.id === selectedSingleVanTechId)
+                    .map((cleaner) => {
                     const tech = cleaner.technician;
                     const isTop1 = cleaner.rank === 1 && locationMode === 'LIVE';
 
@@ -1494,7 +1622,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                             <Car className="w-2.5 h-2.5 text-pink-600" />
                             <span>{tech.name.split(' ')[0]} (Live)</span>
                             <span className="font-mono text-[9px] text-pink-700 bg-pink-100 px-1 rounded">
-                              {cleaner.totalRouteDistanceKm}km
+                              {cleaner.livePoint.drivingDistanceKm}km
                             </span>
                             {isTop1 && <Award className="w-2.5 h-2.5 text-amber-300" />}
                           </div>
@@ -1878,7 +2006,10 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
 
                       {/* Cleaner Home Pins */}
                       {(locationMode === 'HOME' || locationMode === 'BOTH') &&
-                        rankedCleaners.map((cleaner) => {
+                        selectedSingleHubTechId !== 'OFF' &&
+                        rankedCleaners
+                          .filter((c) => selectedSingleHubTechId === 'ALL' || c.technician.id === selectedSingleHubTechId)
+                          .map((cleaner) => {
                           const tech = cleaner.technician;
                           const isTop1 = cleaner.rank === 1 && locationMode === 'HOME';
                           const pos = projectRadarCoord(cleaner.homePoint.lat, cleaner.homePoint.lng);
@@ -1909,7 +2040,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                                 <Home className="w-2.5 h-2.5 text-purple-600" />
                                 <span>{tech.name.split(' ')[0]}</span>
                                 <span className="font-mono text-[9px] text-purple-700 bg-purple-100 px-1 rounded">
-                                  {cleaner.totalRouteDistanceKm}km
+                                  {cleaner.homePoint.drivingDistanceKm}km
                                 </span>
                                 {isTop1 && <Award className="w-2.5 h-2.5 text-amber-300" />}
                               </div>
@@ -1925,7 +2056,10 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
 
                       {/* Cleaner Live Pins */}
                       {(locationMode === 'LIVE' || locationMode === 'BOTH') &&
-                        rankedCleaners.map((cleaner) => {
+                        selectedSingleVanTechId !== 'OFF' &&
+                        rankedCleaners
+                          .filter((c) => selectedSingleVanTechId === 'ALL' || c.technician.id === selectedSingleVanTechId)
+                          .map((cleaner) => {
                           const tech = cleaner.technician;
                           const isTop1 = cleaner.rank === 1 && locationMode === 'LIVE';
                           const pos = projectRadarCoord(cleaner.livePoint.lat, cleaner.livePoint.lng);
@@ -1956,7 +2090,7 @@ export const AddressSearchRadarView: React.FC<AddressSearchRadarViewProps> = ({
                                 <Car className="w-2.5 h-2.5 text-pink-600" />
                                 <span>{tech.name.split(' ')[0]} (Live)</span>
                                 <span className="font-mono text-[9px] text-pink-700 bg-pink-100 px-1 rounded">
-                                  {cleaner.totalRouteDistanceKm}km
+                                  {cleaner.livePoint.drivingDistanceKm}km
                                 </span>
                                 {isTop1 && <Award className="w-2.5 h-2.5 text-amber-300" />}
                               </div>

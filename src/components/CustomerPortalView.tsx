@@ -1,24 +1,18 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   Sparkles,
   CheckCircle2,
   Clock,
   Calendar,
-  MapPin,
   ShieldCheck,
-  Phone,
   Mail,
   ArrowRight,
   Check,
   Star,
-  Home,
-  Building2,
   Key,
   Brush,
   HeartHandshake,
-  Award,
   ExternalLink,
-  PhoneCall,
   Mic,
   MicOff,
   Wand2,
@@ -34,6 +28,8 @@ import {
   FileText,
   HelpCircle,
   X,
+  Volume2,
+  Calculator,
 } from 'lucide-react';
 import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 import { ServiceTicket } from '../types/dispatch';
@@ -43,6 +39,7 @@ import {
   matchCatalogItem,
 } from '../data/serviceCatalogData';
 import { PublicBookingModal } from './PublicBookingModal';
+import { TidyUpsBunnyLogo } from './TidyUpsBunnyLogo';
 
 export interface CustomerBookingSubmissionPayload {
   ticket: ServiceTicket;
@@ -75,20 +72,29 @@ interface ServiceDetail {
   name: string;
   shortName: string;
   badge: string;
+  ruleSummary: string;
   tagline: string;
   startingPrice: string;
   recommendedFor: string;
   duration: string;
   icon: any;
   accentGradient: string;
-  lightBg: string;
-  borderActive: string;
   checklist: string[];
 }
 
-const OFFICIAL_LOGO_URL = '/assets/aistudio/833Tidyups_Logo_2025-removebg_b60e5c87.png';
-
 const OFFICIAL_COMPANY_BANNERS = [
+  {
+    id: 'banner-bunny-wrap',
+    src: '/assets/aistudio/39x14_ver_0001__1__d4ddd987.png',
+    title: 'TidyUps Cleaning Service — Official Bunny Fleet & Vetted Edmonton Teams',
+    caption: 'Move-Out • Basic • Deep Cleaning • app.tidyupscleaning.com/book',
+  },
+  {
+    id: 'banner-desktop-bunny',
+    src: '/assets/aistudio/download__5__a6150ad7.jpg',
+    title: 'TidyUps Cleaning Service Inc. — Edmonton Command & Bunny Crest',
+    caption: 'Move-Out Turnovers • Basic Maintenance • Deep Cleans • tidyupscleaning.com',
+  },
   {
     id: 'banner-3',
     src: '/assets/aistudio/833_Banner_003_16385828.png',
@@ -99,18 +105,6 @@ const OFFICIAL_COMPANY_BANNERS = [
     id: 'banner-4',
     src: '/assets/aistudio/833_Banner_004_-_Copy__2__3861ba3f.png',
     title: 'TidyUps Cleaning Service — Vetted Professional Cleaning Crew',
-    caption: 'Move-Out Turnovers • Basic Maintenance • Deep Cleans • tidyupscleaning.com',
-  },
-  {
-    id: 'banner-1',
-    src: '/assets/aistudio/833_Banner_001_de5f6067.png',
-    title: 'Hotel-Grade Kitchen, Bathroom & Whole-Home Detailing',
-    caption: 'Book Online at app.tidyupscleaning.com/booking • tidyupscleaning.com',
-  },
-  {
-    id: 'banner-5',
-    src: '/assets/aistudio/833_Banner_005_-_Copy_62f2c130.png',
-    title: 'Fully Equipped 1, 2 & 3-Cleaner Teams Ready for Your Home',
     caption: 'Established 2012 • 100% Satisfaction & 24-Hour Free Re-Clean Guarantee',
   },
 ];
@@ -129,15 +123,14 @@ const CLEANING_SERVICES: ServiceDetail[] = [
     id: 'move-out',
     name: 'Move-Out Cleaning',
     shortName: 'Move-Out Cleaning',
-    badge: 'Landlord & Realtor Checklist',
+    badge: 'Min 3 Hrs (2 Cleaners) or 6 Hrs (1 Cleaner)',
+    ruleSummary: '2 Cleaners: Min 3 hrs ($105/hr = $315+) • 1 Cleaner: Starts at 6 hrs ($52.50/hr = $315+)',
     tagline: 'Inspection-ready turnkey reset for tenants, landlords, home buyers, and realtors.',
-    startingPrice: 'Official Catalog Rate',
+    startingPrice: '$315.00',
     recommendedFor: 'Lease-end inspections, home sales, possession day move-ins',
-    duration: 'Synced to Catalog Hours',
+    duration: 'Min 3 hrs (2 Cleaners) / 6 hrs (1 Cleaner)',
     icon: Key,
-    accentGradient: 'from-amber-500 via-orange-500 to-pink-600',
-    lightBg: 'from-amber-50 to-pink-50',
-    borderActive: 'border-amber-500 ring-amber-400/30',
+    accentGradient: 'from-pink-600 via-red-600 to-rose-600',
     checklist: [
       'Full interior oven degrease & rack scrubbing',
       'Interior & exterior refrigerator and freezer sanitization',
@@ -153,15 +146,14 @@ const CLEANING_SERVICES: ServiceDetail[] = [
     id: 'standard',
     name: 'Basic Cleaning',
     shortName: 'Basic Cleaning',
-    badge: 'Standard Maintenance Clean',
-    tagline: 'Bright, spotless upkeep that keeps your home fresh, sanitized, and stress-free.',
-    startingPrice: 'Official Catalog Rate',
+    badge: '1 Pro Cleaner Only ($52.50/hr)',
+    ruleSummary: '1 Dedicated Cleaner ($52.50/hr) • Standard Residential Maintenance',
+    tagline: 'Bright, spotless upkeep with 1 dedicated cleaner that keeps your home fresh and sanitized.',
+    startingPrice: '$131.25',
     recommendedFor: 'Busy families, professionals & regular residential maintenance care',
-    duration: 'Synced to Catalog Hours',
+    duration: '1 Cleaner @ $52.50/hr',
     icon: Brush,
-    accentGradient: 'from-cyan-500 via-teal-500 to-emerald-500',
-    lightBg: 'from-cyan-50 to-teal-50',
-    borderActive: 'border-cyan-500 ring-cyan-400/30',
+    accentGradient: 'from-red-600 via-pink-600 to-fuchsia-600',
     checklist: [
       'Dusting all furniture, ledges, frames & decor',
       'Kitchen countertops, sink, backsplash & exterior appliances wiped',
@@ -177,15 +169,14 @@ const CLEANING_SERVICES: ServiceDetail[] = [
     id: 'deep',
     name: 'Deep Cleaning',
     shortName: 'Deep Cleaning',
-    badge: 'Top-to-Bottom Detail Scrub',
-    tagline: 'Intensive top-to-bottom scrub targeting built-up grime, soap scale, and neglected corners.',
-    startingPrice: 'Official Catalog Rate',
+    badge: 'Min 2 Cleaners for 2 Hrs ($105/hr)',
+    ruleSummary: 'Minimum 2 Cleaners for 2+ Hours ($105/hr = $210.00+)',
+    tagline: 'Intensive 2-cleaner top-to-bottom scrub targeting built-up grime, soap scale, and corners.',
+    startingPrice: '$210.00',
     recommendedFor: 'Spring/Fall refresh, first-time cleans, homes needing extra detail',
-    duration: 'Synced to Catalog Hours',
+    duration: 'Min 2 Cleaners for 2+ Hours',
     icon: Sparkles,
-    accentGradient: 'from-pink-500 via-fuchsia-500 to-purple-600',
-    lightBg: 'from-pink-50 to-fuchsia-50',
-    borderActive: 'border-pink-500 ring-pink-400/30',
+    accentGradient: 'from-pink-500 via-red-600 to-purple-600',
     checklist: [
       'Heavy soap scum, hard water & limescale removal in bathrooms',
       'Hand-wiping baseboards, door frames, window sills & wainscoting',
@@ -199,13 +190,24 @@ const CLEANING_SERVICES: ServiceDetail[] = [
   },
 ];
 
+type HighlightFieldKey =
+  | 'selectedService'
+  | 'firstName'
+  | 'lastName'
+  | 'customerPhone'
+  | 'customerEmail'
+  | 'address'
+  | 'city'
+  | 'bedrooms'
+  | 'bathrooms'
+  | 'cleanerCount'
+  | 'preferredDate'
+  | 'preferredTime'
+  | 'specialInstructions';
+
 export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   onBookingSubmitted,
-  onNavigateToMap,
-  onOpenPhoneModal,
   onOpenStaffLogin,
-  onOpenVoiceIntake,
-  onOpenSpamShield,
   isStandaloneCustomerSite = false,
   isCustomerLockPreview = false,
   onToggleCustomerLockPreview,
@@ -229,7 +231,6 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     return 'Website (tidyupscleaning.com)';
   }, []);
 
-  // Detect if visitor arrived directly on /privacy-policy, /terms, /t&c, or ?legal=privacy|terms
   const [activeLegalModal, setActiveLegalModal] = useState<'PRIVACY' | 'TERMS' | 'SUPPORT' | null>(() => {
     if (typeof window === 'undefined') return null;
     const path = window.location.pathname.toLowerCase();
@@ -284,20 +285,20 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   };
 
   // Route mode:
-  // - /booking (default for simple 3-option form: Move-Out, Basic, Deep)
-  // - /book    (variation with interactive quote calculator synced to Service Catalog)
+  // - /book    (Quote Calculator & Lit-Box Voice Form — default when visiting /book or app.tidyupscleaning.com/book)
+  // - /booking (Simple 3-Option Form: Move-Out, Basic, Deep)
   const [bookingRouteVariant, setBookingRouteVariant] = useState<'SIMPLE_3_OPTION' | 'CALCULATOR'>(() => {
     if (typeof window !== 'undefined') {
       const p = window.location.pathname.toLowerCase();
       const s = window.location.search.toLowerCase();
-      if (p === '/book' || p.startsWith('/book/') || s.includes('variant=calculator')) {
-        return 'CALCULATOR';
-      }
       if (p === '/booking' || p.startsWith('/booking/') || s.includes('variant=simple')) {
         return 'SIMPLE_3_OPTION';
       }
+      if (p === '/book' || p.startsWith('/book/') || s.includes('variant=calculator')) {
+        return 'CALCULATOR';
+      }
     }
-    return 'SIMPLE_3_OPTION';
+    return 'CALCULATOR';
   });
 
   const handleSwitchRouteVariant = (nextVariant: 'SIMPLE_3_OPTION' | 'CALCULATOR') => {
@@ -314,8 +315,9 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [selectedService, setSelectedService] = useState<CleaningCategory>('move-out');
   const [activeBannerIdx, setActiveBannerIdx] = useState<number>(0);
 
-  // Booking Sheet Form State
-  const [customerName, setCustomerName] = useState('');
+  // Split Customer Name: First Name + Last Name
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [address, setAddress] = useState('');
@@ -323,8 +325,10 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [postalCode, setPostalCode] = useState('');
   const [bedrooms, setBedrooms] = useState('3 Bedrooms');
   const [bathrooms, setBathrooms] = useState('2 Bathrooms');
-  const [cleanerCount, setCleanerCount] = useState<1 | 2 | 3>(1);
-  const [frequency, setFrequency] = useState<'One-Time' | 'Weekly (15% Off)' | 'Bi-Weekly (10% Off)' | 'Monthly (5% Off)'>('One-Time');
+  const [cleanerCount, setCleanerCount] = useState<1 | 2>(2);
+  const [frequency, setFrequency] = useState<
+    'One-Time' | 'Weekly (15% Off)' | 'Bi-Weekly (10% Off)' | 'Monthly (5% Off)'
+  >('One-Time');
   const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
   const [preferredDate, setPreferredDate] = useState<string>(() => {
     const tmrw = new Date();
@@ -346,19 +350,53 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [confirmedQuoteNumber, setConfirmedQuoteNumber] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Staff Control Bar State (Only when viewed by owner inside app.tidyupscleaning.com)
+  // Staff Control Bar State
   const [copiedLinkKey, setCopiedLinkKey] = useState<string | null>(null);
   const [isReconnectingLeads, setIsReconnectingLeads] = useState<boolean>(false);
   const [staffStatusMessage, setStaffStatusMessage] = useState<string | null>(null);
 
-  // Optional Voice Fill for Customers/Callers
+  // Continuous Voice Dictation & Box Lighting State (Never shuts off on pause until user clicks Stop!)
   const [isRecordingFormVoice, setIsRecordingFormVoice] = useState(false);
   const [dictationText, setDictationText] = useState('');
+  const [interimDictation, setInterimDictation] = useState('');
   const [isParsingFormVoice, setIsParsingFormVoice] = useState(false);
   const [voiceFillStatus, setVoiceFillStatus] = useState<string | null>(null);
+  const [flashingFields, setFlashingFields] = useState<Record<string, boolean>>({});
+  const [voiceCapturedFields, setVoiceCapturedFields] = useState<Record<string, boolean>>({});
+
+  const recognitionRef = useRef<any>(null);
+  const shouldKeepRecordingRef = useRef<boolean>(false);
+  const latestTranscriptRef = useRef<string>('');
+  const latestInterimRef = useRef<string>('');
 
   const activeServiceData =
     CLEANING_SERVICES.find((s) => s.id === selectedService) || CLEANING_SERVICES[0];
+
+  // Enforce strict Cleaner Crew rules whenever Service Category changes:
+  // - Basic ('standard'): 1 Cleaner ONLY ($52.50/hr)
+  // - Deep ('deep'): Minimum 2 Cleaners for 2+ hours ($105.00/hr)
+  // - Move-Out ('move-out'): Default 2 Cleaners (min 3 hrs @ $105/hr) or 1 Cleaner (starts at 6 hrs @ $52.50/hr)
+  useEffect(() => {
+    if (selectedService === 'standard') {
+      setCleanerCount(1);
+    } else if (selectedService === 'deep') {
+      setCleanerCount(2);
+    } else if (selectedService === 'move-out') {
+      setCleanerCount((prev) => (prev === 1 ? 1 : 2));
+    }
+  }, [selectedService]);
+
+  // Cleanup recognition on unmount
+  useEffect(() => {
+    return () => {
+      shouldKeepRecordingRef.current = false;
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+    };
+  }, []);
 
   // Close Calendar Popup when clicking outside
   useEffect(() => {
@@ -375,8 +413,153 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isCalendarPopupOpen]);
 
-  // Calculate live price directly from the canonical Jobber Service Catalog (matchCatalogItem)
-  // so /book prices NEVER mismatch the official Service Catalog Price List
+  const triggerFieldHighlight = useCallback((fieldKey: HighlightFieldKey) => {
+    setFlashingFields((prev) => ({ ...prev, [fieldKey]: true }));
+    setVoiceCapturedFields((prev) => ({ ...prev, [fieldKey]: true }));
+    setTimeout(() => {
+      setFlashingFields((prev) => ({ ...prev, [fieldKey]: false }));
+    }, 2600);
+  }, []);
+
+  // Live real-time speech extraction so boxes light up immediately while customer speaks
+  const applyLiveSpeechExtraction = useCallback(
+    (rawText: string) => {
+      const text = rawText.trim();
+      if (!text) return;
+      const lower = text.toLowerCase();
+
+      // 1. Service Type
+      if (lower.includes('move out') || lower.includes('move-out') || lower.includes('moving out')) {
+        setSelectedService('move-out');
+        triggerFieldHighlight('selectedService');
+      } else if (lower.includes('deep clean') || lower.includes('deep')) {
+        setSelectedService('deep');
+        setCleanerCount(2);
+        triggerFieldHighlight('selectedService');
+        triggerFieldHighlight('cleanerCount');
+      } else if (lower.includes('basic') || lower.includes('standard') || lower.includes('regular')) {
+        setSelectedService('standard');
+        setCleanerCount(1);
+        triggerFieldHighlight('selectedService');
+        triggerFieldHighlight('cleanerCount');
+      }
+
+      // 2. Cleaner Count
+      if (lower.includes('one cleaner') || lower.includes('1 cleaner') || lower.includes('single cleaner')) {
+        if (selectedService !== 'deep') {
+          setCleanerCount(1);
+          triggerFieldHighlight('cleanerCount');
+        }
+      } else if (lower.includes('two cleaner') || lower.includes('2 cleaner')) {
+        if (selectedService !== 'standard') {
+          setCleanerCount(2);
+          triggerFieldHighlight('cleanerCount');
+        }
+      }
+
+      // 3. Phone Number
+      const phoneMatch = text.match(/(?:\+?1[-.\s]?)?\(?([2-9]\d{2})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})/);
+      if (phoneMatch) {
+        setCustomerPhone(`(${phoneMatch[1]}) ${phoneMatch[2]}-${phoneMatch[3]}`);
+        triggerFieldHighlight('customerPhone');
+      }
+
+      // 4. Email
+      const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      if (emailMatch) {
+        setCustomerEmail(emailMatch[1].toLowerCase());
+        triggerFieldHighlight('customerEmail');
+      }
+
+      // 5. Split First Name & Last Name
+      const namePatterns = [
+        /(?:my name is|name is|this is|i am|i'm|for)\s+([A-Z][a-z]+)(?:\s+([A-Z][a-z]+))?/i,
+        /^([A-Z][a-z]{2,15})\s+([A-Z][a-z]{2,18})\b/,
+      ];
+      for (const pat of namePatterns) {
+        const m = text.match(pat);
+        if (m && m[1]) {
+          const stopWords = new Set(['looking', 'calling', 'booking', 'needing', 'wanting', 'moving', 'cleaning', 'basic', 'deep', 'move']);
+          const candFirst = m[1].trim();
+          const candLast = (m[2] || '').trim();
+          if (!stopWords.has(candFirst.toLowerCase())) {
+            setFirstName(candFirst.charAt(0).toUpperCase() + candFirst.slice(1));
+            triggerFieldHighlight('firstName');
+            if (candLast && !stopWords.has(candLast.toLowerCase())) {
+              setLastName(candLast.charAt(0).toUpperCase() + candLast.slice(1));
+              triggerFieldHighlight('lastName');
+            }
+            break;
+          }
+        }
+      }
+
+      // 6. Bedrooms & Bathrooms
+      const bedMatch = lower.match(/(\d+|one|two|three|four|five|six)\s*(?:bed|bedroom|bdrm)/i);
+      if (bedMatch) {
+        const wordToNum: Record<string, string> = { one: '1', two: '2', three: '3', four: '4', five: '5', six: '6' };
+        const n = wordToNum[bedMatch[1].toLowerCase()] || bedMatch[1];
+        setBedrooms(n === '1' ? '1 Bedroom' : `${n} Bedrooms`);
+        triggerFieldHighlight('bedrooms');
+      }
+      const bathMatch = lower.match(/(\d+(?:\.5)?|one|two|three|four)\s*(?:bath|bathroom)/i);
+      if (bathMatch) {
+        const wordToNum: Record<string, string> = { one: '1', two: '2', three: '3', four: '4' };
+        const n = wordToNum[bathMatch[1].toLowerCase()] || bathMatch[1];
+        setBathrooms(n === '1' ? '1 Bathroom' : `${n} Bathrooms`);
+        triggerFieldHighlight('bathrooms');
+      }
+
+      // 7. Street Address & City
+      const addrMatch = text.match(
+        /\b(\d{2,5}\s+(?:[A-Za-z0-9.]+\s+){1,4}(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Boulevard|Blvd|Way|Lane|Ln|Court|Ct|Place|Pl|Crescent|Cres|Trail|Tr|Close|Loop|Gate|Point|Terrace)(?:\s+(?:NW|NE|SW|SE|North|South|East|West))?)/i
+      );
+      if (addrMatch && addrMatch[1]) {
+        setAddress(addrMatch[1].trim());
+        triggerFieldHighlight('address');
+      }
+      if (lower.includes('st. albert') || lower.includes('st albert') || lower.includes('saint albert')) {
+        setCity('St. Albert');
+        triggerFieldHighlight('city');
+      } else if (lower.includes('sherwood park')) {
+        setCity('Sherwood Park');
+        triggerFieldHighlight('city');
+      } else if (lower.includes('spruce grove')) {
+        setCity('Spruce Grove');
+        triggerFieldHighlight('city');
+      } else if (lower.includes('leduc')) {
+        setCity('Leduc');
+        triggerFieldHighlight('city');
+      } else if (lower.includes('beaumont')) {
+        setCity('Beaumont');
+        triggerFieldHighlight('city');
+      } else if (lower.includes('fort saskatchewan')) {
+        setCity('Fort Saskatchewan');
+        triggerFieldHighlight('city');
+      } else if (lower.includes('edmonton')) {
+        setCity('Edmonton');
+        triggerFieldHighlight('city');
+      }
+
+      // 8. Time Window
+      if (lower.includes('morning')) {
+        setPreferredTime('Morning (8:00 AM - 12:00 PM)');
+        triggerFieldHighlight('preferredTime');
+      } else if (lower.includes('afternoon')) {
+        setPreferredTime('Afternoon (12:00 PM - 4:00 PM)');
+        triggerFieldHighlight('preferredTime');
+      } else if (lower.includes('evening')) {
+        setPreferredTime('Evening (4:00 PM - 7:00 PM)');
+        triggerFieldHighlight('preferredTime');
+      }
+    },
+    [selectedService, triggerFieldHighlight]
+  );
+
+  // Calculate live price directly from the canonical Jobber Service Catalog + strict owner minimum rules:
+  // - Basic Cleaning: 1 Cleaner ($52.50/hr)
+  // - Move-Out Cleaning: 2 Cleaners (min 3 hrs @ $105/hr = $315+) OR 1 Cleaner (starts at 6 hrs @ $52.50/hr = $315+)
+  // - Deep Cleaning: Minimum 2 Cleaners for 2 hrs (@ $105/hr = $210+)
   const priceCalculation = useMemo(() => {
     const catalogList =
       Array.isArray(serviceCatalog) && serviceCatalog.length > 0
@@ -390,20 +573,38 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         ? 'Deep Cleaning'
         : 'Standard Cleaning';
 
+    const effectiveCleaners: 1 | 2 =
+      selectedService === 'standard'
+        ? 1
+        : selectedService === 'deep'
+        ? 2
+        : cleanerCount === 1
+        ? 1
+        : 2;
+
     const matchedItem = matchCatalogItem(
       lookupServiceLabel,
       bedrooms,
       bathrooms,
       catalogList,
-      cleanerCount
+      effectiveCleaners
     );
 
-    const basePackagePrice =
-      matchedItem?.total ||
-      matchedItem?.basePrice ||
-      315;
-    const itemQty = matchedItem?.quantity || matchedItem?.baseHours || 3;
-    const itemUnitPrice = matchedItem?.unitPrice || 105;
+    let itemQty = matchedItem?.quantity || matchedItem?.baseHours || 3;
+    const itemUnitPrice =
+      matchedItem?.unitPrice || (effectiveCleaners === 1 ? 52.5 : 105.0);
+
+    // Enforce strict owner minimum hours:
+    if (selectedService === 'move-out') {
+      itemQty = effectiveCleaners === 1 ? Math.max(6, itemQty) : Math.max(3, itemQty);
+    } else if (selectedService === 'deep') {
+      itemQty = Math.max(2, itemQty);
+    }
+
+    const basePackagePrice = Math.max(
+      matchedItem?.total || matchedItem?.basePrice || 0,
+      Math.round(itemQty * itemUnitPrice * 100) / 100
+    );
 
     const addonsTotal = selectedAddons.reduce((sum, id) => {
       const found = ADDON_OPTIONS.find((a) => a.id === id);
@@ -425,10 +626,13 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     const total = Math.round((subtotal + gst) * 100) / 100;
 
     return {
+      effectiveCleaners,
+      itemQty,
+      itemUnitPrice,
       matchedItemName:
         matchedItem?.jobberItemName ||
-        `${bedrooms} ${bathrooms} ${activeServiceData.shortName} (${cleanerCount} Cleaner${
-          cleanerCount > 1 ? 's' : ''
+        `${bedrooms} ${bathrooms} ${activeServiceData.shortName} (${effectiveCleaners} Cleaner${
+          effectiveCleaners > 1 ? 's' : ''
         })`,
       basePackagePrice,
       discountedBase,
@@ -436,8 +640,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       subtotal,
       gst,
       total,
-      hoursLabel: `${itemQty} hrs @ $${itemUnitPrice.toFixed(2)}/hr (${cleanerCount} Cleaner${
-        cleanerCount > 1 ? 's' : ''
+      hoursLabel: `${itemQty} hrs × $${itemUnitPrice.toFixed(2)}/hr (${effectiveCleaners} Cleaner${
+        effectiveCleaners > 1 ? 's' : ''
       })`,
     };
   }, [bedrooms, bathrooms, selectedService, cleanerCount, selectedAddons, frequency, serviceCatalog, activeServiceData]);
@@ -523,7 +727,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       if (data?.success) {
         setStaffStatusMessage(
           data.message ||
-            '✓ Reconnected Facebook Lead Ads, Google Ads Webhooks & Google Sheets! All new customer bookings on book.tidyupscleaning.com also flow straight into your Master Leads Table.'
+            '✓ Reconnected Facebook Lead Ads, Google Ads Webhooks & Google Sheets! All new customer bookings on app.tidyupscleaning.com/book flow straight into your Master Leads Table.'
         );
         if (onLeadsReconnected) {
           onLeadsReconnected({
@@ -540,86 +744,261 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     }
   };
 
-  const handleParseDictationIntoBlanks = async (textToUse?: string) => {
-    const raw = (textToUse ?? dictationText).trim();
-    if (!raw) return;
-    setIsParsingFormVoice(true);
-    setVoiceFillStatus('Filling form blanks from voice dictation...');
-    try {
-      const res = await fetch('/api/dispatch/parse-voice-ticket', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: raw }),
-      });
-      const data = await res.json();
-      if (data) {
-        if (data.customerName && data.customerName !== 'Residential Client') setCustomerName(data.customerName);
-        if (data.phone) setCustomerPhone(data.phone);
-        if (data.email) setCustomerEmail(data.email);
-        if (data.address) setAddress(data.address);
-        if (data.city) setCity(data.city);
-        if (data.preferredDate) setPreferredDate(data.preferredDate);
-        if (data.timeWindow) setPreferredTime(data.timeWindow);
-        if (data.bedrooms) setBedrooms(data.bedrooms);
-        if (data.bathrooms) setBathrooms(data.bathrooms);
-        if (data.specificInstructions) setSpecialInstructions(data.specificInstructions);
-        else setSpecialInstructions(raw);
+  const handleParseDictationIntoBlanks = useCallback(
+    async (textToUse?: string) => {
+      const raw = (textToUse ?? dictationText).trim();
+      if (!raw) return;
+      setIsParsingFormVoice(true);
+      setVoiceFillStatus('Lighting up form boxes from your voice dictation...');
+      applyLiveSpeechExtraction(raw);
+      try {
+        const res = await fetch('/api/dispatch/parse-voice-ticket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript: raw }),
+        });
+        const data = await res.json();
+        if (data) {
+          if (data.customerName && data.customerName !== 'Residential Client') {
+            const parts = String(data.customerName).trim().split(/\s+/);
+            if (parts[0]) {
+              setFirstName(parts[0]);
+              triggerFieldHighlight('firstName');
+            }
+            if (parts.length > 1) {
+              setLastName(parts.slice(1).join(' '));
+              triggerFieldHighlight('lastName');
+            }
+          }
+          if (data.phone) {
+            setCustomerPhone(data.phone);
+            triggerFieldHighlight('customerPhone');
+          }
+          if (data.email) {
+            setCustomerEmail(data.email);
+            triggerFieldHighlight('customerEmail');
+          }
+          if (data.address) {
+            setAddress(data.address);
+            triggerFieldHighlight('address');
+          }
+          if (data.city) {
+            setCity(data.city);
+            triggerFieldHighlight('city');
+          }
+          if (data.preferredDate) {
+            setPreferredDate(data.preferredDate);
+            triggerFieldHighlight('preferredDate');
+          }
+          if (data.timeWindow) {
+            setPreferredTime(data.timeWindow);
+            triggerFieldHighlight('preferredTime');
+          }
+          if (data.bedrooms) {
+            setBedrooms(data.bedrooms);
+            triggerFieldHighlight('bedrooms');
+          }
+          if (data.bathrooms) {
+            setBathrooms(data.bathrooms);
+            triggerFieldHighlight('bathrooms');
+          }
+          if (data.specificInstructions) {
+            setSpecialInstructions(data.specificInstructions);
+            triggerFieldHighlight('specialInstructions');
+          } else {
+            setSpecialInstructions(raw);
+            triggerFieldHighlight('specialInstructions');
+          }
 
-        const cat = (data.serviceCategory || '').toLowerCase();
-        if (cat.includes('move')) setSelectedService('move-out');
-        else if (cat.includes('deep')) setSelectedService('deep');
-        else setSelectedService('standard');
+          const cat = (data.serviceCategory || '').toLowerCase();
+          if (cat.includes('move')) {
+            setSelectedService('move-out');
+            triggerFieldHighlight('selectedService');
+          } else if (cat.includes('deep')) {
+            setSelectedService('deep');
+            setCleanerCount(2);
+            triggerFieldHighlight('selectedService');
+            triggerFieldHighlight('cleanerCount');
+          } else if (cat.includes('basic') || cat.includes('standard')) {
+            setSelectedService('standard');
+            setCleanerCount(1);
+            triggerFieldHighlight('selectedService');
+            triggerFieldHighlight('cleanerCount');
+          }
 
-        setVoiceFillStatus(
-          `✓ Auto-filled: ${data.customerName || 'Customer'} • ${data.address || city} • ${
-            data.preferredDayLabel || data.preferredDate || 'Date Set'
-          }`
-        );
+          setVoiceFillStatus(
+            `✓ Lit Up & Auto-Filled: ${data.customerName || `${firstName} ${lastName}`.trim() || 'Customer'} • ${
+              data.address || city
+            } • ${data.preferredDayLabel || data.preferredDate || 'Date Ready'}`
+          );
+        }
+      } catch {
+        setVoiceFillStatus('✓ Applied spoken details to form boxes.');
+      } finally {
+        setIsParsingFormVoice(false);
       }
-    } catch {
-      setVoiceFillStatus('Added voice notes to special instructions.');
-    } finally {
-      setIsParsingFormVoice(false);
-    }
-  };
+    },
+    [dictationText, applyLiveSpeechExtraction, triggerFieldHighlight, firstName, lastName, city]
+  );
 
+  // Continuous Microphone Toggle — Never shuts off when user pauses speaking!
   const handleToggleFormMic = () => {
+    if (isRecordingFormVoice) {
+      shouldKeepRecordingRef.current = false;
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+      setIsRecordingFormVoice(false);
+      const fullFinal = `${latestTranscriptRef.current || dictationText} ${
+        latestInterimRef.current || interimDictation
+      }`.trim();
+      if (fullFinal) {
+        latestTranscriptRef.current = fullFinal;
+        latestInterimRef.current = '';
+        setDictationText(fullFinal);
+        setInterimDictation('');
+        handleParseDictationIntoBlanks(fullFinal);
+      }
+      return;
+    }
+
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) {
-      setVoiceFillStatus('Type or paste your details below and click "Fill Blanks".');
+      setVoiceFillStatus('Type or paste your details below and click "Light Up Boxes".');
       return;
     }
-    if (isRecordingFormVoice) {
-      setIsRecordingFormVoice(false);
-      return;
-    }
+
     try {
+      shouldKeepRecordingRef.current = true;
+      latestTranscriptRef.current = dictationText;
+      latestInterimRef.current = '';
+
       const rec = new SpeechRec();
       rec.lang = 'en-CA';
-      rec.continuous = false;
-      rec.interimResults = false;
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.maxAlternatives = 3;
+
       rec.onstart = () => {
         setIsRecordingFormVoice(true);
-        setVoiceFillStatus('Listening... Speak your name, phone, address, bedrooms, bathrooms & preferred date.');
+        setVoiceFillStatus(
+          '🎙️ Continuous Mic Active (Will NOT shut off when you pause!) — Speak First & Last Name, Phone, Address, Bedrooms, Bathrooms & Preferred Date...'
+        );
       };
+
       rec.onresult = (ev: any) => {
-        const t = ev.results?.[0]?.[0]?.transcript || '';
-        if (t) {
-          setDictationText(t);
-          handleParseDictationIntoBlanks(t);
+        let finalChunk = '';
+        let interimChunk = '';
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const t = ev.results[i][0].transcript;
+          if (ev.results[i].isFinal) {
+            finalChunk += t + ' ';
+          } else {
+            interimChunk += t;
+          }
+        }
+        const prevBase = latestTranscriptRef.current;
+        const updated = finalChunk ? `${prevBase} ${finalChunk}`.trim() : prevBase;
+        latestTranscriptRef.current = updated;
+        latestInterimRef.current = interimChunk;
+
+        const combinedLive = `${updated} ${interimChunk}`.trim();
+        if (combinedLive) {
+          applyLiveSpeechExtraction(combinedLive);
+        }
+        setDictationText(updated);
+        setInterimDictation(interimChunk);
+      };
+
+      rec.onerror = (ev: any) => {
+        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+          shouldKeepRecordingRef.current = false;
+          setIsRecordingFormVoice(false);
+          setVoiceFillStatus('Microphone access was blocked by browser permissions.');
         }
       };
-      rec.onend = () => setIsRecordingFormVoice(false);
+
+      rec.onend = () => {
+        // Automatically restart on pause so the mic NEVER shuts off until the user clicks Stop!
+        if (shouldKeepRecordingRef.current) {
+          try {
+            rec.start();
+            return;
+          } catch {}
+        }
+        setIsRecordingFormVoice(false);
+        setInterimDictation('');
+      };
+
+      recognitionRef.current = rec;
       rec.start();
     } catch {
+      shouldKeepRecordingRef.current = false;
       setIsRecordingFormVoice(false);
     }
   };
+
+  // Glowing Lit-Up Box Styling helper (matching Voice Dictation Intake page)
+  const getLitBoxClass = (fieldKey: HighlightFieldKey, isFilled: boolean) => {
+    const isFlashing = Boolean(flashingFields[fieldKey]);
+    if (isFlashing) {
+      return 'border-pink-400 bg-gradient-to-br from-pink-950/90 via-red-950/80 to-black ring-4 ring-pink-500/50 shadow-[0_0_25px_rgba(236,72,153,0.65)] scale-[1.01] transition-all duration-300';
+    }
+    if (isFilled) {
+      return 'border-emerald-400/90 bg-gradient-to-br from-emerald-950/55 via-zinc-900 to-black ring-2 ring-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all duration-300';
+    }
+    return 'border-zinc-800 bg-zinc-900/90 hover:border-pink-500/60 transition-all duration-300';
+  };
+
+  const renderLitBadge = (fieldKey: HighlightFieldKey, isFilled: boolean, required = false) => {
+    const wasVoice = Boolean(voiceCapturedFields[fieldKey]);
+    if (isFilled) {
+      return (
+        <span
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-xs ${
+            wasVoice
+              ? 'bg-gradient-to-r from-pink-500 to-red-500 text-white animate-pulse'
+              : 'bg-emerald-500/20 border border-emerald-400 text-emerald-300'
+          }`}
+        >
+          <CheckCircle2 className="w-3 h-3" />
+          <span>{wasVoice ? 'Voice Lit ✓' : 'Filled ✓'}</span>
+        </span>
+      );
+    }
+    return required ? (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-red-950/90 border border-red-500/50 text-red-300 text-[10px] font-black uppercase">
+        Required *
+      </span>
+    ) : (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 text-[10px] font-bold">
+        Optional
+      </span>
+    );
+  };
+
+  const requiredBoxesStatus = useMemo(() => {
+    return [
+      { key: 'selectedService', label: '1. Service Type', filled: Boolean(selectedService) },
+      { key: 'firstName', label: '2. First Name', filled: Boolean(firstName.trim()) },
+      { key: 'lastName', label: '3. Last Name', filled: Boolean(lastName.trim()) },
+      { key: 'customerPhone', label: '4. Mobile Phone', filled: Boolean(customerPhone.trim()) },
+      { key: 'address', label: '5. Street Address', filled: Boolean(address.trim()) },
+      { key: 'bedrooms', label: '6. Bedrooms', filled: Boolean(bedrooms) },
+      { key: 'bathrooms', label: '7. Bathrooms', filled: Boolean(bathrooms) },
+      { key: 'preferredDate', label: '8. Preferred Date', filled: Boolean(preferredDate) },
+    ];
+  }, [selectedService, firstName, lastName, customerPhone, address, bedrooms, bathrooms, preferredDate]);
+
+  const filledRequiredCount = requiredBoxesStatus.filter((b) => b.filled).length;
+  const fullNameCombined = `${firstName.trim()} ${lastName.trim()}`.trim();
 
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName.trim() || !customerPhone.trim() || !address.trim()) {
-      setErrorMessage('Please enter your full name, phone number, and street address.');
+    if (!firstName.trim() || !lastName.trim() || !customerPhone.trim() || !address.trim()) {
+      setErrorMessage('Please enter your First Name, Last Name, Mobile Phone Number, and Street Address so all required boxes light up.');
       return;
     }
 
@@ -630,16 +1009,14 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       ? address.trim()
       : `${address.trim()}, ${city}, AB ${postalCode.trim()}`.trim();
 
-    const addonLabels = selectedAddons
-      .map((id) => ADDON_OPTIONS.find((a) => a.id === id)?.label)
-      .filter(Boolean) as string[];
-
     try {
       const res = await fetch('/api/public/book', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customerName: customerName.trim(),
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          customerName: fullNameCombined,
           customerPhone: customerPhone.trim(),
           customerEmail: customerEmail.trim(),
           serviceType:
@@ -653,7 +1030,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           postalCode: postalCode.trim(),
           bedrooms,
           bathrooms,
-          cleanerCount,
+          cleanerCount: priceCalculation.effectiveCleaners,
           frequency,
           selectedAddons: selectedAddons,
           estimatedSubtotal: priceCalculation.subtotal,
@@ -701,7 +1078,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
   if (bookingRouteVariant === 'SIMPLE_3_OPTION') {
     return (
-      <div className="flex-1 h-full w-full overflow-y-auto overflow-x-hidden">
+      <div className="flex-1 h-full w-full overflow-y-auto overflow-x-hidden bg-black">
         <PublicBookingModal
           isOpen={true}
           mode="STANDALONE_PAGE"
@@ -726,28 +1103,28 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   }
 
   return (
-    <div className="flex-1 h-full w-full overflow-y-auto overflow-x-hidden bg-gradient-to-b from-cyan-50 via-pink-50/40 to-amber-50/30 font-sans text-slate-900">
+    <div className="flex-1 h-full w-full overflow-y-auto overflow-x-hidden bg-black font-sans text-white">
       {/* ─────────────────────────────────────────────────────────────────────────────
-          OWNER-ONLY CONTROL BAR (NEVER SHOWN TO CUSTOMERS ON book.tidyupscleaning.com)
+          OWNER-ONLY CONTROL BAR (NEVER SHOWN TO CUSTOMERS ON app.tidyupscleaning.com/book)
          ───────────────────────────────────────────────────────────────────────────── */}
       {showStaffPreviewBanner && !isCustomerLockPreview && (
-        <div className="bg-slate-950 text-white px-4 py-3 border-b-2 border-cyan-400 shadow-lg">
+        <div className="bg-zinc-950 text-white px-4 py-3 border-b-2 border-pink-500 shadow-lg">
           <div className="max-w-7xl mx-auto flex flex-col xl:flex-row xl:items-center justify-between gap-3">
             <div className="flex items-start sm:items-center gap-3 flex-wrap">
-              <span className="px-2.5 py-1 rounded-full bg-gradient-to-r from-cyan-400 to-teal-400 text-slate-950 text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
+              <span className="px-2.5 py-1 rounded-full bg-gradient-to-r from-pink-500 to-red-600 text-white text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
                 <Lock className="w-3.5 h-3.5" />
-                <span>Locked Customer Page (/book)</span>
+                <span>Customer Quote &amp; Voice Booking Page (/book)</span>
               </span>
-              <div className="text-xs text-slate-200">
-                <strong className="text-amber-300">2 Customer Booking Variations:</strong> Use{' '}
-                <code className="px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300 font-mono font-bold">
-                  https://app.tidyupscleaning.com/booking
-                </code>{' '}
-                (Simple 3-Option Form: Move-Out, Basic, Deep) or{' '}
-                <code className="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono font-bold">
+              <div className="text-xs text-zinc-200">
+                <strong className="text-pink-400">Live Customer Booking URLs:</strong>{' '}
+                <code className="px-1.5 py-0.5 rounded bg-zinc-900 border border-pink-500/40 text-pink-300 font-mono font-bold">
                   https://app.tidyupscleaning.com/book
                 </code>{' '}
-                (Quote Calculator Variation synced to your Service Catalog Price List).
+                (Voice + Lit-Box Quote Calculator) &amp;{' '}
+                <code className="px-1.5 py-0.5 rounded bg-zinc-900 border border-red-500/40 text-red-300 font-mono font-bold">
+                  https://app.tidyupscleaning.com/booking
+                </code>{' '}
+                (Simple 3-Option Form).
               </div>
             </div>
 
@@ -755,7 +1132,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <button
                 type="button"
                 onClick={() => handleSwitchRouteVariant('SIMPLE_3_OPTION')}
-                className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 to-red-600 hover:from-pink-500 hover:to-red-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
                 title="Switch to the Simple 3-Option Booking Form (/booking: Move-Out, Basic, Deep)"
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -764,9 +1141,17 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
               <button
                 type="button"
+                onClick={() => handleCopyBookingLink('main', 'https://app.tidyupscleaning.com/book')}
+                className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-pink-500 text-pink-300 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+              >
+                {copiedLinkKey === 'main' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedLinkKey === 'main' ? 'Copied /book!' : 'Copy /book Link'}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => handleCopyBookingLink('booking3', 'https://app.tidyupscleaning.com/booking')}
-                className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
-                title="Copy https://app.tidyupscleaning.com/booking (Simple 3-Option Form)"
+                className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-red-500 text-red-300 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
               >
                 {copiedLinkKey === 'booking3' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 <span>{copiedLinkKey === 'booking3' ? 'Copied /booking!' : 'Copy /booking Link'}</span>
@@ -774,54 +1159,22 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => handleCopyBookingLink('main', 'https://app.tidyupscleaning.com/book')}
-                className="px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
-                title="Copy https://app.tidyupscleaning.com/book (Quote Calculator Variation)"
-              >
-                {copiedLinkKey === 'main' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedLinkKey === 'main' ? 'Copied /book!' : 'Copy /book (Calculator)'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleCopyBookingLink('privacy', 'https://app.tidyupscleaning.com/book/privacy-policy')}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-cyan-400/50 text-cyan-300 font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
-                title="Copy Direct Privacy Policy URL for Facebook Ads, Google Ads & Twilio Compliance"
-              >
-                {copiedLinkKey === 'privacy' ? <Check className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-                <span>{copiedLinkKey === 'privacy' ? 'Copied Privacy URL!' : '🔒 Copy Privacy URL'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleCopyBookingLink('terms', 'https://app.tidyupscleaning.com/book/terms')}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-pink-400/50 text-pink-300 font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs"
-                title="Copy Direct Terms & Conditions URL"
-              >
-                {copiedLinkKey === 'terms' ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
-                <span>{copiedLinkKey === 'terms' ? 'Copied T&C URL!' : '📄 Copy T&C URL'}</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={handleReconnectFacebookAndGoogleLeads}
                 disabled={isReconnectingLeads}
-                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-pink-500 to-fuchsia-600 hover:from-pink-400 hover:to-fuchsia-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
-                title="Reconnect Facebook Lead Ads, Google Ads Webhooks & Pull Latest Rows from Google Sheets"
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-pink-600 hover:opacity-95 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isReconnectingLeads ? 'animate-spin' : ''}`} />
-                <span>{isReconnectingLeads ? 'Reconnecting...' : '🔄 Reconnect FB & Google Leads'}</span>
+                <span>{isReconnectingLeads ? 'Reconnecting...' : '🔄 Sync Leads'}</span>
               </button>
 
               {onToggleCustomerLockPreview && (
                 <button
                   type="button"
                   onClick={() => onToggleCustomerLockPreview(true)}
-                  className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  title="Preview exact Customer-Only Locked Mode (hides all staff bars & buttons)"
+                  className="px-3 py-1.5 rounded-xl bg-pink-500 hover:bg-pink-400 text-black font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
                   <Lock className="w-3.5 h-3.5" />
-                  <span>Test Customer-Only Lock</span>
+                  <span>Preview Customer-Only Lock</span>
                 </button>
               )}
             </div>
@@ -851,89 +1204,80 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           <button
             type="button"
             onClick={() => onToggleCustomerLockPreview(false)}
-            className="px-4 py-2 rounded-2xl bg-slate-950/90 hover:bg-slate-900 text-amber-300 border border-amber-400/50 text-xs font-black flex items-center gap-2 shadow-2xl cursor-pointer"
+            className="px-4 py-2 rounded-2xl bg-zinc-950 hover:bg-zinc-900 text-pink-300 border-2 border-pink-500 text-xs font-black flex items-center gap-2 shadow-2xl cursor-pointer"
           >
-            <Unlock className="w-4 h-4 text-amber-400" />
+            <Unlock className="w-4 h-4 text-pink-400" />
             <span>Exit Customer-Only Lock Preview (Return to Staff App)</span>
           </button>
         </div>
       )}
 
       {/* ─────────────────────────────────────────────────────────────────────────────
-          1. DEDICATED CUSTOMER-ONLY STICKY TOP HEADER (833 TIDYUPS BRIGHT BRANDING)
-             No internal app tabs — only Logo, Main Website link, Phone Lines & Book Now!
+          1. DEDICATED STICKY TOP HEADER (BLACK, HOT PINK & BRIGHT RED + TIDYUPS BUNNY)
          ───────────────────────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b-4 border-cyan-400 shadow-md px-4 sm:px-6 lg:px-8 py-2.5">
+      <header className="sticky top-0 z-30 bg-black/95 backdrop-blur-md border-b-2 border-pink-500 shadow-[0_4px_25px_rgba(236,72,153,0.25)] px-4 sm:px-6 lg:px-8 py-3">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          {/* Official 833 Tidyups Crest Logo & Name */}
-          <div className="flex items-center gap-3">
-            <img
-              src={OFFICIAL_LOGO_URL}
-              alt="833 Tidyups Cleaning Service Logo"
-              className="w-12 h-12 sm:w-14 sm:h-14 object-contain drop-shadow-sm shrink-0"
-            />
+          {/* TidyUps Bunny Mascot Crest & Brand Name */}
+          <div className="flex items-center gap-3.5">
+            <TidyUpsBunnyLogo size="md" />
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-lg sm:text-xl font-black tracking-tight bg-gradient-to-r from-pink-600 via-fuchsia-600 to-cyan-600 bg-clip-text text-transparent">
-                  833 TidyUps Cleaning Service
+                <span className="text-lg sm:text-2xl font-black tracking-tight bg-gradient-to-r from-white via-pink-400 to-red-500 bg-clip-text text-transparent">
+                  TidyUps Cleaning Service Inc.
                 </span>
-                <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-amber-300 text-slate-950 text-[10px] font-black uppercase tracking-wider">
-                  Est. 2012 • Edmonton &amp; Area
+                <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-full bg-gradient-to-r from-pink-600 to-red-600 text-white text-[10px] font-black uppercase tracking-wider">
+                  🐰 Est. 2012 • Edmonton &amp; Area
                 </span>
               </div>
-              <p className="text-[11px] sm:text-xs font-bold text-slate-600">
-                Residential • Commercial • Deep Cleans • Move-In / Move-Out • AirBnB
+              <p className="text-[11px] sm:text-xs font-bold text-zinc-400">
+                Move-Out Cleaning • Basic Cleaning • Deep Cleaning • Instant Voice &amp; Online Quotes
               </p>
             </div>
           </div>
 
-          {/* Customer-Only Actions: Visit Main Website + Official Phone Numbers + Jump to Booking Form */}
+          {/* Customer-Only Actions (Zero Phone Numbers) */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
             <a
               href="https://tidyupscleaning.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-2 rounded-xl bg-cyan-50 hover:bg-cyan-100 border-2 border-cyan-400 text-cyan-950 font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
-              title="Visit our main company website at tidyupscleaning.com"
+              className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-pink-500/60 text-pink-300 font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer"
             >
-              <Globe className="w-3.5 h-3.5 text-cyan-600" />
-              <span>Visit Website (tidyupscleaning.com)</span>
-              <ExternalLink className="w-3 h-3 text-cyan-700" />
+              <Globe className="w-3.5 h-3.5 text-pink-400" />
+              <span>tidyupscleaning.com</span>
+              <ExternalLink className="w-3 h-3 text-pink-400" />
             </a>
 
             <a
               href="mailto:booking@tidyupscleaning.com"
-              className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-400 text-emerald-950 font-black text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
-              title="Email Booking & Customer Support: booking@tidyupscleaning.com"
+              className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-red-500/60 text-red-300 font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer"
             >
-              <Mail className="w-3.5 h-3.5 text-emerald-600" />
+              <Mail className="w-3.5 h-3.5 text-red-400" />
               <span>booking@tidyupscleaning.com</span>
             </a>
 
             <button
               type="button"
               onClick={() => handleOpenLegalModal('PRIVACY')}
-              className="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-pink-50 border border-slate-300 hover:border-pink-400 text-slate-800 font-black text-xs flex items-center gap-1 transition-all cursor-pointer"
-              title="View Privacy Policy"
+              className="px-2.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 font-black text-xs flex items-center gap-1 transition-all cursor-pointer"
             >
-              <Lock className="w-3.5 h-3.5 text-pink-600" />
-              <span>Privacy Policy</span>
+              <Lock className="w-3.5 h-3.5 text-pink-500" />
+              <span>Privacy</span>
             </button>
 
             <button
               type="button"
               onClick={() => handleOpenLegalModal('TERMS')}
-              className="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-cyan-50 border border-slate-300 hover:border-cyan-400 text-slate-800 font-black text-xs flex items-center gap-1 transition-all cursor-pointer"
-              title="View Terms & Conditions (T&C)"
+              className="px-2.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 font-black text-xs flex items-center gap-1 transition-all cursor-pointer"
             >
-              <FileText className="w-3.5 h-3.5 text-cyan-600" />
+              <FileText className="w-3.5 h-3.5 text-red-500" />
               <span>T&amp;C</span>
             </button>
 
             <button
               type="button"
               onClick={() => bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-500 via-red-600 to-pink-600 hover:opacity-95 text-white font-black text-xs flex items-center gap-1.5 shadow-[0_0_15px_rgba(236,72,153,0.4)] cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Book Now ↓</span>
@@ -943,11 +1287,10 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenStaffLogin}
-                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border-2 border-amber-400 font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
-                title="Owner (cleaningserviceyeg@gmail.com - No Password), Dispatcher & Cleaner Login"
+                className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-pink-300 border-2 border-pink-500 font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
               >
-                <Lock className="w-3.5 h-3.5 text-amber-400" />
-                <span>👑 Owner / Staff Login</span>
+                <Lock className="w-3.5 h-3.5 text-pink-400" />
+                <span>👑 Owner Login</span>
               </button>
             )}
           </div>
@@ -955,42 +1298,41 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       </header>
 
       {/* ─────────────────────────────────────────────────────────────────────────────
-          2. BRIGHT VIBRANT HERO + OFFICIAL 833 TIDYUPS BANNERS SHOWCASE
+          2. BLACK, HOT PINK & BRIGHT RED HERO + TIDYUPS BUNNY FLEET SHOWCASE
          ───────────────────────────────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-gradient-to-r from-[#ec4899] via-[#9333ea] to-[#06b6d4] text-white py-8 sm:py-10 px-4 sm:px-6 lg:px-8 border-b-4 border-amber-400 shadow-lg">
-        {/* Bright decorative glow accents */}
-        <div className="absolute -top-20 -left-20 w-80 h-80 rounded-full bg-amber-300/30 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-20 -right-20 w-80 h-80 rounded-full bg-cyan-300/30 blur-3xl pointer-events-none" />
+      <section className="relative overflow-hidden bg-gradient-to-r from-black via-zinc-950 to-red-950/60 text-white py-8 sm:py-10 px-4 sm:px-6 lg:px-8 border-b-2 border-pink-500/60 shadow-2xl">
+        <div className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-pink-600/20 blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-24 -right-24 w-96 h-96 rounded-full bg-red-600/20 blur-3xl pointer-events-none" />
 
         <div className="relative max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-          {/* Left Hero Copy & Trust Badges */}
+          {/* Left Hero Copy */}
           <div className="lg:col-span-6 space-y-4 text-center lg:text-left">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-300 text-slate-950 text-xs font-black uppercase tracking-wide shadow-md">
-              <Sparkles className="w-4 h-4 text-pink-600 fill-pink-600" />
-              <span>Official Customer Booking Page • book.tidyupscleaning.com</span>
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-pink-600 to-red-600 text-white text-xs font-black uppercase tracking-wide shadow-md">
+              <Sparkles className="w-4 h-4" />
+              <span>🐰 TidyUps Bunny Voice &amp; Instant Quote Portal • app.tidyupscleaning.com/book</span>
             </div>
 
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight drop-shadow-sm">
-              Book Your Sparkling Clean Home in{' '}
-              <span className="text-amber-300 underline decoration-cyan-300 decoration-4 underline-offset-4">
-                60 Seconds!
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
+              Speak or Click to Book Your{' '}
+              <span className="bg-gradient-to-r from-pink-400 via-red-400 to-pink-500 bg-clip-text text-transparent underline decoration-red-500 decoration-4 underline-offset-4">
+                Move-Out, Basic, or Deep Clean!
               </span>
             </h1>
 
-            <p className="text-white/95 text-sm sm:text-base font-medium leading-relaxed max-w-xl mx-auto lg:mx-0">
-              Whether you need a <strong>Standard / Basic Clean</strong>, a restorative <strong>Deep Clean</strong>, an inspection-guaranteed <strong>Move-Out / Move-In Clean</strong>, or an <strong>AirBnB Turnover</strong> — pick your package, see your instant price, and choose your preferred date below!
+            <p className="text-zinc-300 text-sm sm:text-base font-medium leading-relaxed max-w-xl mx-auto lg:mx-0">
+              Use our <strong className="text-pink-400">Continuous Voice Dictation</strong> or fill in the boxes below — watch every box <strong className="text-emerald-400">light up</strong> as your First Name, Last Name, Address, Home Size, and Crew are captured!
             </p>
 
-            {/* Bright Pill Trust Badges */}
-            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2.5 pt-1">
-              <span className="px-3 py-1.5 rounded-xl bg-white/95 text-slate-900 text-xs font-black flex items-center gap-1.5 shadow-sm">
-                <ShieldCheck className="w-4 h-4 text-teal-600" /> Insured &amp; Bonded Since 2012
+            {/* Crew & Minimum Hours Rule Pills */}
+            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2 pt-1">
+              <span className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-pink-500/60 text-pink-300 text-xs font-black flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-pink-400" /> Basic: 1 Cleaner ($52.50/hr)
               </span>
-              <span className="px-3 py-1.5 rounded-xl bg-white/95 text-slate-900 text-xs font-black flex items-center gap-1.5 shadow-sm">
-                <Star className="w-4 h-4 text-amber-500 fill-amber-400" /> 5.0★ Rated Edmonton Crews
+              <span className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-red-500/60 text-red-300 text-xs font-black flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-red-400" /> Move-Out: 2 Cleaners (3h Min) or 1 Cleaner (6h Min)
               </span>
-              <span className="px-3 py-1.5 rounded-xl bg-white/95 text-slate-900 text-xs font-black flex items-center gap-1.5 shadow-sm">
-                <CheckCircle2 className="w-4 h-4 text-pink-600" /> 1, 2 &amp; 3-Cleaner Teams
+              <span className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-pink-500/60 text-pink-300 text-xs font-black flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-pink-400" /> Deep Clean: Min 2 Cleaners for 2 Hrs
               </span>
             </div>
 
@@ -998,27 +1340,26 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <button
                 type="button"
                 onClick={() => bookingFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                className="px-6 py-3 rounded-2xl bg-amber-300 hover:bg-amber-200 text-slate-950 font-black text-sm flex items-center gap-2 shadow-xl transition-all active:scale-95 cursor-pointer"
+                className="px-6 py-3 rounded-2xl bg-gradient-to-r from-pink-500 via-red-600 to-pink-600 hover:opacity-95 text-white font-black text-sm flex items-center gap-2 shadow-[0_0_25px_rgba(236,72,153,0.45)] transition-all active:scale-95 cursor-pointer"
               >
-                <span>Start Your Booking Sheet Below</span>
+                <Mic className="w-4 h-4" />
+                <span>Start Voice or Online Booking Below</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
-              <a
-                href="https://tidyupscleaning.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-3 rounded-2xl bg-white/20 hover:bg-white/30 border-2 border-white/60 text-white font-black text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer"
+              <button
+                type="button"
+                onClick={() => handleSwitchRouteVariant('SIMPLE_3_OPTION')}
+                className="px-4 py-3 rounded-2xl bg-zinc-900 hover:bg-zinc-800 border-2 border-pink-500/60 text-pink-200 font-black text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer"
               >
-                <span>Explore Main Website (tidyupscleaning.com)</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+                <span>Open Simple Popup Form (/booking)</span>
+              </button>
             </div>
           </div>
 
-          {/* Right: Interactive Showcase of User's Uploaded 833 Tidyups Banners & Crew Photos */}
+          {/* Right: TidyUps Bunny Fleet & Mascot Banner Showcase */}
           <div className="lg:col-span-6">
-            <div className="bg-white/95 p-3 rounded-3xl shadow-2xl border-4 border-amber-300 space-y-2.5">
-              <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-[16/9] shadow-inner">
+            <div className="bg-zinc-950 p-3 rounded-3xl shadow-[0_0_35px_rgba(236,72,153,0.3)] border-2 border-pink-500 space-y-2.5">
+              <div className="relative rounded-2xl overflow-hidden bg-black aspect-[16/9] border border-zinc-800">
                 <img
                   src={OFFICIAL_COMPANY_BANNERS[activeBannerIdx].src}
                   alt={OFFICIAL_COMPANY_BANNERS[activeBannerIdx].title}
@@ -1031,7 +1372,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       (prev) => (prev - 1 + OFFICIAL_COMPANY_BANNERS.length) % OFFICIAL_COMPANY_BANNERS.length
                     )
                   }
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/75 hover:bg-slate-950 text-white flex items-center justify-center shadow-lg cursor-pointer"
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/80 hover:bg-pink-600 text-white border border-pink-500/50 flex items-center justify-center shadow-lg cursor-pointer"
                   aria-label="Previous company banner"
                 >
                   <ChevronLeft className="w-5 h-5" />
@@ -1041,14 +1382,13 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                   onClick={() =>
                     setActiveBannerIdx((prev) => (prev + 1) % OFFICIAL_COMPANY_BANNERS.length)
                   }
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-950/75 hover:bg-slate-950 text-white flex items-center justify-center shadow-lg cursor-pointer"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/80 hover:bg-pink-600 text-white border border-pink-500/50 flex items-center justify-center shadow-lg cursor-pointer"
                   aria-label="Next company banner"
                 >
                   <ChevronRight className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Thumbnail Strip of All 4 Official Banners */}
               <div className="grid grid-cols-4 gap-2">
                 {OFFICIAL_COMPANY_BANNERS.map((b, idx) => (
                   <button
@@ -1057,17 +1397,17 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                     onClick={() => setActiveBannerIdx(idx)}
                     className={`rounded-xl overflow-hidden border-2 aspect-[16/9] cursor-pointer transition-all ${
                       activeBannerIdx === idx
-                        ? 'border-pink-600 ring-2 ring-pink-400 scale-[1.02]'
-                        : 'border-slate-200 opacity-75 hover:opacity-100'
+                        ? 'border-pink-500 ring-2 ring-red-500 scale-[1.02]'
+                        : 'border-zinc-800 opacity-70 hover:opacity-100'
                     }`}
                   >
                     <img src={b.src} alt={b.title} className="w-full h-full object-cover" />
                   </button>
                 ))}
               </div>
-              <div className="flex items-center justify-between px-1 text-[11px] font-extrabold text-slate-700">
-                <span>{OFFICIAL_COMPANY_BANNERS[activeBannerIdx].title}</span>
-                <span className="text-pink-600 font-mono">tidyupscleaning.com</span>
+              <div className="flex items-center justify-between px-1 text-[11px] font-extrabold text-zinc-300">
+                <span className="truncate">{OFFICIAL_COMPANY_BANNERS[activeBannerIdx].title}</span>
+                <span className="text-pink-400 font-mono shrink-0 ml-2">app.tidyupscleaning.com/book</span>
               </div>
             </div>
           </div>
@@ -1075,26 +1415,29 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       </section>
 
       {/* ─────────────────────────────────────────────────────────────────────────────
-          3. 1-PAGE INTERACTIVE CUSTOMER BOOKING SHEET & INSTANT PRICE ESTIMATOR
+          3. VOICE DICTATION & LIT-UP BOXES CUSTOMER BOOKING SHEET + QUOTE CALCULATOR
          ───────────────────────────────────────────────────────────────────────────── */}
       <section ref={bookingFormRef} className="max-w-7xl mx-auto py-8 sm:py-10 px-4 sm:px-6 lg:px-8 space-y-8">
-        {/* Step 1: Bright Cleaning Service Selector Cards */}
-        <div className="space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        {/* Step 1: 3 Cleaning Service Options (Move-Out, Basic, Deep) */}
+        <div className={`p-5 rounded-3xl border-2 ${getLitBoxClass('selectedService', Boolean(selectedService))}`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
             <div>
-              <span className="inline-block px-3 py-1 rounded-full bg-gradient-to-r from-pink-500 to-cyan-500 text-white text-[11px] font-black uppercase tracking-wider">
-                Step 1 of 3 • Pick Your Cleaning Service
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">
-                What Type of Cleaning Can We Help You With?
+              <div className="flex items-center gap-2">
+                <span className="inline-block px-3 py-1 rounded-full bg-gradient-to-r from-pink-600 to-red-600 text-white text-[11px] font-black uppercase tracking-wider">
+                  Step 1 of 3 • Pick Your Cleaning Service (3 Core Options)
+                </span>
+                {renderLitBadge('selectedService', Boolean(selectedService), true)}
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black text-white mt-1.5">
+                Choose Move-Out, Basic, or Deep Cleaning
               </h2>
             </div>
-            <span className="text-xs font-extrabold text-teal-800 bg-teal-100 border border-teal-300 px-3 py-1.5 rounded-xl">
+            <span className="text-xs font-extrabold text-pink-300 bg-pink-950/60 border border-pink-500/50 px-3 py-1.5 rounded-xl">
               ✨ All Supplies, HEPA Vacuums &amp; Eco-Safe Products Included!
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
             {CLEANING_SERVICES.map((s) => {
               const IconComp = s.icon;
               const isSelected = selectedService === s.id;
@@ -1102,38 +1445,45 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => setSelectedService(s.id)}
-                  className={`p-3.5 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                  onClick={() => {
+                    setSelectedService(s.id);
+                    triggerFieldHighlight('selectedService');
+                  }}
+                  className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
                     isSelected
-                      ? `bg-gradient-to-b ${s.lightBg} ${s.borderActive} ring-4 shadow-lg scale-[1.01]`
-                      : 'bg-white border-slate-200 hover:border-cyan-400 shadow-xs'
+                      ? 'bg-gradient-to-b from-pink-950/90 via-red-950/60 to-black border-pink-500 ring-2 ring-pink-500/40 shadow-[0_0_25px_rgba(236,72,153,0.4)] scale-[1.01]'
+                      : 'bg-zinc-950 border-zinc-800 hover:border-pink-500/60'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-1">
+                  <div className="flex items-center justify-between gap-2">
                     <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-xs ${
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-md ${
                         isSelected
                           ? `bg-gradient-to-br ${s.accentGradient} text-white`
-                          : 'bg-slate-100 text-slate-700'
+                          : 'bg-zinc-900 text-zinc-400'
                       }`}
                     >
-                      <IconComp className="w-4 h-4" />
+                      <IconComp className="w-5 h-5" />
                     </div>
                     <span
-                      className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                        isSelected ? 'bg-amber-300 text-slate-950' : 'bg-slate-100 text-slate-600'
+                      className={`text-[10px] font-black px-2.5 py-1 rounded-full ${
+                        isSelected
+                          ? 'bg-gradient-to-r from-pink-500 to-red-600 text-white'
+                          : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
                       }`}
                     >
                       From {s.startingPrice}
                     </span>
                   </div>
                   <div>
-                    <h3 className="font-black text-xs sm:text-sm text-slate-900 leading-snug">
-                      {s.shortName}
-                    </h3>
-                    <span className="text-[10px] font-bold text-pink-600 block mt-0.5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-black text-base text-white">{s.shortName}</h3>
+                      {isSelected && <CheckCircle2 className="w-5 h-5 text-pink-400" />}
+                    </div>
+                    <span className="inline-block mt-1 px-2 py-0.5 rounded-md bg-red-600/20 border border-red-500/40 text-[10px] font-black text-red-300">
                       {s.badge}
                     </span>
+                    <p className="text-[11px] text-zinc-300 mt-1.5 leading-relaxed">{s.tagline}</p>
                   </div>
                 </button>
               );
@@ -1141,55 +1491,65 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           </div>
         </div>
 
-        {/* Main Split Grid: Left = Booking Sheet Form (Cols 1-7) | Right = Live Estimate, Checklist & Photos (Cols 8-12) */}
+        {/* Main Split Grid: Left = Voice & Lit-Box Booking Form (Cols 1-7) | Right = Live Estimate, Checklist & Guarantee (Cols 8-12) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* LEFT COLUMN: THE 1-PAGE CUSTOMER BOOKING SHEET */}
+          {/* LEFT COLUMN: THE CUSTOMER BOOKING SHEET WITH LIT-UP BOXES */}
           <div className="lg:col-span-7">
-            <div className="bg-white rounded-3xl border-4 border-cyan-400 shadow-xl p-5 sm:p-7 relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-pink-500 via-amber-400 to-cyan-500" />
+            <div className="bg-zinc-950 rounded-3xl border-2 border-pink-500 shadow-[0_0_40px_rgba(236,72,153,0.25)] p-5 sm:p-7 relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-pink-500 via-red-600 to-pink-500" />
 
               {formSubmitted ? (
                 <div className="py-8 text-center space-y-5 animate-fadeIn">
-                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-white flex items-center justify-center mx-auto shadow-lg">
-                    <CheckCircle2 className="w-11 h-11" />
+                  <div className="flex justify-center">
+                    <TidyUpsBunnyLogo size="lg" />
                   </div>
                   <div className="space-y-1.5">
-                    <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black uppercase">
-                      ✓ Booking Confirmed &amp; Sent to 833 TidyUps Dispatch
+                    <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-xs font-black uppercase">
+                      ✓ Booking Confirmed &amp; Sent to TidyUps Dispatch
                     </span>
-                    <h3 className="text-2xl sm:text-3xl font-black text-slate-900">
-                      Thank You, {customerName}!
+                    <h3 className="text-2xl sm:text-3xl font-black text-white">
+                      Thank You, {firstName} {lastName}!
                     </h3>
-                    <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
-                      Your cleaning request and instant estimate have been received by our Edmonton team. We will text/call you at{' '}
-                      <strong className="text-slate-900">{customerPhone}</strong> to confirm your arrival window.
+                    <p className="text-xs sm:text-sm text-zinc-300 max-w-md mx-auto">
+                      Your <strong>{activeServiceData.name}</strong> booking and instant quote have been saved in Jobber. We will confirm your arrival window at{' '}
+                      <strong className="text-pink-400">{customerPhone}</strong>.
                     </p>
                   </div>
 
-                  <div className="p-5 bg-gradient-to-br from-cyan-50 via-white to-pink-50 rounded-2xl border-2 border-cyan-300 max-w-md mx-auto text-left text-xs space-y-2 shadow-xs">
-                    <div className="flex justify-between items-center border-b border-slate-200 pb-2">
-                      <span className="text-slate-500 font-bold">Booking Reference:</span>
-                      <span className="font-black font-mono text-pink-600 text-sm">
+                  <div className="p-5 bg-zinc-900 rounded-2xl border-2 border-pink-500/60 max-w-md mx-auto text-left text-xs space-y-2.5 shadow-lg">
+                    <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
+                      <span className="text-zinc-400 font-bold">Booking Reference:</span>
+                      <span className="font-black font-mono text-pink-400 text-sm">
                         #{confirmedBookingId} ({confirmedQuoteNumber})
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-500 font-bold">Selected Package:</span>
-                      <span className="font-black text-slate-900 text-right">{priceCalculation.matchedItemName}</span>
+                      <span className="text-zinc-400 font-bold">Client Name:</span>
+                      <span className="font-black text-white text-right">
+                        {firstName} {lastName}
+                      </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-500 font-bold">Property Address:</span>
-                      <span className="font-bold text-slate-800 text-right">{address}, {city}</span>
+                      <span className="text-zinc-400 font-bold">Selected Package:</span>
+                      <span className="font-black text-pink-300 text-right">{priceCalculation.matchedItemName}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-500 font-bold">Preferred Date &amp; Time:</span>
-                      <span className="font-black text-teal-700 text-right">
+                      <span className="text-zinc-400 font-bold">Crew &amp; Minimum Hours:</span>
+                      <span className="font-bold text-red-300 text-right">{priceCalculation.hoursLabel}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400 font-bold">Property Address:</span>
+                      <span className="font-bold text-white text-right">{address}, {city}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400 font-bold">Preferred Date &amp; Time:</span>
+                      <span className="font-black text-emerald-400 text-right">
                         {formattedPreferredDateLabel} • {preferredTime}
                       </span>
                     </div>
-                    <div className="flex justify-between pt-2 border-t border-slate-200 text-sm">
-                      <span className="font-black text-slate-900">Estimated Total (incl. GST):</span>
-                      <span className="font-black font-mono text-emerald-700 text-base">
+                    <div className="flex justify-between pt-2 border-t border-zinc-800 text-sm">
+                      <span className="font-black text-white">Estimated Total (incl. GST):</span>
+                      <span className="font-black font-mono text-pink-400 text-base">
                         ${priceCalculation.total.toFixed(2)} CAD
                       </span>
                     </div>
@@ -1200,11 +1560,13 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       type="button"
                       onClick={() => {
                         setFormSubmitted(false);
-                        setCustomerName('');
+                        setFirstName('');
+                        setLastName('');
                         setCustomerPhone('');
                         setAddress('');
+                        setVoiceCapturedFields({});
                       }}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-cyan-600 text-white text-xs font-black hover:opacity-95 transition-all cursor-pointer shadow-md"
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-red-600 text-white text-xs font-black hover:opacity-95 transition-all cursor-pointer shadow-md"
                     >
                       Book Another Cleaning
                     </button>
@@ -1212,7 +1574,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       href="https://tidyupscleaning.com"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-5 py-2.5 rounded-xl border-2 border-cyan-500 text-cyan-900 text-xs font-black hover:bg-cyan-50 transition-colors flex items-center gap-1.5"
+                      className="px-5 py-2.5 rounded-xl border-2 border-pink-500 text-pink-300 text-xs font-black hover:bg-pink-950/40 transition-colors flex items-center gap-1.5"
                     >
                       <span>Return to tidyupscleaning.com</span>
                       <ExternalLink className="w-3.5 h-3.5" />
@@ -1221,401 +1583,269 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 </div>
               ) : (
                 <form onSubmit={handleBookingSubmit} className="space-y-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                    <div>
-                      <span className="text-[11px] font-black text-pink-600 uppercase tracking-wider block">
-                        Step 2 of 3 • Complete Your Customer Booking Sheet
-                      </span>
-                      <h3 className="text-xl sm:text-2xl font-black text-slate-900">
-                        {activeServiceData.name}
-                      </h3>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-3">
+                    <div className="flex items-center gap-3">
+                      <TidyUpsBunnyLogo size="sm" showRibbonText={false} />
+                      <div>
+                        <span className="text-[11px] font-black text-pink-400 uppercase tracking-wider block">
+                          Step 2 of 3 • Voice &amp; Lit-Box Customer Booking Sheet
+                        </span>
+                        <h3 className="text-xl sm:text-2xl font-black text-white">
+                          {activeServiceData.name}
+                        </h3>
+                      </div>
                     </div>
-                    <div className="text-right bg-gradient-to-r from-amber-100 to-yellow-100 border-2 border-amber-400 px-3.5 py-1.5 rounded-2xl">
-                      <span className="text-[10px] font-black uppercase text-amber-900 block">
+                    <div className="text-right bg-gradient-to-r from-pink-950 via-red-950 to-black border-2 border-pink-500 px-3.5 py-1.5 rounded-2xl shadow-md">
+                      <span className="text-[10px] font-black uppercase text-pink-300 block">
                         Instant Estimate (+GST)
                       </span>
-                      <span className="text-xl sm:text-2xl font-black font-mono text-slate-950">
+                      <span className="text-xl sm:text-2xl font-black font-mono text-white">
                         ${priceCalculation.total.toFixed(2)}
                       </span>
                     </div>
                   </div>
 
-                  {/* Optional Quick Voice Fill Bar for Customers Who Prefer Speaking Their Details */}
-                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-50 via-pink-50 to-amber-50 border-2 border-pink-300 space-y-2">
+                  {/* ─────────────────────────────────────────────────────────────────
+                      CONTINUOUS VOICE DICTATION BAR (NEVER SHUTS OFF ON PAUSE!)
+                     ───────────────────────────────────────────────────────────────── */}
+                  <div
+                    className={`p-4 rounded-2xl border-2 transition-all space-y-2.5 ${
+                      isRecordingFormVoice
+                        ? 'border-red-500 bg-gradient-to-r from-red-950/90 via-pink-950/80 to-black ring-4 ring-red-500/30 shadow-[0_0_30px_rgba(239,68,68,0.45)]'
+                        : 'border-pink-500/80 bg-gradient-to-r from-black via-pink-950/35 to-black'
+                    }`}
+                  >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-                        <Mic className="w-4 h-4 text-pink-600" />
-                        <span>Want to Fill This Form by Voice? Speak Your Info!</span>
-                      </span>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                            isRecordingFormVoice
+                              ? 'bg-red-600 text-white animate-pulse'
+                              : 'bg-gradient-to-br from-pink-500 to-red-600 text-white'
+                          }`}
+                        >
+                          {isRecordingFormVoice ? <Volume2 className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                        </div>
+                        <div>
+                          <span className="text-xs sm:text-sm font-black text-white block">
+                            🎙️ Fill Out by Voice — Watch Every Box Light Up!
+                          </span>
+                          <span className="text-[11px] text-pink-200/90 block">
+                            {isRecordingFormVoice
+                              ? '● Continuous Mic Active — Pausing will NOT stop the mic! Click "Stop Mic" when finished.'
+                              : 'Speak your First Name, Last Name, Phone, Address, Bedrooms, Bathrooms & Date at your own pace.'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={handleToggleFormMic}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs transition-all ${
+                          className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-md transition-all ${
                             isRecordingFormVoice
-                              ? 'bg-rose-600 text-white animate-pulse'
-                              : 'bg-gradient-to-r from-pink-600 to-purple-600 text-white hover:opacity-95'
+                              ? 'bg-red-600 hover:bg-red-500 text-white ring-2 ring-white/50'
+                              : 'bg-gradient-to-r from-pink-500 to-red-600 hover:from-pink-400 hover:to-red-500 text-white'
                           }`}
                         >
-                          {isRecordingFormVoice ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                          <span>{isRecordingFormVoice ? 'Stop & Fill' : '🎙️ Speak Details'}</span>
+                          {isRecordingFormVoice ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                          <span>{isRecordingFormVoice ? 'Stop Mic' : '🎙️ Start Continuous Mic'}</span>
                         </button>
                         <button
                           type="button"
                           disabled={isParsingFormVoice || !dictationText.trim()}
                           onClick={() => handleParseDictationIntoBlanks(dictationText)}
-                          className="px-2.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white text-xs font-black flex items-center gap-1 cursor-pointer"
+                          className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-pink-600 disabled:opacity-40 border border-pink-500/50 text-white text-xs font-black flex items-center gap-1 cursor-pointer"
                         >
-                          <Wand2 className="w-3.5 h-3.5" />
-                          <span>Fill Form</span>
+                          <Wand2 className="w-3.5 h-3.5 text-pink-400" />
+                          <span>{isParsingFormVoice ? 'Lighting...' : 'Light Up Boxes'}</span>
                         </button>
                       </div>
                     </div>
+
                     <input
                       type="text"
-                      value={dictationText}
-                      onChange={(e) => setDictationText(e.target.value)}
-                      placeholder='Or type/speak here: e.g. "Sarah Jenkins, 780-555-0199, 10420 98 Ave NW Edmonton, 3 bedrooms 2 bathrooms, Friday morning"'
-                      className="w-full px-3 py-2 bg-white border border-pink-300 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-pink-600"
+                      value={
+                        interimDictation
+                          ? `${dictationText} ${interimDictation}`.trim()
+                          : dictationText
+                      }
+                      onChange={(e) => {
+                        setDictationText(e.target.value);
+                        latestTranscriptRef.current = e.target.value;
+                        applyLiveSpeechExtraction(e.target.value);
+                      }}
+                      placeholder='Speak or type here: e.g. "My name is Sarah Jenkins, 780-555-0199, 10420 98 Ave NW Edmonton, 3 bedrooms 2 bathrooms, Friday morning"'
+                      className="w-full px-3.5 py-2 bg-black/90 border border-pink-500/50 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-pink-400"
                     />
                     {voiceFillStatus && (
-                      <p className="text-[11px] font-black text-teal-800">{voiceFillStatus}</p>
+                      <p className="text-[11px] font-black text-emerald-400 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                        <span>{voiceFillStatus}</span>
+                      </p>
                     )}
                   </div>
 
-                  {errorMessage && (
-                    <div className="p-3 rounded-xl bg-rose-50 border-2 border-rose-300 text-rose-800 text-xs font-bold">
-                      {errorMessage}
-                    </div>
-                  )}
-
-                  {/* Home Size, Bathrooms & Cleaner Crew Size */}
-                  <div className="p-4 rounded-2xl bg-cyan-50/70 border-2 border-cyan-200 space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs font-black text-slate-800 mb-1">
-                          How Many Bedrooms? *
-                        </label>
-                        <select
-                          value={bedrooms}
-                          onChange={(e) => setBedrooms(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white border-2 border-cyan-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-pink-500"
-                        >
-                          <option value="1 Bedroom">1 Bedroom / Condo</option>
-                          <option value="2 Bedrooms">2 Bedrooms</option>
-                          <option value="3 Bedrooms">3 Bedrooms</option>
-                          <option value="4 Bedrooms">4 Bedrooms</option>
-                          <option value="5 Bedrooms">5 Bedrooms</option>
-                          <option value="6 Bedrooms">6+ Bedrooms</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-black text-slate-800 mb-1">
-                          How Many Bathrooms? *
-                        </label>
-                        <select
-                          value={bathrooms}
-                          onChange={(e) => setBathrooms(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white border-2 border-cyan-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-pink-500"
-                        >
-                          <option value="1 Bathroom">1 Bathroom</option>
-                          <option value="2 Bathrooms">2 Bathrooms</option>
-                          <option value="3 Bathrooms">3 Bathrooms</option>
-                          <option value="4 Bathrooms">4+ Bathrooms</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-black text-slate-800 mb-1">
-                          How Often? (Save up to 15%)
-                        </label>
-                        <select
-                          value={frequency}
-                          onChange={(e) => setFrequency(e.target.value as any)}
-                          className="w-full px-3 py-2.5 bg-white border-2 border-cyan-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-pink-500"
-                        >
-                          <option value="One-Time">One-Time Cleaning</option>
-                          <option value="Weekly (15% Off)">Weekly (Save 15%)</option>
-                          <option value="Bi-Weekly (10% Off)">Bi-Weekly (Save 10%)</option>
-                          <option value="Monthly (5% Off)">Monthly (Save 5%)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* 1, 2, or 3 Cleaners Selector */}
-                    <div>
-                      <label className="block text-xs font-black text-slate-800 mb-1.5 flex items-center gap-1.5">
-                        <Users className="w-3.5 h-3.5 text-pink-600" />
-                        <span>Preferred Crew Size (Synced with Our Official Price List):</span>
-                      </label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {([1, 2, 3] as const).map((cnt) => (
-                          <button
-                            key={cnt}
-                            type="button"
-                            onClick={() => setCleanerCount(cnt)}
-                            className={`py-2 px-3 rounded-xl border-2 text-xs font-black transition-all cursor-pointer ${
-                              cleanerCount === cnt
-                                ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white border-pink-600 shadow-sm'
-                                : 'bg-white text-slate-700 border-slate-200 hover:border-pink-400'
-                            }`}
-                          >
-                            {cnt === 1
-                              ? '👤 1 Pro Cleaner'
-                              : cnt === 2
-                              ? '👥 2 Cleaners (Faster!)'
-                              : '👩‍👩‍👧 3 Cleaners (Express!)'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Optional Add-ons */}
-                  <div>
-                    <label className="block text-xs font-black text-slate-800 mb-2 flex items-center gap-1.5">
-                      <Tag className="w-3.5 h-3.5 text-pink-600" />
-                      <span>Optional Extra Add-Ons (Click to Add):</span>
-                    </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {ADDON_OPTIONS.map((addon) => {
-                        const isChecked = selectedAddons.includes(addon.id);
-                        return (
-                          <button
-                            key={addon.id}
-                            type="button"
-                            onClick={() => handleToggleAddon(addon.id)}
-                            className={`p-2.5 rounded-xl border-2 text-left text-xs transition-all cursor-pointer flex items-center justify-between gap-1.5 ${
-                              isChecked
-                                ? 'bg-pink-50 border-pink-500 text-pink-950 font-black shadow-2xs'
-                                : 'bg-slate-50 border-slate-200 text-slate-700 font-bold hover:border-cyan-400'
-                            }`}
-                          >
-                            <span className="truncate">
-                              {addon.icon} {addon.label}
-                            </span>
-                            <span className="text-[10px] font-mono font-black px-1.5 py-0.5 rounded bg-white border border-slate-200 shrink-0">
-                              +${addon.price}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Interactive Preferred Date Pop-Up Calendar Picker & Time Window */}
-                  <div className="p-4 rounded-2xl bg-amber-50/80 border-2 border-amber-300 space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div ref={datePickerContainerRef} className="relative">
-                        <label className="block text-xs font-black text-slate-900 mb-1 flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-pink-600" />
-                          <span>Preferred Cleaning Date (Click Calendar) *</span>
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => setIsCalendarPopupOpen((o) => !o)}
-                          className="w-full px-3.5 py-2.5 bg-white border-2 border-amber-400 hover:border-pink-500 rounded-xl text-xs font-black text-slate-900 flex items-center justify-between shadow-2xs cursor-pointer"
-                        >
-                          <span>📅 {formattedPreferredDateLabel}</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-pink-100 text-pink-800 font-extrabold">
-                            Pick Date ▾
-                          </span>
-                        </button>
-
-                        {/* Pop-Up Month Calendar */}
-                        {isCalendarPopupOpen && (
-                          <div className="absolute left-0 top-full mt-2 z-40 w-72 sm:w-80 rounded-2xl bg-white border-4 border-cyan-400 shadow-2xl p-3.5 space-y-3">
-                            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setCalendarMonthDate(
-                                    new Date(calendarMonthDate.getFullYear(), calendarMonthDate.getMonth() - 1, 1)
-                                  )
-                                }
-                                className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-black cursor-pointer"
-                              >
-                                ◀
-                              </button>
-                              <span className="text-xs font-black text-slate-900">
-                                {calendarMonthDate.toLocaleDateString('en-US', {
-                                  month: 'long',
-                                  year: 'numeric',
-                                })}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setCalendarMonthDate(
-                                    new Date(calendarMonthDate.getFullYear(), calendarMonthDate.getMonth() + 1, 1)
-                                  )
-                                }
-                                className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-black cursor-pointer"
-                              >
-                                ▶
-                              </button>
-                            </div>
-
-                            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black text-slate-500">
-                              {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
-                                <div key={d}>{d}</div>
-                              ))}
-                            </div>
-
-                            <div className="grid grid-cols-7 gap-1">
-                              {calendarDaysGrid.map((cell, idx) => {
-                                if (!cell.day) return <div key={`empty-${idx}`} />;
-                                const isSelected = preferredDate === cell.iso;
-                                return (
-                                  <button
-                                    key={cell.iso}
-                                    type="button"
-                                    onClick={() => {
-                                      setPreferredDate(cell.iso);
-                                      setIsCalendarPopupOpen(false);
-                                    }}
-                                    className={`py-1.5 rounded-lg text-xs font-black cursor-pointer transition-all ${
-                                      isSelected
-                                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-sm'
-                                        : 'hover:bg-cyan-100 text-slate-800'
-                                    }`}
-                                  >
-                                    {cell.day}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-black text-slate-900 mb-1 flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-teal-600" />
-                          <span>Preferred Arrival Window *</span>
-                        </label>
-                        <select
-                          value={preferredTime}
-                          onChange={(e) => setPreferredTime(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white border-2 border-amber-400 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-pink-500"
-                        >
-                          <option value="Morning (8:00 AM - 12:00 PM)">☀️ Morning (8:00 AM - 12:00 PM)</option>
-                          <option value="Afternoon (12:00 PM - 4:00 PM)">🌤️ Afternoon (12:00 PM - 4:00 PM)</option>
-                          <option value="Evening (4:00 PM - 7:00 PM)">🌙 Evening (4:00 PM - 7:00 PM)</option>
-                          <option value="Flexible / Earliest Available">⚡ Flexible / Earliest Available</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* 1-Click Quick Day Pills */}
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[10px] font-black uppercase text-amber-900 mr-1">
-                        Quick Pick Day:
+                  {/* ─────────────────────────────────────────────────────────────────
+                      LIVE BOX LIGHTING PROGRESS BAR (See when every box is filled in!)
+                     ───────────────────────────────────────────────────────────────── */}
+                  <div className="p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-pink-400">
+                        ✨ Live Box Lighting Tracker — See Every Box Light Up When Filled
                       </span>
-                      {quickDatePills.map((p) => (
-                        <button
-                          key={p.iso}
-                          type="button"
-                          onClick={() => setPreferredDate(p.iso)}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black cursor-pointer transition-all ${
-                            preferredDate === p.iso
-                              ? 'bg-pink-600 text-white shadow-2xs'
-                              : 'bg-white hover:bg-pink-50 text-slate-800 border border-amber-300'
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
+                          filledRequiredCount === requiredBoxesStatus.length
+                            ? 'bg-emerald-500 text-black shadow-[0_0_12px_rgba(16,185,129,0.5)]'
+                            : 'bg-pink-600 text-white'
+                        }`}
+                      >
+                        {filledRequiredCount} / {requiredBoxesStatus.length} Required Boxes Lit Up ✓
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                      {requiredBoxesStatus.map((b) => (
+                        <div
+                          key={b.key}
+                          className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-black flex items-center justify-between gap-1.5 transition-all ${
+                            b.filled
+                              ? 'bg-emerald-950/70 border-emerald-400 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                              : 'bg-zinc-950 border-zinc-800 text-zinc-500'
                           }`}
                         >
-                          {p.label}
-                        </button>
+                          <span className="truncate">{b.label}</span>
+                          {b.filled ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          ) : (
+                            <span className="w-2 h-2 rounded-full bg-red-500/70 shrink-0" />
+                          )}
+                        </div>
                       ))}
                     </div>
                   </div>
 
-                  {/* Customer Contact & Property Address */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-black text-slate-800 mb-1">
-                        Your Full Name *
-                      </label>
+                  {errorMessage && (
+                    <div className="p-3 rounded-xl bg-red-950/90 border-2 border-red-500 text-red-200 text-xs font-bold">
+                      {errorMessage}
+                    </div>
+                  )}
+
+                  {/* SPLIT CUSTOMER NAME: FIRST NAME + LAST NAME + PHONE + EMAIL */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {/* FIRST NAME BOX */}
+                    <div className={`p-3.5 rounded-2xl border-2 ${getLitBoxClass('firstName', Boolean(firstName.trim()))}`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-black text-white">
+                          First Name *
+                        </label>
+                        {renderLitBadge('firstName', Boolean(firstName.trim()), true)}
+                      </div>
                       <input
                         type="text"
                         required
-                        placeholder="e.g. Sarah Jenkins"
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border-2 border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-pink-500"
+                        placeholder="e.g. Sarah"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white placeholder-zinc-500 focus:outline-none focus:border-pink-500"
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-black text-slate-800 mb-1">
-                        Best Phone Number (For Confirmation) *
-                      </label>
+
+                    {/* LAST NAME BOX */}
+                    <div className={`p-3.5 rounded-2xl border-2 ${getLitBoxClass('lastName', Boolean(lastName.trim()))}`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-black text-white">
+                          Last Name *
+                        </label>
+                        {renderLitBadge('lastName', Boolean(lastName.trim()), true)}
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Jenkins"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white placeholder-zinc-500 focus:outline-none focus:border-pink-500"
+                      />
+                    </div>
+
+                    {/* MOBILE PHONE BOX */}
+                    <div className={`p-3.5 rounded-2xl border-2 ${getLitBoxClass('customerPhone', Boolean(customerPhone.trim()))}`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-black text-white">
+                          Best Mobile Number (For Confirmation) *
+                        </label>
+                        {renderLitBadge('customerPhone', Boolean(customerPhone.trim()), true)}
+                      </div>
                       <input
                         type="tel"
                         required
                         placeholder="(780) 555-0199"
                         value={customerPhone}
                         onChange={(e) => setCustomerPhone(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border-2 border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-pink-500"
+                        className="w-full px-3.5 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white placeholder-zinc-500 focus:outline-none focus:border-pink-500"
                       />
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-black text-slate-800 mb-1">
-                        Email Address (For Receipt &amp; Quote)
-                      </label>
+                    {/* EMAIL BOX */}
+                    <div className={`p-3.5 rounded-2xl border-2 ${getLitBoxClass('customerEmail', Boolean(customerEmail.trim()))}`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-black text-white">
+                          Email Address (For Official Quote &amp; Receipt)
+                        </label>
+                        {renderLitBadge('customerEmail', Boolean(customerEmail.trim()), false)}
+                      </div>
                       <input
                         type="email"
                         placeholder="sarah@example.com"
                         value={customerEmail}
                         onChange={(e) => setCustomerEmail(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border-2 border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-pink-500"
+                        className="w-full px-3.5 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white placeholder-zinc-500 focus:outline-none focus:border-pink-500"
                       />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-black text-slate-800 mb-1">
-                        How Did You Hear About Us?
-                      </label>
-                      <select
-                        value={heardAbout}
-                        onChange={(e) => setHeardAbout(e.target.value)}
-                        className="w-full px-3 py-2.5 bg-slate-50 border-2 border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-pink-500"
-                      >
-                        <option value="Website (tidyupscleaning.com)">🌐 tidyupscleaning.com Website</option>
-                        <option value="Facebook / Instagram Ad">🔵 Facebook / Instagram</option>
-                        <option value="Google Search / Ad">🟢 Google Search / Google Maps</option>
-                        <option value="Friend / Family Referral">💛 Friend / Realtor Referral</option>
-                        <option value="Returning TidyUps Client">⭐ Returning TidyUps Customer</option>
-                      </select>
                     </div>
                   </div>
 
-                  {/* Property Street Address */}
-                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                    <div className="sm:col-span-8">
-                      <label className="block text-xs font-black text-slate-800 mb-1">
-                        Property Street Address *
-                      </label>
+                  {/* Property Street Address & City */}
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5">
+                    <div className={`sm:col-span-8 p-3.5 rounded-2xl border-2 ${getLitBoxClass('address', Boolean(address.trim()))}`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-black text-white">
+                          Property Street Address *
+                        </label>
+                        {renderLitBadge('address', Boolean(address.trim()), true)}
+                      </div>
                       <AddressAutocompleteInput
+                        theme="dark"
                         value={address}
-                        onChange={setAddress}
-                        onSelect={(pred) => {
-                          setAddress(pred.description || pred.mainText);
+                        onChange={(newAddr) => {
+                          setAddress(newAddr);
+                          triggerFieldHighlight('address');
+                          const lower = newAddr.toLowerCase();
+                          if (lower.includes('st. albert') || lower.includes('st albert')) { setCity('St. Albert'); triggerFieldHighlight('city'); }
+                          else if (lower.includes('sherwood park')) { setCity('Sherwood Park'); triggerFieldHighlight('city'); }
+                          else if (lower.includes('leduc')) { setCity('Leduc'); triggerFieldHighlight('city'); }
+                          else if (lower.includes('spruce grove')) { setCity('Spruce Grove'); triggerFieldHighlight('city'); }
+                          else if (lower.includes('beaumont')) { setCity('Beaumont'); triggerFieldHighlight('city'); }
+                          else if (lower.includes('fort saskatchewan')) { setCity('Fort Saskatchewan'); triggerFieldHighlight('city'); }
+                          else if (lower.includes('edmonton')) { setCity('Edmonton'); triggerFieldHighlight('city'); }
                         }}
-                        placeholder="Start typing your Edmonton & area street address..."
-                        className="text-xs"
+                        placeholder="Start typing house #, street, or neighborhood (auto-completes)..."
+                        className="px-3.5 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white placeholder-zinc-500 focus:outline-none focus:border-pink-500"
                         required
                       />
                     </div>
-                    <div className="sm:col-span-4">
-                      <label className="block text-xs font-black text-slate-800 mb-1">
-                        City / Community
-                      </label>
+
+                    <div className={`sm:col-span-4 p-3.5 rounded-2xl border-2 ${getLitBoxClass('city', Boolean(city))}`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-black text-white">
+                          City / Community
+                        </label>
+                        {renderLitBadge('city', Boolean(city), false)}
+                      </div>
                       <select
                         value={city}
                         onChange={(e) => setCity(e.target.value)}
-                        className="w-full px-3 py-2.5 bg-slate-50 border-2 border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-pink-500"
+                        className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
                       >
                         <option value="Edmonton">Edmonton</option>
                         <option value="Sherwood Park">Sherwood Park</option>
@@ -1629,28 +1859,367 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Special Instructions */}
-                  <div>
-                    <label className="block text-xs font-black text-slate-800 mb-1">
-                      Special Notes, Pets, Parking or Lockbox / Entry Instructions
+                  {/* Home Size, Bathrooms & Strict Cleaner Crew Rules */}
+                  <div className="space-y-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                      <div className={`p-3.5 rounded-2xl border-2 ${getLitBoxClass('bedrooms', Boolean(bedrooms))}`}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="block text-xs font-black text-white">
+                            Bedrooms *
+                          </label>
+                          {renderLitBadge('bedrooms', Boolean(bedrooms), true)}
+                        </div>
+                        <select
+                          value={bedrooms}
+                          onChange={(e) => setBedrooms(e.target.value)}
+                          className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
+                        >
+                          <option value="1 Bedroom">1 Bedroom / Condo</option>
+                          <option value="2 Bedrooms">2 Bedrooms</option>
+                          <option value="3 Bedrooms">3 Bedrooms</option>
+                          <option value="4 Bedrooms">4 Bedrooms</option>
+                          <option value="5 Bedrooms">5 Bedrooms</option>
+                          <option value="6 Bedrooms">6+ Bedrooms</option>
+                        </select>
+                      </div>
+
+                      <div className={`p-3.5 rounded-2xl border-2 ${getLitBoxClass('bathrooms', Boolean(bathrooms))}`}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="block text-xs font-black text-white">
+                            Bathrooms *
+                          </label>
+                          {renderLitBadge('bathrooms', Boolean(bathrooms), true)}
+                        </div>
+                        <select
+                          value={bathrooms}
+                          onChange={(e) => setBathrooms(e.target.value)}
+                          className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
+                        >
+                          <option value="1 Bathroom">1 Bathroom</option>
+                          <option value="1.5 Bathrooms">1.5 Bathrooms</option>
+                          <option value="2 Bathrooms">2 Bathrooms</option>
+                          <option value="2.5 Bathrooms">2.5 Bathrooms</option>
+                          <option value="3 Bathrooms">3 Bathrooms</option>
+                          <option value="3.5 Bathrooms">3.5 Bathrooms</option>
+                          <option value="4 Bathrooms">4+ Bathrooms</option>
+                        </select>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl border-2 border-zinc-800 bg-zinc-900/90">
+                        <label className="block text-xs font-black text-white mb-1.5">
+                          Frequency (Save up to 15%)
+                        </label>
+                        <select
+                          value={frequency}
+                          onChange={(e) => setFrequency(e.target.value as any)}
+                          className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
+                        >
+                          <option value="One-Time">One-Time Cleaning</option>
+                          <option value="Weekly (15% Off)">Weekly (Save 15%)</option>
+                          <option value="Bi-Weekly (10% Off)">Bi-Weekly (Save 10%)</option>
+                          <option value="Monthly (5% Off)">Monthly (Save 5%)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* STRICT CREW & MINIMUM HOURS RULES BOX */}
+                    <div className={`p-4 rounded-2xl border-2 ${getLitBoxClass('cleanerCount', true)}`}>
+                      <div className="flex items-center justify-between mb-2.5 flex-wrap gap-2">
+                        <label className="text-xs font-black text-white flex items-center gap-1.5">
+                          <Users className="w-4 h-4 text-pink-500" />
+                          <span>Cleaner Crew &amp; Minimum Hours ({activeServiceData.name}):</span>
+                        </label>
+                        {renderLitBadge('cleanerCount', true, true)}
+                      </div>
+
+                      {selectedService === 'standard' && (
+                        <div className="p-3.5 rounded-xl bg-black border-2 border-pink-500 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-xs sm:text-sm font-black text-white">
+                              👤 1 Professional Cleaner ($52.50/hr)
+                            </div>
+                            <p className="text-[11px] text-zinc-300 mt-0.5">
+                              Basic Cleaning is locked to <strong>1 Pro Cleaner</strong> ({priceCalculation.hoursLabel}).
+                            </p>
+                          </div>
+                          <span className="px-3 py-1 rounded-xl bg-pink-600 text-white text-xs font-black shrink-0">
+                            1 Cleaner Only
+                          </span>
+                        </div>
+                      )}
+
+                      {selectedService === 'deep' && (
+                        <div className="p-3.5 rounded-xl bg-black border-2 border-pink-500 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-xs sm:text-sm font-black text-white">
+                              👥 2 Professional Cleaners — Minimum 2 Hours ($105.00/hr)
+                            </div>
+                            <p className="text-[11px] text-zinc-300 mt-0.5">
+                              Deep Cleaning requires a <strong>minimum of 2 cleaners for 2+ hours</strong> ({priceCalculation.hoursLabel}).
+                            </p>
+                          </div>
+                          <span className="px-3 py-1 rounded-xl bg-red-600 text-white text-xs font-black shrink-0">
+                            Min 2 Cleaners • 2+ Hrs
+                          </span>
+                        </div>
+                      )}
+
+                      {selectedService === 'move-out' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCleanerCount(2);
+                              triggerFieldHighlight('cleanerCount');
+                            }}
+                            className={`p-3.5 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                              cleanerCount === 2
+                                ? 'bg-gradient-to-r from-pink-950 via-red-950 to-black border-pink-500 text-white shadow-md'
+                                : 'bg-black border-zinc-800 text-zinc-400 hover:border-pink-500/50'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-white">
+                                👥 2 Cleaners (Min 3 Hours)
+                              </span>
+                              {cleanerCount === 2 && <CheckCircle2 className="w-4 h-4 text-pink-400" />}
+                            </div>
+                            <div className="text-[11px] font-bold text-pink-300 mt-1">
+                              Minimum 3 Hrs @ $105.00/hr ($315.00+)
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCleanerCount(1);
+                              triggerFieldHighlight('cleanerCount');
+                            }}
+                            className={`p-3.5 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                              cleanerCount === 1
+                                ? 'bg-gradient-to-r from-pink-950 via-red-950 to-black border-pink-500 text-white shadow-md'
+                                : 'bg-black border-zinc-800 text-zinc-400 hover:border-pink-500/50'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-white">
+                                👤 1 Cleaner (Starts at 6 Hours)
+                              </span>
+                              {cleanerCount === 1 && <CheckCircle2 className="w-4 h-4 text-pink-400" />}
+                            </div>
+                            <div className="text-[11px] font-bold text-red-300 mt-1">
+                              Starts at 6 Hrs Minimum @ $52.50/hr ($315.00+)
+                            </div>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Optional Add-ons */}
+                  <div className="p-4 rounded-2xl bg-zinc-900/90 border border-zinc-800">
+                    <label className="block text-xs font-black text-white mb-2.5 flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-pink-500" />
+                      <span>Optional Extra Add-Ons (Click to Add):</span>
                     </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {ADDON_OPTIONS.map((addon) => {
+                        const isChecked = selectedAddons.includes(addon.id);
+                        return (
+                          <button
+                            key={addon.id}
+                            type="button"
+                            onClick={() => handleToggleAddon(addon.id)}
+                            className={`p-2.5 rounded-xl border-2 text-left text-xs transition-all cursor-pointer flex items-center justify-between gap-1.5 ${
+                              isChecked
+                                ? 'bg-pink-950/80 border-pink-500 text-white font-black shadow-sm'
+                                : 'bg-black border-zinc-800 text-zinc-300 font-bold hover:border-pink-500/50'
+                            }`}
+                          >
+                            <span className="truncate">
+                              {addon.icon} {addon.label}
+                            </span>
+                            <span className="text-[10px] font-mono font-black px-1.5 py-0.5 rounded bg-zinc-900 border border-pink-500/40 text-pink-300 shrink-0">
+                              +${addon.price}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Interactive Preferred Date Pop-Up Calendar Picker & Time Window */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div
+                      ref={datePickerContainerRef}
+                      className={`relative p-3.5 rounded-2xl border-2 ${getLitBoxClass(
+                        'preferredDate',
+                        Boolean(preferredDate)
+                      )}`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-black text-white flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-pink-500" />
+                          <span>Preferred Cleaning Date *</span>
+                        </label>
+                        {renderLitBadge('preferredDate', Boolean(preferredDate), true)}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsCalendarPopupOpen((o) => !o)}
+                        className="w-full px-3.5 py-2.5 bg-black/90 border border-zinc-700 hover:border-pink-500 rounded-xl text-xs font-black text-white flex items-center justify-between cursor-pointer"
+                      >
+                        <span>📅 {formattedPreferredDateLabel}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-pink-600 text-white font-extrabold">
+                          Pick Date ▾
+                        </span>
+                      </button>
+
+                      {/* Pop-Up Month Calendar */}
+                      {isCalendarPopupOpen && (
+                        <div className="absolute left-0 top-full mt-2 z-40 w-72 sm:w-80 rounded-2xl bg-zinc-950 border-2 border-pink-500 shadow-2xl p-3.5 space-y-3">
+                          <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCalendarMonthDate(
+                                  new Date(calendarMonthDate.getFullYear(), calendarMonthDate.getMonth() - 1, 1)
+                                )
+                              }
+                              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-white font-black cursor-pointer"
+                            >
+                              ◀
+                            </button>
+                            <span className="text-xs font-black text-white">
+                              {calendarMonthDate.toLocaleDateString('en-US', {
+                                month: 'long',
+                                year: 'numeric',
+                              })}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCalendarMonthDate(
+                                  new Date(calendarMonthDate.getFullYear(), calendarMonthDate.getMonth() + 1, 1)
+                                )
+                              }
+                              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-white font-black cursor-pointer"
+                            >
+                              ▶
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black text-zinc-400">
+                            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+                              <div key={d}>{d}</div>
+                            ))}
+                          </div>
+
+                          <div className="grid grid-cols-7 gap-1">
+                            {calendarDaysGrid.map((cell, idx) => {
+                              if (!cell.day) return <div key={`empty-${idx}`} />;
+                              const isSelected = preferredDate === cell.iso;
+                              return (
+                                <button
+                                  key={cell.iso}
+                                  type="button"
+                                  onClick={() => {
+                                    setPreferredDate(cell.iso);
+                                    triggerFieldHighlight('preferredDate');
+                                    setIsCalendarPopupOpen(false);
+                                  }}
+                                  className={`py-1.5 rounded-lg text-xs font-black cursor-pointer transition-all ${
+                                    isSelected
+                                      ? 'bg-gradient-to-r from-pink-600 to-red-600 text-white shadow-sm'
+                                      : 'hover:bg-pink-950 text-zinc-200'
+                                  }`}
+                                >
+                                  {cell.day}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Quick Date Pills */}
+                      <div className="flex flex-wrap items-center gap-1 mt-2">
+                        {quickDatePills.slice(0, 3).map((p) => (
+                          <button
+                            key={p.iso}
+                            type="button"
+                            onClick={() => {
+                              setPreferredDate(p.iso);
+                              triggerFieldHighlight('preferredDate');
+                            }}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-black cursor-pointer transition-all ${
+                              preferredDate === p.iso
+                                ? 'bg-pink-600 text-white'
+                                : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700'
+                            }`}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div
+                      className={`p-3.5 rounded-2xl border-2 ${getLitBoxClass(
+                        'preferredTime',
+                        Boolean(preferredTime)
+                      )}`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-black text-white flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-red-500" />
+                          <span>Preferred Arrival Window *</span>
+                        </label>
+                        {renderLitBadge('preferredTime', Boolean(preferredTime), true)}
+                      </div>
+                      <select
+                        value={preferredTime}
+                        onChange={(e) => setPreferredTime(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
+                      >
+                        <option value="Morning (8:00 AM - 12:00 PM)">☀️ Morning (8:00 AM - 12:00 PM)</option>
+                        <option value="Afternoon (12:00 PM - 4:00 PM)">🌤️ Afternoon (12:00 PM - 4:00 PM)</option>
+                        <option value="Evening (4:00 PM - 7:00 PM)">🌙 Evening (4:00 PM - 7:00 PM)</option>
+                        <option value="Flexible / Earliest Available">⚡ Flexible / Earliest Available</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Special Instructions Box */}
+                  <div
+                    className={`p-3.5 rounded-2xl border-2 ${getLitBoxClass(
+                      'specialInstructions',
+                      Boolean(specialInstructions.trim())
+                    )}`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-black text-white">
+                        Special Notes, Pets, Parking or Lockbox / Entry Instructions
+                      </label>
+                      {renderLitBadge('specialInstructions', Boolean(specialInstructions.trim()), false)}
+                    </div>
                     <textarea
                       rows={2}
                       placeholder="e.g. Friendly dog in backyard, key in lockbox #1234, please focus on master bathroom shower glass..."
                       value={specialInstructions}
                       onChange={(e) => setSpecialInstructions(e.target.value)}
-                      className="w-full px-3.5 py-2 bg-slate-50 border-2 border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:border-pink-500"
+                      className="w-full px-3.5 py-2 bg-black/90 border border-zinc-700 rounded-xl text-xs font-medium text-white placeholder-zinc-500 focus:outline-none focus:border-pink-500"
                     />
                   </div>
 
                   {/* Terms & Conditions and Privacy Policy Consent Notice */}
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 leading-relaxed flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 leading-relaxed flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
-                      By submitting your booking request, you agree to 833 TidyUps Cleaning Service Inc.&apos;s{' '}
+                      By submitting your booking request, you agree to TidyUps Cleaning Service Inc.&apos;s{' '}
                       <button
                         type="button"
                         onClick={() => handleOpenLegalModal('TERMS')}
-                        className="font-black text-pink-600 hover:text-pink-700 underline cursor-pointer"
+                        className="font-black text-pink-400 hover:text-pink-300 underline cursor-pointer"
                       >
                         Terms &amp; Conditions (T&amp;C)
                       </button>{' '}
@@ -1658,27 +2227,11 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       <button
                         type="button"
                         onClick={() => handleOpenLegalModal('PRIVACY')}
-                        className="font-black text-cyan-700 hover:text-cyan-800 underline cursor-pointer"
+                        className="font-black text-red-400 hover:text-red-300 underline cursor-pointer"
                       >
                         Privacy Policy
-                      </button>{' '}
-                      (including SMS/email appointment updates &amp; Jobber scheduling).
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenLegalModal('PRIVACY')}
-                        className="px-2 py-1 rounded-lg bg-white border border-slate-300 hover:border-cyan-500 text-[10px] font-black text-slate-700 cursor-pointer"
-                      >
-                        🔒 Privacy
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenLegalModal('TERMS')}
-                        className="px-2 py-1 rounded-lg bg-white border border-slate-300 hover:border-pink-500 text-[10px] font-black text-slate-700 cursor-pointer"
-                      >
-                        📄 T&amp;C
-                      </button>
+                      .
                     </div>
                   </div>
 
@@ -1686,21 +2239,23 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-pink-600 via-fuchsia-600 to-cyan-600 hover:opacity-95 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-xl transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                    className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-pink-600 via-red-600 to-pink-600 hover:from-pink-500 hover:via-red-500 hover:to-pink-500 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-[0_0_25px_rgba(236,72,153,0.45)] transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <span>Submitting Your Cleaning Booking...</span>
                     ) : (
                       <>
+                        <Sparkles className="w-5 h-5" />
                         <span>
-                          Confirm &amp; Request Booking — ${priceCalculation.total.toFixed(2)} CAD
+                          Confirm &amp; Request Booking ({priceCalculation.effectiveCleaners} Cleaner
+                          {priceCalculation.effectiveCleaners > 1 ? 's' : ''}) — ${priceCalculation.total.toFixed(2)} CAD
                         </span>
                         <ArrowRight className="w-5 h-5" />
                       </>
                     )}
                   </button>
-                  <p className="text-[11px] text-center font-bold text-slate-500">
-                    🔒 No upfront card charge today • $50 deposit holds your spot after we confirm your time window!
+                  <p className="text-[11px] text-center font-bold text-zinc-400">
+                    🔒 No upfront card charge today • Synced directly with our official Jobber Price List!
                   </p>
                 </form>
               )}
@@ -1710,33 +2265,29 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           {/* RIGHT COLUMN: LIVE INSTANT PRICE SUMMARY + PACKAGE CHECKLIST + GUARANTEE */}
           <div className="lg:col-span-5 space-y-6">
             {/* Instant Price Summary Card */}
-            <div className="bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 text-white rounded-3xl border-4 border-amber-400 shadow-xl p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-white/15 pb-3">
-                <div className="flex items-center gap-2.5">
-                  <img
-                    src={OFFICIAL_LOGO_URL}
-                    alt="833 Tidyups"
-                    className="w-11 h-11 object-contain"
-                  />
+            <div className="bg-gradient-to-br from-zinc-950 via-black to-red-950/60 text-white rounded-3xl border-2 border-pink-500 shadow-[0_0_35px_rgba(236,72,153,0.25)] p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3.5">
+                <div className="flex items-center gap-3">
+                  <TidyUpsBunnyLogo size="md" />
                   <div>
-                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-300 block">
-                      Step 3 of 3 • Official Price Breakdown
+                    <span className="text-[10px] font-black uppercase tracking-wider text-pink-400 block">
+                      Step 3 of 3 • Official Catalog Price Breakdown
                     </span>
                     <h3 className="text-base font-black text-white">
-                      Your InstantTidyUps Estimate
+                      Your Instant TidyUps Estimate
                     </h3>
                   </div>
                 </div>
-                <span className="px-2.5 py-1 rounded-full bg-cyan-400 text-slate-950 text-[10px] font-black uppercase">
+                <span className="px-2.5 py-1 rounded-full bg-gradient-to-r from-pink-600 to-red-600 text-white text-[10px] font-black uppercase">
                   {frequency}
                 </span>
               </div>
 
-              <div className="space-y-2 text-xs">
+              <div className="space-y-2.5 text-xs">
                 <div className="flex justify-between items-start gap-2">
                   <div>
-                    <div className="font-black text-amber-300">{priceCalculation.matchedItemName}</div>
-                    <div className="text-[11px] text-slate-300">
+                    <div className="font-black text-pink-400">{priceCalculation.matchedItemName}</div>
+                    <div className="text-[11px] text-zinc-300 mt-0.5">
                       {bedrooms} • {bathrooms} • {priceCalculation.hoursLabel}
                     </div>
                   </div>
@@ -1745,61 +2296,66 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                   </span>
                 </div>
 
+                {/* Crew & Minimum Hours Rule Callout */}
+                <div className="p-2.5 rounded-xl bg-black/80 border border-pink-500/40 text-[11px] text-pink-200 font-bold">
+                  🐰 <strong>Crew Rule:</strong> {activeServiceData.ruleSummary}
+                </div>
+
                 {selectedAddons.length > 0 && (
-                  <div className="pt-2 border-t border-white/10 space-y-1">
-                    <span className="text-[10px] font-black uppercase text-cyan-300 block">
+                  <div className="pt-2 border-t border-zinc-800 space-y-1">
+                    <span className="text-[10px] font-black uppercase text-red-400 block">
                       Selected Add-Ons:
                     </span>
                     {selectedAddons.map((id) => {
                       const addon = ADDON_OPTIONS.find((a) => a.id === id);
                       if (!addon) return null;
                       return (
-                        <div key={id} className="flex justify-between text-xs text-slate-200">
+                        <div key={id} className="flex justify-between text-xs text-zinc-200">
                           <span>
                             {addon.icon} {addon.label}
                           </span>
-                          <span className="font-mono font-bold">+${addon.price.toFixed(2)}</span>
+                          <span className="font-mono font-bold text-pink-300">+${addon.price.toFixed(2)}</span>
                         </div>
                       );
                     })}
                   </div>
                 )}
 
-                <div className="pt-3 border-t border-white/15 space-y-1">
-                  <div className="flex justify-between text-slate-300">
+                <div className="pt-3 border-t border-zinc-800 space-y-1">
+                  <div className="flex justify-between text-zinc-300">
                     <span>Subtotal:</span>
                     <span className="font-mono font-bold">${priceCalculation.subtotal.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-slate-300">
+                  <div className="flex justify-between text-zinc-300">
                     <span>Alberta GST (5%):</span>
                     <span className="font-mono font-bold">${priceCalculation.gst.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between items-center pt-2 border-t border-white/20 text-base font-black text-amber-300">
+                  <div className="flex justify-between items-center pt-2 border-t border-zinc-800 text-base font-black text-pink-400">
                     <span>Estimated Total (CAD):</span>
-                    <span className="font-mono text-2xl">${priceCalculation.total.toFixed(2)}</span>
+                    <span className="font-mono text-2xl text-white">${priceCalculation.total.toFixed(2)}</span>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Detailed Package Checklist Card */}
-            <div className="bg-white rounded-3xl border-2 border-pink-300 shadow-md p-6 space-y-4">
-              <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+            <div className="bg-zinc-950 rounded-3xl border-2 border-pink-500/60 shadow-lg p-6 space-y-4">
+              <div className="flex items-start justify-between gap-3 border-b border-zinc-800 pb-3">
                 <div>
-                  <span className="inline-block px-2.5 py-0.5 rounded-full bg-pink-100 text-pink-700 text-[10px] font-black uppercase">
+                  <span className="inline-block px-2.5 py-0.5 rounded-full bg-red-600/20 border border-red-500/50 text-red-300 text-[10px] font-black uppercase">
                     {activeServiceData.badge}
                   </span>
-                  <h4 className="text-lg font-black text-slate-900 mt-1">
+                  <h4 className="text-lg font-black text-white mt-1">
                     What&apos;s Included in {activeServiceData.shortName}
                   </h4>
-                  <p className="text-xs text-slate-600 mt-0.5">{activeServiceData.tagline}</p>
+                  <p className="text-xs text-zinc-400 mt-0.5">{activeServiceData.tagline}</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-2">
                 {activeServiceData.checklist.map((item, idx) => (
-                  <div key={idx} className="flex items-start gap-2 text-xs text-slate-800 font-medium">
-                    <div className="w-4 h-4 rounded-full bg-teal-500 text-white flex items-center justify-center shrink-0 mt-0.5">
+                  <div key={idx} className="flex items-start gap-2 text-xs text-zinc-200 font-medium">
+                    <div className="w-4 h-4 rounded-full bg-gradient-to-r from-pink-500 to-red-600 text-white flex items-center justify-center shrink-0 mt-0.5">
                       <Check className="w-2.5 h-2.5 stroke-[3]" />
                     </div>
                     <span>{item}</span>
@@ -1808,26 +2364,26 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               </div>
             </div>
 
-            {/* 24-Hour Satisfaction Guarantee & Direct Contact Card */}
-            <div className="bg-gradient-to-r from-amber-300 via-yellow-200 to-cyan-200 rounded-3xl border-2 border-amber-400 p-5 space-y-3 shadow-md">
+            {/* 24-Hour Satisfaction Guarantee Card */}
+            <div className="bg-gradient-to-r from-pink-950 via-red-950 to-black rounded-3xl border-2 border-red-500 p-5 space-y-3 shadow-lg">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-slate-950 text-amber-300 flex items-center justify-center shrink-0 shadow-md">
+                <div className="w-12 h-12 rounded-2xl bg-black border border-pink-500 text-pink-400 flex items-center justify-center shrink-0 shadow-md">
                   <HeartHandshake className="w-6 h-6" />
                 </div>
                 <div>
-                  <h4 className="font-black text-sm text-slate-950">
-                    The 833 TidyUps 24-Hour Clean Guarantee
+                  <h4 className="font-black text-sm text-white">
+                    The TidyUps 24-Hour Clean Guarantee
                   </h4>
-                  <p className="text-xs font-bold text-slate-800 leading-snug">
+                  <p className="text-xs font-medium text-zinc-200 leading-snug mt-0.5">
                     If you or your landlord spot any missed item on your checklist within 24 hours, our crew returns and re-cleans it free of charge!
                   </p>
                 </div>
               </div>
-              <div className="pt-2 border-t border-amber-400/60 flex flex-wrap items-center justify-between gap-2 text-xs font-black text-slate-900">
+              <div className="pt-2 border-t border-pink-500/30 flex flex-wrap items-center justify-between gap-2 text-xs font-black text-zinc-200">
                 <span>Questions? Email our Edmonton booking team:</span>
                 <a
                   href="mailto:booking@tidyupscleaning.com"
-                  className="underline hover:text-pink-700 font-mono"
+                  className="text-pink-400 underline hover:text-pink-300 font-mono"
                 >
                   booking@tidyupscleaning.com
                 </a>
@@ -1838,77 +2394,18 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       </section>
 
       {/* ─────────────────────────────────────────────────────────────────────────────
-          4. OFFICIAL PRIVACY POLICY, TERMS & CONDITIONS (T&C) & CUSTOMER SUPPORT BAR
+          4. CUSTOMER-ONLY FOOTER (BLACK, HOT PINK & BRIGHT RED — NO PHONE NUMBERS)
          ───────────────────────────────────────────────────────────────────────────── */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 pb-4">
-        <div className="bg-white rounded-3xl border-2 border-cyan-300 shadow-md p-5 sm:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-start sm:items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-pink-500 via-fuchsia-600 to-cyan-500 text-white flex items-center justify-center shrink-0 shadow-sm">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm sm:text-base font-black text-slate-900">
-                  Official Privacy Policy &amp; Terms and Conditions (T&amp;C)
-                </h3>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase">
-                  PIPEDA &amp; Alberta Verified
-                </span>
-              </div>
-              <p className="text-xs text-slate-600 mt-0.5">
-                Transparent customer privacy protection, 24-Hour Clean Guarantee terms, cancellation policy &amp; Jobber billing standards for <strong>book.tidyupscleaning.com</strong>.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => handleOpenLegalModal('PRIVACY')}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>Read Privacy Policy</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleOpenLegalModal('TERMS')}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>Read Terms &amp; Conditions (T&amp;C)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleOpenLegalModal('SUPPORT')}
-              className="px-3.5 py-2.5 rounded-xl bg-amber-300 hover:bg-amber-200 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
-            >
-              <HelpCircle className="w-3.5 h-3.5" />
-              <span>Customer FAQ &amp; Support</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* ─────────────────────────────────────────────────────────────────────────────
-          5. CUSTOMER-ONLY FOOTER (STRICTLY PUBLIC — LINKS TO WEBSITE, PRIVACY & T&C)
-         ───────────────────────────────────────────────────────────────────────────── */}
-      <footer className="bg-slate-950 text-slate-300 border-t-4 border-pink-500 py-8 px-4 sm:px-6 lg:px-8 mt-4">
+      <footer className="bg-zinc-950 text-zinc-300 border-t-2 border-pink-500 py-8 px-4 sm:px-6 lg:px-8 mt-4">
         <div className="max-w-7xl mx-auto space-y-5">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
             <div className="flex items-center gap-3">
-              <img
-                src={OFFICIAL_LOGO_URL}
-                alt="833 Tidyups Logo"
-                className="w-10 h-10 object-contain"
-              />
+              <TidyUpsBunnyLogo size="sm" />
               <div>
                 <p className="font-black text-white">
-                  833 TidyUps Cleaning Service Inc. • Established 2012
+                  TidyUps Cleaning Service Inc. • Established 2012
                 </p>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-[11px] text-zinc-400">
                   Serving Edmonton, St. Albert, Sherwood Park, Spruce Grove, Leduc &amp; Beaumont
                 </p>
               </div>
@@ -1919,52 +2416,51 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 href="https://tidyupscleaning.com"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+                className="text-pink-400 hover:text-pink-300 flex items-center gap-1"
               >
                 <span>Main Website: tidyupscleaning.com</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
-              <a href="mailto:booking@tidyupscleaning.com" className="text-emerald-400 hover:text-emerald-300 font-mono">
+              <a href="mailto:booking@tidyupscleaning.com" className="text-red-400 hover:text-red-300 font-mono">
                 booking@tidyupscleaning.com
               </a>
             </div>
           </div>
 
-          {/* Bottom Legal Links Bar */}
-          <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-400">
+          <div className="pt-4 border-t border-zinc-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-zinc-400">
             <div>
-              © {new Date().getFullYear()} 833 TidyUps Cleaning Service Inc. All rights reserved. • 8306 Chappelle Way SW, Edmonton, AB T6W 4L3
+              © {new Date().getFullYear()} TidyUps Cleaning Service Inc. All rights reserved. • 8306 Chappelle Way SW, Edmonton, AB T6W 4L3
             </div>
             <div className="flex flex-wrap items-center gap-4 font-bold">
               <button
                 type="button"
                 onClick={() => handleOpenLegalModal('PRIVACY')}
-                className="text-cyan-300 hover:text-white underline cursor-pointer flex items-center gap-1"
+                className="text-pink-400 hover:text-white underline cursor-pointer flex items-center gap-1"
               >
                 <Lock className="w-3 h-3" />
-                <span>Privacy Policy (/privacy-policy)</span>
+                <span>Privacy Policy</span>
               </button>
               <button
                 type="button"
                 onClick={() => handleOpenLegalModal('TERMS')}
-                className="text-pink-300 hover:text-white underline cursor-pointer flex items-center gap-1"
+                className="text-red-400 hover:text-white underline cursor-pointer flex items-center gap-1"
               >
                 <FileText className="w-3 h-3" />
-                <span>Terms &amp; Conditions (/terms)</span>
+                <span>Terms &amp; Conditions</span>
               </button>
               <button
                 type="button"
                 onClick={() => handleOpenLegalModal('SUPPORT')}
-                className="text-amber-300 hover:text-white underline cursor-pointer flex items-center gap-1"
+                className="text-zinc-300 hover:text-white underline cursor-pointer flex items-center gap-1"
               >
                 <HelpCircle className="w-3 h-3" />
-                <span>Customer Support &amp; FAQ (/support)</span>
+                <span>FAQ &amp; Support</span>
               </button>
               {onOpenStaffLogin && !isCustomerLockPreview && (
                 <button
                   type="button"
                   onClick={onOpenStaffLogin}
-                  className="text-slate-400 hover:text-amber-300 underline cursor-pointer flex items-center gap-1"
+                  className="text-zinc-500 hover:text-pink-400 underline cursor-pointer flex items-center gap-1"
                 >
                   <Lock className="w-3 h-3" />
                   <span>Staff &amp; Owner Login</span>
@@ -1976,44 +2472,32 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       </footer>
 
       {/* ─────────────────────────────────────────────────────────────────────────────
-          6. BUILT-IN PRIVACY POLICY, TERMS & CONDITIONS (T&C) & SUPPORT MODAL / PAGE
-             Works both via clicking links AND direct URLs (/privacy-policy, /terms)
+          5. BUILT-IN PRIVACY POLICY, TERMS & CONDITIONS (T&C) & SUPPORT MODAL
          ───────────────────────────────────────────────────────────────────────────── */}
       {activeLegalModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-          <div className="bg-white rounded-3xl border-4 border-cyan-400 shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden my-auto">
-            {/* Modal Top Header */}
-            <div className="bg-gradient-to-r from-slate-950 via-purple-950 to-slate-900 text-white px-5 py-4 border-b-4 border-pink-500 flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-zinc-950 rounded-3xl border-2 border-pink-500 shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden my-auto text-white">
+            <div className="bg-gradient-to-r from-black via-zinc-950 to-red-950 text-white px-5 py-4 border-b-2 border-pink-500 flex flex-wrap items-center justify-between gap-3 shrink-0">
               <div className="flex items-center gap-3">
-                <img
-                  src={OFFICIAL_LOGO_URL}
-                  alt="833 Tidyups Logo"
-                  className="w-11 h-11 object-contain"
-                />
+                <TidyUpsBunnyLogo size="sm" />
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-base sm:text-lg font-black text-white">
-                      833 TidyUps Cleaning Service Inc.
-                    </h2>
-                    <span className="px-2 py-0.5 rounded-full bg-amber-300 text-slate-950 text-[10px] font-black uppercase">
-                      Official Legal &amp; Privacy
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-cyan-300 font-mono">
-                    https://book.tidyupscleaning.com • https://tidyupscleaning.com
+                  <h2 className="text-base sm:text-lg font-black text-white">
+                    TidyUps Cleaning Service Inc.
+                  </h2>
+                  <p className="text-[11px] text-pink-400 font-mono">
+                    https://app.tidyupscleaning.com/book • https://tidyupscleaning.com
                   </p>
                 </div>
               </div>
 
-              {/* Switcher Tabs + Close Button */}
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => handleOpenLegalModal('PRIVACY')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
                     activeLegalModal === 'PRIVACY'
-                      ? 'bg-cyan-400 text-slate-950 shadow-sm'
-                      : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                      ? 'bg-pink-600 text-white'
+                      : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
                   }`}
                 >
                   <Lock className="w-3.5 h-3.5" />
@@ -2025,12 +2509,12 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                   onClick={() => handleOpenLegalModal('TERMS')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
                     activeLegalModal === 'TERMS'
-                      ? 'bg-pink-500 text-white shadow-sm'
-                      : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                      ? 'bg-red-600 text-white'
+                      : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
                   }`}
                 >
                   <FileText className="w-3.5 h-3.5" />
-                  <span>Terms &amp; Conditions (T&amp;C)</span>
+                  <span>Terms &amp; Conditions</span>
                 </button>
 
                 <button
@@ -2038,8 +2522,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                   onClick={() => handleOpenLegalModal('SUPPORT')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
                     activeLegalModal === 'SUPPORT'
-                      ? 'bg-amber-300 text-slate-950 shadow-sm'
-                      : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                      ? 'bg-pink-500 text-black'
+                      : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
                   }`}
                 >
                   <HelpCircle className="w-3.5 h-3.5" />
@@ -2049,232 +2533,56 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 <button
                   type="button"
                   onClick={() => handleOpenLegalModal(null)}
-                  className="ml-1 p-2 rounded-xl bg-white/10 hover:bg-rose-600 text-white cursor-pointer transition-all"
-                  title="Close and return to Customer Booking Sheet"
+                  className="ml-1 p-2 rounded-xl bg-zinc-900 hover:bg-red-600 text-white cursor-pointer transition-all"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {/* Modal Body Content */}
-            <div className="p-5 sm:p-8 overflow-y-auto space-y-6 text-xs sm:text-sm text-slate-700 leading-relaxed flex-1">
+            <div className="p-5 sm:p-8 overflow-y-auto space-y-5 text-xs sm:text-sm text-zinc-300 leading-relaxed flex-1">
               {activeLegalModal === 'PRIVACY' && (
-                <div className="space-y-5">
-                  <div className="border-b border-slate-200 pb-4">
-                    <span className="inline-block px-2.5 py-0.5 rounded-full bg-cyan-100 text-cyan-800 text-[10px] font-black uppercase tracking-wider mb-1">
-                      Canadian PIPEDA &amp; Alberta PIPA Compliant
-                    </span>
-                    <h3 className="text-xl sm:text-2xl font-black text-slate-900">
-                      Privacy Policy — 833 TidyUps Cleaning Service Inc.
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Effective Date: January 1, 2026 • Applies to <strong>book.tidyupscleaning.com</strong>, <strong>tidyupscleaning.com</strong>, and our Facebook / Google Lead booking forms.
-                    </p>
-                  </div>
-
-                  <section className="space-y-1.5">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      1. Information We Collect When You Book
-                    </h4>
-                    <p>
-                      When you request an instant quote or submit a cleaning booking on <code>book.tidyupscleaning.com</code> or through our social media lead forms, we collect only the information needed to prepare your quote and perform your cleaning service:
-                    </p>
-                    <ul className="list-disc list-inside space-y-1 text-slate-700 pl-1">
-                      <li><strong>Contact Information:</strong> Your full name, phone number, and email address.</li>
-                      <li><strong>Property &amp; Service Details:</strong> Service street address, city/community, home size (bedrooms/bathrooms), chosen cleaning package, and preferred date/time window.</li>
-                      <li><strong>Entry &amp; Special Instructions:</strong> Optional lockbox codes, buzzer numbers, pet notes, or specific cleaning priorities you share with our team.</li>
-                    </ul>
-                  </section>
-
-                  <section className="space-y-1.5">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      2. How We Use Your Information
-                    </h4>
-                    <p>We use your personal information strictly to:</p>
-                    <ul className="list-disc list-inside space-y-1 text-slate-700 pl-1">
-                      <li>Confirm your cleaning appointment, send your official Jobber quote/receipt, and assign your vetted cleaning crew.</li>
-                      <li>Provide arrival ETA notifications and customer support before and after your clean.</li>
-                      <li>Honor our <strong>24-Hour Satisfaction &amp; Move-Out Inspection Guarantee</strong>.</li>
-                    </ul>
-                  </section>
-
-                  <section className="space-y-1.5 bg-cyan-50/70 border border-cyan-200 rounded-2xl p-4">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      3. SMS, Phone &amp; Email Communications Policy (No Third-Party Sharing)
-                    </h4>
-                    <p>
-                      By providing your phone number or email on our booking sheet, you consent to receive booking confirmations, appointment reminders, crew arrival updates, and quote follow-ups from <strong>833 TidyUps Cleaning Service Inc.</strong> via phone, SMS text message, or email.
-                    </p>
-                    <p className="font-bold text-slate-900">
-                      We NEVER sell, rent, trade, or share your mobile phone number, SMS opt-in consent, or personal data with any third parties or affiliates for marketing or promotional purposes. You may reply STOP to any SMS message at any time to opt out.
-                    </p>
-                  </section>
-
-                  <section className="space-y-1.5">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      4. Secure Payment Processing &amp; Data Protection
-                    </h4>
-                    <p>
-                      No credit card is charged upfront when submitting this booking request form. Official quotes, $50 booking deposits, and completed service invoices are processed securely through <strong>Jobber</strong> (PCI-DSS compliant) or via Interac e-Transfer. All customer records are encrypted in transit (TLS 1.3) and restricted strictly to authorized 833 TidyUps dispatch and cleaning personnel.
-                    </p>
-                  </section>
-
-                  <section className="space-y-1.5">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      5. Contact Our Privacy Officer
-                    </h4>
-                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs space-y-1">
-                      <div className="font-black text-slate-900">TidyUps Cleaning Service Inc. — Privacy &amp; Customer Care</div>
-                      <div>Address: 8306 Chappelle Way SW, Edmonton, AB T6W 4L3</div>
-                      <div>Email: <a href="mailto:booking@tidyupscleaning.com" className="text-pink-600 font-bold underline">booking@tidyupscleaning.com</a></div>
-                    </div>
-                  </section>
+                <div className="space-y-4">
+                  <h3 className="text-xl font-black text-white">
+                    Privacy Policy — TidyUps Cleaning Service Inc.
+                  </h3>
+                  <p>
+                    We collect your First Name, Last Name, mobile phone number, email address, and property details solely to prepare your cleaning quote, schedule your appointment in Jobber, and deliver your residential cleaning service. We never sell or share your personal data with third parties.
+                  </p>
+                  <p>
+                    Questions? Email <a href="mailto:booking@tidyupscleaning.com" className="text-pink-400 underline font-bold">booking@tidyupscleaning.com</a>.
+                  </p>
                 </div>
               )}
 
               {activeLegalModal === 'TERMS' && (
-                <div className="space-y-5">
-                  <div className="border-b border-slate-200 pb-4">
-                    <span className="inline-block px-2.5 py-0.5 rounded-full bg-pink-100 text-pink-800 text-[10px] font-black uppercase tracking-wider mb-1">
-                      Customer Service Agreement • Province of Alberta
-                    </span>
-                    <h3 className="text-xl sm:text-2xl font-black text-slate-900">
-                      Terms and Conditions (T&amp;C) — 833 TidyUps Cleaning Service Inc.
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Effective Date: January 1, 2026 • Governing Law: Province of Alberta, Canada
-                    </p>
-                  </div>
-
-                  <section className="space-y-1.5">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      1. Scope of Cleaning Services &amp; Instant Estimates
-                    </h4>
-                    <p>
-                      833 TidyUps Cleaning Service Inc. provides residential Standard/Basic Cleans, Deep Cleans, Move-In/Move-Out Turnovers, AirBnB Turnovers, Post-Renovation Cleans, and Commercial Cleaning across Edmonton, St. Albert, Sherwood Park, Spruce Grove, Leduc, Beaumont, and Fort Saskatchewan. Online prices displayed on <code>book.tidyupscleaning.com</code> are calculated from our official Jobber service catalog based on your selected bedrooms, bathrooms, crew size, and add-ons (plus 5% Alberta GST).
-                    </p>
-                  </section>
-
-                  <section className="space-y-1.5">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      2. Booking Confirmation, $50 Deposit &amp; Payment Terms
-                    </h4>
-                    <p>
-                      Submitting a booking request on this page does not charge your card upfront. Once our dispatch team confirms your preferred date and arrival window in Jobber, a <strong>$50 CAD booking deposit</strong> holds your reserved crew slot (applied directly toward your total). The remaining balance is due upon completion of your clean via credit/debit card through Jobber or Interac e-Transfer to <code>booking@tidyupscleaning.com</code>.
-                    </p>
-                  </section>
-
-                  <section className="space-y-1.5">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      3. Property Access, Lockboxes, Pets &amp; Safety
-                    </h4>
-                    <p>
-                      Clients agree to provide safe, unobstructed entry to the property during the scheduled arrival window (via in-person greeting, door keypad, or lockbox code) along with running water and electricity. For everyone&apos;s safety, we kindly ask that pets be secured during cleaning. If our crew is unable to access the home within 30 minutes of arrival, a $50 CAD lockout/trip fee may apply.
-                    </p>
-                  </section>
-
-                  <section className="space-y-1.5">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      4. 24-Hour Cancellation &amp; Rescheduling Policy
-                    </h4>
-                    <p>
-                      We understand plans can change! You may reschedule or cancel your appointment at least <strong>24 hours before</strong> your scheduled arrival window with zero penalty. Cancellations or reschedules requested with less than 24 hours&apos; notice may be subject to a $50 CAD late cancellation fee to compensate the assigned cleaning crew.
-                    </p>
-                  </section>
-
-                  <section className="space-y-1.5 bg-amber-50 border border-amber-300 rounded-2xl p-4">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      5. The 833 TidyUps 24-Hour Clean &amp; Move-Out Guarantee
-                    </h4>
-                    <p>
-                      Your satisfaction is guaranteed. If you, your realtor, or your landlord notice any item included in your booked package checklist that was missed, simply contact us within <strong>24 hours of service completion</strong> at <strong>booking@tidyupscleaning.com</strong> and our team will return to re-clean the area free of charge.
-                    </p>
-                  </section>
-
-                  <section className="space-y-1.5">
-                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
-                      6. Insurance, WCB Coverage &amp; Liability
-                    </h4>
-                    <p>
-                      TidyUps Cleaning Service Inc. maintains full $5M Commercial General Liability Insurance, WCB Alberta coverage, and background-verified staff. While our teams exercise the highest care, we are not responsible for pre-existing damage, unstable fixtures, or unsealed surfaces.
-                    </p>
-                  </section>
+                <div className="space-y-4">
+                  <h3 className="text-xl font-black text-white">
+                    Terms &amp; Conditions — TidyUps Cleaning Service Inc.
+                  </h3>
+                  <ul className="list-disc list-inside space-y-2">
+                    <li><strong>Basic Cleaning:</strong> Scheduled with 1 professional cleaner ($52.50/hr).</li>
+                    <li><strong>Move-Out Cleaning:</strong> Minimum 3 hours with 2 cleaners ($105.00/hr = $315.00 min), or starts at 6 hours minimum with 1 cleaner ($52.50/hr = $315.00 min).</li>
+                    <li><strong>Deep Cleaning:</strong> Minimum 2 cleaners for 2 hours ($105.00/hr = $210.00 min).</li>
+                    <li><strong>24-Hour Clean Guarantee:</strong> Report any missed checklist item within 24 hours and our team returns to re-clean it free of charge.</li>
+                  </ul>
                 </div>
               )}
 
               {activeLegalModal === 'SUPPORT' && (
-                <div className="space-y-5">
-                  <div className="border-b border-slate-200 pb-4">
-                    <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black uppercase tracking-wider mb-1">
-                      Edmonton &amp; Area Customer Care
-                    </span>
-                    <h3 className="text-xl sm:text-2xl font-black text-slate-900">
-                      Customer Support &amp; Frequently Asked Questions
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Open 7 Days a Week • 7:00 AM – 8:00 PM MST • Same-Day &amp; Next-Day Bookings Available
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <a
-                      href="mailto:booking@tidyupscleaning.com"
-                      className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 hover:border-amber-500 transition-all block"
-                    >
-                      <div className="text-[10px] font-black uppercase text-amber-900">Customer Care Email</div>
-                      <div className="text-xs font-black text-slate-950 mt-1 break-all">booking@tidyupscleaning.com</div>
-                      <div className="text-xs font-bold text-slate-600 mt-0.5">Fast Replies &amp; Quotes</div>
+                <div className="space-y-4">
+                  <h3 className="text-xl font-black text-white">
+                    Customer Support &amp; FAQ
+                  </h3>
+                  <p>
+                    All supplies, HEPA vacuums, and eco-safe sanitizers are included with every clean. Email our Edmonton booking desk anytime at{' '}
+                    <a href="mailto:booking@tidyupscleaning.com" className="text-pink-400 underline font-bold">
+                      booking@tidyupscleaning.com
                     </a>
-
-                    <a
-                      href="https://tidyupscleaning.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-4 rounded-2xl bg-cyan-50 border-2 border-cyan-300 hover:border-cyan-500 transition-all block"
-                    >
-                      <div className="text-[10px] font-black uppercase text-cyan-800">Official Website</div>
-                      <div className="text-xs font-black text-slate-950 mt-1">tidyupscleaning.com</div>
-                      <div className="text-xs font-bold text-slate-600 mt-0.5">Edmonton &amp; Area Cleaning</div>
-                    </a>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                      <h4 className="font-black text-slate-900 text-sm">Do your cleaners bring all supplies and equipment?</h4>
-                      <p className="text-xs text-slate-600 mt-1">
-                        Yes! Every 833 TidyUps team arrives fully stocked with commercial HEPA vacuums, microfiber mop systems, eco-friendly sanitizers, and kitchen/bathroom detailing supplies.
-                      </p>
-                    </div>
-                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                      <h4 className="font-black text-slate-900 text-sm">Do I need to be home during the clean?</h4>
-                      <p className="text-xs text-slate-600 mt-1">
-                        Not at all! Most customers provide a door keypad code, lockbox code, or buzzer instruction in the Special Notes box when booking. All cleaners are background-checked and insured.
-                      </p>
-                    </div>
-                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                      <h4 className="font-black text-slate-900 text-sm">What happens right after I click &quot;Confirm &amp; Request Booking&quot;?</h4>
-                      <p className="text-xs text-slate-600 mt-1">
-                        Your booking goes straight into our live dispatch schedule and Jobber system. You receive an instant confirmation Reference ID on screen, and our office confirms your exact arrival window!
-                      </p>
-                    </div>
-                  </div>
+                    .
+                  </p>
                 </div>
               )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="bg-slate-100 border-t border-slate-200 px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <div className="text-xs font-bold text-slate-600">
-                Questions? Email <a href="mailto:booking@tidyupscleaning.com" className="text-pink-600 font-black underline">booking@tidyupscleaning.com</a>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleOpenLegalModal(null)}
-                className="px-5 py-2 rounded-xl bg-gradient-to-r from-pink-600 to-cyan-600 hover:opacity-95 text-white font-black text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
-              >
-                <span>← Back to Customer Booking Sheet</span>
-              </button>
             </div>
           </div>
         </div>

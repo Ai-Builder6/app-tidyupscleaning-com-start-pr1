@@ -1,192 +1,358 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapPin, Loader2, Check, ArrowRight } from 'lucide-react';
+import { MapPin, Loader2, Navigation, CheckCircle2, Sparkles, X } from 'lucide-react';
 
 export interface AddressPrediction {
   description: string;
-  placeId: string;
+  place_id: string;
+  placeId?: string;
+  main_text: string;
   mainText: string;
+  secondary_text: string;
   secondaryText: string;
+  lat?: number;
+  lng?: number;
+  tag?: string;
 }
 
-interface AddressAutocompleteInputProps {
-  id?: string;
+interface Prediction {
+  description: string;
+  place_id: string;
+  main_text: string;
+  secondary_text: string;
+  lat?: number;
+  lng?: number;
+  tag?: string;
+}
+
+export interface AddressAutocompleteInputProps {
   value: string;
-  onChange: (address: string) => void;
+  onChange: (value: string, coords?: { lat: number; lng: number }) => void;
   onSelect?: (prediction: AddressPrediction) => void;
   placeholder?: string;
-  required?: boolean;
   className?: string;
-  autoFocus?: boolean;
+  required?: boolean;
+  disabled?: boolean;
+  onBlur?: () => void;
+  theme?: 'light' | 'dark';
+  id?: string;
+  name?: string;
+  showClearButton?: boolean;
 }
 
-// Common Edmonton streets and corridors for 0ms instant typing suggestions
-const EDMONTON_INSTANT_CORRIDORS = [
-  "10405 Jasper Ave NW, Edmonton, AB",
-  "Whyte Ave (82 Ave NW), Edmonton, AB",
-  "10920 84 Ave NW, Edmonton, AB",
-  "12420 102 Ave NW, Edmonton, AB",
-  "10540 85 Ave NW, Edmonton, AB",
-  "3112 119 St NW, Edmonton, AB",
-  "14102 102 Ave NW, Edmonton, AB",
-  "4904 141 Ave NW, Edmonton, AB",
-  "9632 142 St NW, Edmonton, AB",
-  "2045 111A St NW, Edmonton, AB",
-  "7221 Chivers Pl SW, Edmonton, AB",
-  "8306 Chappelle Way SW, Edmonton, AB",
-  "574 Saddleback Rd NW, Edmonton, AB",
-  "10231 120 St NW, Edmonton, AB",
-  "3751 139 Ave NW, Edmonton, AB",
-  "740 Knottwood Rd S NW, Edmonton, AB",
-  "10740 109 St NW, Edmonton, AB",
-  "9434 208 St NW, Edmonton, AB",
-  "17115 61 Ave NW, Edmonton, AB",
-  "17908 61 Ave NW, Edmonton, AB",
-  "12219 103 St NW, Edmonton, AB",
-  "10408 155 Ave NW, Edmonton, AB",
-  "20123 58 Ave NW, Edmonton, AB",
-  "9722 154 St NW, Edmonton, AB",
-  "10180 104 St NW, Edmonton, AB",
-  "6812 112 Ave NW, Edmonton, AB",
-  "4310 114a St NW, Edmonton, AB",
-  "12411 106 Ave NW, Edmonton, AB",
-  "8910 148 St NW, Edmonton, AB",
-  "8310 160 St NW, Edmonton, AB",
-  "5110 122 St NW, Edmonton, AB",
-  "9812 144 St NW, Edmonton, AB",
-  "15403 75 Ave NW, Edmonton, AB",
-  "Gateway Blvd NW, Edmonton, AB",
-  "Calgary Trail NW, Edmonton, AB",
-  "Anthony Henday Dr, Edmonton, AB",
-  "Whitemud Dr NW, Edmonton, AB",
-  "Yellowhead Trail NW, Edmonton, AB",
-  "St. Albert Trail, St. Albert, AB",
-  "Sherwood Dr, Sherwood Park, AB",
+interface CorridorPreset {
+  address: string;
+  area: string;
+  city: string;
+  postal: string;
+  lat: number;
+  lng: number;
+}
+
+// Comprehensive Edmonton & Capital Region corridors with accurate coordinates
+const EDMONTON_CORRIDOR_PRESETS: CorridorPreset[] = [
+  { address: '10420 Jasper Ave NW', area: 'Downtown Core', city: 'Edmonton, AB', postal: 'T5J 1Z2', lat: 53.5409, lng: -113.4994 },
+  { address: '10155 102 St NW', area: 'Financial District', city: 'Edmonton, AB', postal: 'T5J 4G8', lat: 53.5432, lng: -113.4955 },
+  { address: '10230 104 St NW', area: 'ICE District / 104 St Promenade', city: 'Edmonton, AB', postal: 'T5J 1B8', lat: 53.5446, lng: -113.4992 },
+  { address: '11215 Jasper Ave NW', area: 'Oliver / Wîhkwêntôwin', city: 'Edmonton, AB', postal: 'T5K 0L5', lat: 53.5408, lng: -113.5148 },
+  { address: '8215 104 St NW', area: 'Whyte Ave / Old Strathcona', city: 'Edmonton, AB', postal: 'T6E 4E7', lat: 53.5182, lng: -113.4981 },
+  { address: '10824 82 Ave NW', area: 'Garneau / University', city: 'Edmonton, AB', postal: 'T6E 2B3', lat: 53.5181, lng: -113.5098 },
+  { address: '9620 82 Ave NW', area: 'Ritchie / Mill Creek', city: 'Edmonton, AB', postal: 'T6C 1A1', lat: 53.5180, lng: -113.4785 },
+  { address: '12410 102 Ave NW', area: 'Westmount / 124 Street', city: 'Edmonton, AB', postal: 'T5N 0M1', lat: 53.5433, lng: -113.5364 },
+  { address: '13815 102 Ave NW', area: 'Glenora', city: 'Edmonton, AB', postal: 'T5N 0P1', lat: 53.5425, lng: -113.5598 },
+  { address: '9110 142 St NW', area: 'Parkview / Laurier Heights', city: 'Edmonton, AB', postal: 'T5R 0M7', lat: 53.5256, lng: -113.5665 },
+  { address: '14925 87 Ave NW', area: 'Lynnwood / Meadowlark', city: 'Edmonton, AB', postal: 'T5R 4E8', lat: 53.5194, lng: -113.5786 },
+  { address: '8882 170 St NW', area: 'West Edmonton / Summerlea', city: 'Edmonton, AB', postal: 'T5T 4J2', lat: 53.5225, lng: -113.6242 },
+  { address: '6240 199 St NW', area: 'The Hamptons / West End', city: 'Edmonton, AB', postal: 'T6M 2W5', lat: 53.4985, lng: -113.6642 },
+  { address: '21115 92 Ave NW', area: 'Lewis Estates / Secord', city: 'Edmonton, AB', postal: 'T5T 4K8', lat: 53.5271, lng: -113.6845 },
+  { address: '1215 Windermere Way SW', area: 'Windermere South', city: 'Edmonton, AB', postal: 'T6W 0T1', lat: 53.4288, lng: -113.6114 },
+  { address: '6104 Currents Dr NW', area: 'Currents of Windermere / Ambleside', city: 'Edmonton, AB', postal: 'T6W 0L9', lat: 53.4368, lng: -113.6005 },
+  { address: '14220 28 Ave SW', area: 'Chappelle / Jagare Ridge', city: 'Edmonton, AB', postal: 'T6W 3P2', lat: 53.4052, lng: -113.5688 },
+  { address: '2310 Rabbit Hill Rd NW', area: 'Terwillegar Towne / South Terwillegar', city: 'Edmonton, AB', postal: 'T6R 3L6', lat: 53.4535, lng: -113.5775 },
+  { address: '4215 106 St NW', area: 'Whitemud Crossing / Duggan', city: 'Edmonton, AB', postal: 'T6J 2P9', lat: 53.4792, lng: -113.5035 },
+  { address: '1925 105 St NW', area: 'Century Park / Ermineskin', city: 'Edmonton, AB', postal: 'T6J 5C4', lat: 53.4578, lng: -113.5015 },
+  { address: '11120 Ellerslie Rd SW', area: 'Rutherford / Heritage Valley', city: 'Edmonton, AB', postal: 'T6W 1A2', lat: 53.4242, lng: -113.5162 },
+  { address: '2810 119 St SW', area: 'Macewan / Callaghan', city: 'Edmonton, AB', postal: 'T6W 1B5', lat: 53.4125, lng: -113.5284 },
+  { address: '9104 17 Ave SW', area: 'Summerside / Lake Summerside', city: 'Edmonton, AB', postal: 'T6X 0R5', lat: 53.4138, lng: -113.4742 },
+  { address: '5215 Ellerslie Rd SW', area: 'The Orchards / Walker Lakes', city: 'Edmonton, AB', postal: 'T6X 0J3', lat: 53.4245, lng: -113.4215 },
+  { address: '2331 66 St NW', area: 'Mill Woods Town Centre', city: 'Edmonton, AB', postal: 'T6K 4B5', lat: 53.4562, lng: -113.4351 },
+  { address: '3815 34 St NW', area: 'Tamarack / Meadows', city: 'Edmonton, AB', postal: 'T6T 0K9', lat: 53.4712, lng: -113.3924 },
+  { address: '1820 17 St NW', area: 'Laurel / Silver Berry', city: 'Edmonton, AB', postal: 'T6T 0P5', lat: 53.4485, lng: -113.3688 },
+  { address: '9810 75 St NW', area: 'Capilano / Ottewell', city: 'Edmonton, AB', postal: 'T6A 2Y8', lat: 53.5364, lng: -113.4438 },
+  { address: '8310 85 St NW', area: 'Bonnie Doon / Idylwylde', city: 'Edmonton, AB', postal: 'T6C 3B9', lat: 53.5192, lng: -113.4585 },
+  { address: '11815 97 St NW', area: 'Alberta Ave / Norwood', city: 'Edmonton, AB', postal: 'T5G 1Y5', lat: 53.5705, lng: -113.4918 },
+  { address: '11220 65 St NW', area: 'Highlands / Bellevue', city: 'Edmonton, AB', postal: 'T5W 4K5', lat: 53.5628, lng: -113.4408 },
+  { address: '13710 97 St NW', area: 'Northgate / Griesbach', city: 'Edmonton, AB', postal: 'T5E 4E2', lat: 53.5994, lng: -113.4922 },
+  { address: '10815 153 Ave NW', area: 'Castle Downs / Beaumaris', city: 'Edmonton, AB', postal: 'T5X 5S1', lat: 53.6152, lng: -113.5085 },
+  { address: '16510 59A St NW', area: 'Hollick-Kenyon / McConachie', city: 'Edmonton, AB', postal: 'T5Y 3J8', lat: 53.6268, lng: -113.4325 },
+  { address: '15320 37 St NW', area: 'Clareview / Kirkness', city: 'Edmonton, AB', postal: 'T5Y 2W5', lat: 53.6145, lng: -113.3982 },
+  { address: '375 St Albert Trail', area: 'St. Albert Central', city: 'St. Albert, AB', postal: 'T8N 3K8', lat: 53.6458, lng: -113.6272 },
+  { address: '45 Erin Ridge Rd', area: 'Erin Ridge / North St. Albert', city: 'St. Albert, AB', postal: 'T8N 7E8', lat: 53.6642, lng: -113.6195 },
+  { address: '2020 Sherwood Dr', area: 'Broadmoor / Festival Place', city: 'Sherwood Park, AB', postal: 'T8A 3H9', lat: 53.5234, lng: -113.3112 },
+  { address: '800 Emerald Dr', area: 'Emerald Hills', city: 'Sherwood Park, AB', postal: 'T8H 0W6', lat: 53.5592, lng: -113.2985 },
+  { address: '120 Century Crossing', area: 'Century Crossing', city: 'Spruce Grove, AB', postal: 'T7X 0C8', lat: 53.5412, lng: -113.8965 },
+  { address: '5010 50 Ave', area: 'Downtown Leduc', city: 'Leduc, AB', postal: 'T9E 6T2', lat: 53.2594, lng: -113.5491 },
+  { address: '5004 50 St', area: 'Centre-Ville Beaumont', city: 'Beaumont, AB', postal: 'T4X 1J9', lat: 53.3572, lng: -113.4148 },
+  { address: '9910 104 St', area: 'Downtown Fort Saskatchewan', city: 'Fort Saskatchewan, AB', postal: 'T8L 2P6', lat: 53.7128, lng: -113.2134 }
 ];
 
+// Named streets in Edmonton & area for dynamic house-number synthesis
+const NAMED_STREETS: { street: string; quadrant: string; city: string; area: string; lat: number; lng: number }[] = [
+  { street: 'Jasper Ave', quadrant: 'NW', city: 'Edmonton, AB', area: 'Downtown / Oliver', lat: 53.5409, lng: -113.5050 },
+  { street: 'Whyte Ave (82 Ave)', quadrant: 'NW', city: 'Edmonton, AB', area: 'Old Strathcona', lat: 53.5181, lng: -113.4981 },
+  { street: 'Windermere Blvd', quadrant: 'SW', city: 'Edmonton, AB', area: 'Windermere', lat: 53.4310, lng: -113.6050 },
+  { street: 'Windermere Way', quadrant: 'SW', city: 'Edmonton, AB', area: 'Windermere', lat: 53.4288, lng: -113.6114 },
+  { street: 'Ambleside Dr', quadrant: 'SW', city: 'Edmonton, AB', area: 'Ambleside', lat: 53.4325, lng: -113.5960 },
+  { street: 'Rabbit Hill Rd', quadrant: 'NW', city: 'Edmonton, AB', area: 'Terwillegar / Magrath', lat: 53.4535, lng: -113.5775 },
+  { street: 'Terwillegar Dr', quadrant: 'NW', city: 'Edmonton, AB', area: 'Terwillegar', lat: 53.4585, lng: -113.5820 },
+  { street: 'Ellerslie Rd', quadrant: 'SW', city: 'Edmonton, AB', area: 'Heritage Valley / Summerside', lat: 53.4242, lng: -113.5010 },
+  { street: 'Summerside Grande Blvd', quadrant: 'SW', city: 'Edmonton, AB', area: 'Summerside', lat: 53.4145, lng: -113.4730 },
+  { street: 'Chappelle Way', quadrant: 'SW', city: 'Edmonton, AB', area: 'Chappelle Gardens', lat: 53.4045, lng: -113.5695 },
+  { street: 'Rutherford Rd', quadrant: 'SW', city: 'Edmonton, AB', area: 'Rutherford', lat: 53.4180, lng: -113.5240 },
+  { street: 'Gateway Blvd', quadrant: 'NW', city: 'Edmonton, AB', area: 'Southgate / Strathcona', lat: 53.4920, lng: -113.4945 },
+  { street: 'Calgary Trail', quadrant: 'NW', city: 'Edmonton, AB', area: 'South Corridor', lat: 53.4885, lng: -113.4960 },
+  { street: 'Stony Plain Rd', quadrant: 'NW', city: 'Edmonton, AB', area: 'West Edmonton', lat: 53.5418, lng: -113.5780 },
+  { street: 'Groat Rd', quadrant: 'NW', city: 'Edmonton, AB', area: 'Westmount / Glenora', lat: 53.5510, lng: -113.5420 },
+  { street: 'Lessard Rd', quadrant: 'NW', city: 'Edmonton, AB', area: 'Lessard / Gariepy', lat: 53.4820, lng: -113.6210 },
+  { street: 'Callingwood Rd', quadrant: 'NW', city: 'Edmonton, AB', area: 'Callingwood', lat: 53.5025, lng: -113.6150 },
+  { street: 'Riverbend Rd', quadrant: 'NW', city: 'Edmonton, AB', area: 'Riverbend / Brookside', lat: 53.4850, lng: -113.5680 },
+  { street: 'fort Rd', quadrant: 'NW', city: 'Edmonton, AB', area: 'Belvedere / Northeast', lat: 53.5880, lng: -113.4420 },
+  { street: 'Victoria Trail', quadrant: 'NW', city: 'Edmonton, AB', area: 'Hermitage / Clareview', lat: 53.5960, lng: -113.3850 },
+  { street: 'Manning Dr', quadrant: 'NW', city: 'Edmonton, AB', area: 'Manning / Ebbers', lat: 53.6120, lng: -113.4180 },
+  { street: 'St Albert Trail', quadrant: '', city: 'St. Albert, AB', area: 'St. Albert Corridor', lat: 53.6458, lng: -113.6272 },
+  { street: 'Sherwood Dr', quadrant: '', city: 'Sherwood Park, AB', area: 'Sherwood Park Central', lat: 53.5234, lng: -113.3112 },
+  { street: 'Baseline Rd', quadrant: '', city: 'Sherwood Park, AB', area: 'Sherwood Park North', lat: 53.5415, lng: -113.3090 },
+  { street: 'Wye Rd', quadrant: '', city: 'Sherwood Park, AB', area: 'Sherwood Park South', lat: 53.5080, lng: -113.3150 }
+];
+
+/**
+ * Estimates accurate Edmonton grid coordinates from numbered street/avenue addresses
+ * Edmonton's 100 St = -113.4909, 100 Ave = 53.5385
+ */
+export function estimateEdmontonGridCoords(addressText: string): { lat: number; lng: number } | undefined {
+  const clean = addressText.trim();
+  const preset = EDMONTON_CORRIDOR_PRESETS.find(
+    p => clean.toLowerCase().includes(p.address.toLowerCase()) || p.address.toLowerCase().includes(clean.toLowerCase())
+  );
+  if (preset) return { lat: preset.lat, lng: preset.lng };
+
+  for (const ns of NAMED_STREETS) {
+    if (clean.toLowerCase().includes(ns.street.toLowerCase())) {
+      return { lat: ns.lat, lng: ns.lng };
+    }
+  }
+
+  const isSW = /\bSW\b/i.test(clean);
+  // Pattern 1: "10824 82 Ave NW" -> house 10824 (~108 St), 82 Ave
+  const aveMatch = clean.match(/\b(\d{2,5})\s+(\d{1,3})\s*(?:Ave|Avenue)\b/i);
+  if (aveMatch) {
+    const houseNum = parseInt(aveMatch[1], 10);
+    const aveNum = parseInt(aveMatch[2], 10);
+    const stNum = houseNum >= 1000 ? Math.floor(houseNum / 100) : 104;
+    const lat = isSW
+      ? 53.438 - (aveNum - 1) * 0.0022
+      : 53.5385 + (aveNum - 100) * 0.0018;
+    const lng = -113.4909 - (stNum - 100) * 0.0023;
+    return {
+      lat: Math.max(53.35, Math.min(53.68, Number(lat.toFixed(5)))),
+      lng: Math.max(-113.72, Math.min(-113.28, Number(lng.toFixed(5))))
+    };
+  }
+
+  // Pattern 2: "8215 104 St NW" -> house 8215 (~82 Ave), 104 St
+  const stMatch = clean.match(/\b(\d{2,5})\s+(\d{1,3})\s*(?:St|Street)\b/i);
+  if (stMatch) {
+    const houseNum = parseInt(stMatch[1], 10);
+    const stNum = parseInt(stMatch[2], 10);
+    const aveNum = houseNum >= 1000 ? Math.floor(houseNum / 100) : 100;
+    const lat = isSW
+      ? 53.438 - (aveNum > 50 ? 15 : aveNum) * 0.0022
+      : 53.5385 + (aveNum - 100) * 0.0018;
+    const lng = -113.4909 - (stNum - 100) * 0.0023;
+    return {
+      lat: Math.max(53.35, Math.min(53.68, Number(lat.toFixed(5)))),
+      lng: Math.max(-113.72, Math.min(-113.28, Number(lng.toFixed(5))))
+    };
+  }
+
+  return undefined;
+}
+
+/**
+ * Generates instant smart auto-complete predictions for ANY typed house number,
+ * street/avenue, or neighborhood in Edmonton & Capital Region.
+ */
+function buildInstantLocalPredictions(rawQuery: string): Prediction[] {
+  const q = rawQuery.trim();
+  const qLower = q.toLowerCase();
+  const results: Prediction[] = [];
+  const seen = new Set<string>();
+
+  const pushUnique = (pred: Prediction) => {
+    const key = pred.description.toLowerCase();
+    if (!seen.has(key) && results.length < 7) {
+      seen.add(key);
+      results.push(pred);
+    }
+  };
+
+  if (!q) {
+    return EDMONTON_CORRIDOR_PRESETS.slice(0, 6).map((item, idx) => ({
+      description: `${item.address}, ${item.city} (${item.area})`,
+      place_id: `preset-init-${idx}`,
+      main_text: item.address,
+      secondary_text: `${item.city} • ${item.area}`,
+      lat: item.lat,
+      lng: item.lng,
+      tag: item.area
+    }));
+  }
+
+  // 1. If the user starts with a house number (e.g., "10824", "10824 82", "4512 118 Ave", "1240 Windermere")
+  const leadingNumMatch = q.match(/^(\d{1,5})(?:\s+(.*))?$/);
+  if (leadingNumMatch) {
+    const houseNum = leadingNumMatch[1];
+    const rest = (leadingNumMatch[2] || '').trim();
+    const restLower = rest.toLowerCase();
+
+    // Case 1A: User typed house number + partial or full numbered street/ave (e.g. "10824 82", "10824 82 ave")
+    const numRoadMatch = rest.match(/^(\d{1,3})\s*(st|street|ave|avenue)?\s*(nw|sw|ne|se)?/i);
+    if (numRoadMatch) {
+      const roadNum = numRoadMatch[1];
+      const roadTypeRaw = (numRoadMatch[2] || '').toLowerCase();
+      const quadRaw = (numRoadMatch[3] || '').toUpperCase();
+
+      const roadTypes = roadTypeRaw.startsWith('av')
+        ? ['Ave']
+        : roadTypeRaw.startsWith('st')
+        ? ['St']
+        : ['Ave', 'St'];
+      const quads = quadRaw ? [quadRaw] : ['NW', 'SW'];
+
+      for (const rt of roadTypes) {
+        for (const qd of quads) {
+          const mainText = `${houseNum} ${roadNum} ${rt} ${qd}`;
+          const coords = estimateEdmontonGridCoords(mainText);
+          const areaHint = qd === 'SW' ? 'Southwest Edmonton' : parseInt(roadNum, 10) < 90 && rt === 'Ave' ? 'South / Strathcona' : 'Edmonton Grid';
+          pushUnique({
+            description: `${mainText}, Edmonton, AB`,
+            place_id: `synth-grid-${mainText}`,
+            main_text: mainText,
+            secondary_text: `Edmonton, AB • ${areaHint}`,
+            lat: coords?.lat,
+            lng: coords?.lng,
+            tag: 'Instant Auto-Fill'
+          });
+        }
+      }
+    }
+
+    // Case 1B: User typed house number + named street prefix (e.g. "10420 jasper", "1215 wind", "420 st albert")
+    if (rest.length > 0) {
+      for (const ns of NAMED_STREETS) {
+        if (ns.street.toLowerCase().includes(restLower) || ns.area.toLowerCase().includes(restLower)) {
+          const mainText = `${houseNum} ${ns.street}${ns.quadrant ? ` ${ns.quadrant}` : ''}`;
+          pushUnique({
+            description: `${mainText}, ${ns.city}`,
+            place_id: `synth-named-${mainText}`,
+            main_text: mainText,
+            secondary_text: `${ns.city} • ${ns.area}`,
+            lat: ns.lat,
+            lng: ns.lng,
+            tag: ns.area
+          });
+        }
+      }
+    } else {
+      // User only typed a house number so far (e.g., "10420" or "8215") -> suggest common Edmonton streets with that house number!
+      const hInt = parseInt(houseNum, 10);
+      const inferredStOrAve = hInt >= 1000 ? Math.floor(hInt / 100) : 104;
+      const candidateStreets = [
+        `${houseNum} Jasper Ave NW`,
+        `${houseNum} 82 Ave NW`,
+        `${houseNum} ${Math.min(170, Math.max(50, inferredStOrAve))} St NW`,
+        `${houseNum} ${Math.min(167, Math.max(23, inferredStOrAve))} Ave NW`,
+        `${houseNum} Windermere Blvd SW`,
+        `${houseNum} Ellerslie Rd SW`
+      ];
+      candidateStreets.forEach((mainText, idx) => {
+        const coords = estimateEdmontonGridCoords(mainText);
+        pushUnique({
+          description: `${mainText}, Edmonton, AB`,
+          place_id: `synth-numonly-${idx}-${mainText}`,
+          main_text: mainText,
+          secondary_text: 'Edmonton, AB • Street Auto-Fill',
+          lat: coords?.lat,
+          lng: coords?.lng,
+          tag: 'Auto-Fill'
+        });
+      });
+    }
+  }
+
+  // 2. Match against curated presets by address, neighborhood/area, city, or postal code
+  for (const item of EDMONTON_CORRIDOR_PRESETS) {
+    const haystack = `${item.address} ${item.area} ${item.city} ${item.postal}`.toLowerCase();
+    if (haystack.includes(qLower)) {
+      pushUnique({
+        description: `${item.address}, ${item.city} (${item.area})`,
+        place_id: `preset-${item.address}`,
+        main_text: item.address,
+        secondary_text: `${item.city} • ${item.area}`,
+        lat: item.lat,
+        lng: item.lng,
+        tag: item.area
+      });
+    }
+  }
+
+  // 3. Match against named streets even without a leading house number (e.g. "Whyte", "Windermere", "Jasper")
+  for (const ns of NAMED_STREETS) {
+    if (
+      ns.street.toLowerCase().includes(qLower) ||
+      ns.area.toLowerCase().includes(qLower) ||
+      ns.city.toLowerCase().includes(qLower)
+    ) {
+      const sampleMain = `10120 ${ns.street}${ns.quadrant ? ` ${ns.quadrant}` : ''}`;
+      pushUnique({
+        description: `${sampleMain}, ${ns.city}`,
+        place_id: `named-default-${ns.street}`,
+        main_text: sampleMain,
+        secondary_text: `${ns.city} • ${ns.area}`,
+        lat: ns.lat,
+        lng: ns.lng,
+        tag: ns.area
+      });
+    }
+  }
+
+  return results.slice(0, 7);
+}
+
 export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> = ({
-  id,
   value,
   onChange,
   onSelect,
-  placeholder = 'Start typing address in Edmonton & area...',
-  required = false,
+  placeholder = 'Start typing house #, street, or neighborhood (auto-completes)...',
   className = '',
-  autoFocus = false,
+  required = false,
+  disabled = false,
+  onBlur,
+  theme = 'light',
+  id,
+  name = 'street-address',
+  showClearButton = true
 }) => {
-  const [predictions, setPredictions] = useState<AddressPrediction[]>([]);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<number | null>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(0);
+  const [justAutoFilled, setJustAutoFilled] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch address predictions as user types using client Google Maps SDK or proxy
   useEffect(() => {
-    if (!value || value.trim().length < 2) {
-      setPredictions([]);
-      setIsOpen(false);
-      return;
-    }
-
-    const trimmed = value.trim();
-
-    // 1. Instant local matching for zero-latency feedback (number matching, corridor, street)
-    const terms = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
-    const quickLocal: AddressPrediction[] = EDMONTON_INSTANT_CORRIDORS
-      .filter((s) => {
-        const sLower = s.toLowerCase();
-        return terms.every((t) => sLower.includes(t));
-      })
-      .slice(0, 6)
-      .map((s, idx) => ({
-        description: s,
-        placeId: `local-${idx}`,
-        mainText: s.split(',')[0],
-        secondaryText: s.split(',').slice(1).join(',').trim(),
-      }));
-
-    if (quickLocal.length > 0) {
-      setPredictions(quickLocal);
-      setIsOpen(true);
-      setSelectedIndex(0);
-    }
-
-    if (debounceRef.current) {
-      window.clearTimeout(debounceRef.current);
-    }
-
-    debounceRef.current = window.setTimeout(async () => {
-      setIsLoading(true);
-
-      const fetchFallback = async () => {
-        try {
-          const res = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(trimmed)}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (Array.isArray(data.predictions) && data.predictions.length > 0) {
-              setPredictions(data.predictions);
-              setIsOpen(true);
-              setSelectedIndex(0); // Auto-focus top prediction for quick Enter/Tab population
-            }
-          }
-        } catch (err) {
-          console.warn('Address autocomplete fallback error:', err);
-        } finally {
-          setIsLoading(false);
-        }
-      };
-
-      // Try Google Maps JavaScript Places SDK directly in browser (instant response)
-      if (typeof window !== 'undefined' && (window as any).google?.maps?.places?.AutocompleteService) {
-        try {
-          const service = new (window as any).google.maps.places.AutocompleteService();
-          service.getPlacePredictions(
-            {
-              input: trimmed,
-              componentRestrictions: { country: 'ca' },
-              locationBias: new (window as any).google.maps.Circle({
-                center: { lat: 53.5461, lng: -113.4938 },
-                radius: 45000,
-              }),
-            },
-            (results: any[], status: any) => {
-              setIsLoading(false);
-              const PlacesServiceStatus = (window as any).google?.maps?.places?.PlacesServiceStatus;
-              if ((status === 'OK' || status === PlacesServiceStatus?.OK) && results && results.length > 0) {
-                const formatted: AddressPrediction[] = results.map((r) => ({
-                  description: r.description,
-                  placeId: r.place_id,
-                  mainText: r.structured_formatting?.main_text || r.description,
-                  secondaryText: r.structured_formatting?.secondary_text || 'Edmonton, AB',
-                }));
-                setPredictions(formatted);
-                setIsOpen(true);
-                setSelectedIndex(0);
-              } else {
-                fetchFallback();
-              }
-            }
-          );
-          return;
-        } catch {
-          fetchFallback();
-        }
-      } else {
-        fetchFallback();
-      }
-    }, 40);
-
-    return () => {
-      if (debounceRef.current) {
-        window.clearTimeout(debounceRef.current);
-      }
-    };
-  }, [value]);
-
-  // Close dropdown on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
@@ -194,14 +360,187 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSelectPrediction = (prediction: AddressPrediction) => {
-    onChange(prediction.description);
-    setPredictions([]);
-    setIsOpen(false);
-    setSelectedIndex(-1);
-    if (onSelect) {
-      onSelect(prediction);
+  const fetchPredictions = async (input: string) => {
+    const localSmart = buildInstantLocalPredictions(input);
+    setPredictions(localSmart);
+    setHighlightedIndex(0);
+    setIsOpen(true);
+
+    if (!input || input.trim().length < 2) {
+      setIsLoading(false);
+      return;
     }
+
+    setIsLoading(true);
+    try {
+      // 1. Try modern Google Maps Places JS SDK (AutocompleteSuggestion or AutocompleteService) if loaded
+      const w = window as unknown as { google?: any };
+      if (w.google?.maps?.places) {
+        if (typeof w.google.maps.places.AutocompleteSuggestion?.fetchAutocompleteSuggestions === 'function') {
+          try {
+            const { suggestions } = await w.google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+              input,
+              includedRegionCodes: ['ca'],
+              locationBias: {
+                center: { lat: 53.5461, lng: -113.4938 },
+                radius: 50000
+              }
+            });
+            if (Array.isArray(suggestions) && suggestions.length > 0) {
+              const gmpPreds: Prediction[] = suggestions
+                .map((s: any, idx: number) => {
+                  const p = s.placePrediction;
+                  if (!p) return null;
+                  const fullText = p.text?.toString?.() || '';
+                  const mainText = p.mainText?.toString?.() || fullText.split(',')[0] || fullText;
+                  const secondaryText = p.secondaryText?.toString?.() || 'Edmonton & Area, AB';
+                  const coords = estimateEdmontonGridCoords(fullText);
+                  return {
+                    description: fullText,
+                    place_id: p.placeId || `gmp-sug-${idx}`,
+                    main_text: mainText,
+                    secondary_text: secondaryText,
+                    lat: coords?.lat,
+                    lng: coords?.lng,
+                    tag: 'Google Maps'
+                  } as Prediction;
+                })
+                .filter(Boolean);
+              if (gmpPreds.length > 0) {
+                const merged = [...gmpPreds, ...localSmart].slice(0, 7);
+                setPredictions(merged);
+                setIsLoading(false);
+                return;
+              }
+            }
+          } catch {
+            // Fall through to AutocompleteService / server proxy
+          }
+        }
+
+        if (typeof w.google.maps.places.AutocompleteService === 'function') {
+          const service = new w.google.maps.places.AutocompleteService();
+          const hasEdmontonContext = /edmonton|st\.?\s*albert|sherwood|spruce|leduc|beaumont|\bab\b/i.test(input);
+          const searchInput = hasEdmontonContext ? input : `${input}, Edmonton, AB`;
+
+          const googlePreds = await new Promise<Prediction[]>((resolve) => {
+            service.getPlacePredictions(
+              {
+                input: searchInput,
+                componentRestrictions: { country: 'ca' }
+              },
+              (results: any[] | null, status: string) => {
+                if (status === 'OK' && results && results.length > 0) {
+                  resolve(
+                    results.slice(0, 5).map((p: any) => {
+                      const coords = estimateEdmontonGridCoords(p.description || '');
+                      return {
+                        description: p.description,
+                        place_id: p.place_id,
+                        main_text: p.structured_formatting?.main_text || p.description.split(',')[0],
+                        secondary_text: p.structured_formatting?.secondary_text || 'Alberta, Canada',
+                        lat: coords?.lat,
+                        lng: coords?.lng,
+                        tag: 'Google Places'
+                      };
+                    })
+                  );
+                } else {
+                  resolve([]);
+                }
+              }
+            );
+          });
+
+          if (googlePreds.length > 0) {
+            const seenDesc = new Set(googlePreds.map(g => g.main_text.toLowerCase()));
+            const combined = [
+              ...googlePreds,
+              ...localSmart.filter(l => !seenDesc.has(l.main_text.toLowerCase()))
+            ].slice(0, 7);
+            setPredictions(combined);
+            setIsLoading(false);
+            return;
+          }
+        }
+      }
+
+      // 2. Try Server Proxy (/api/places/autocomplete)
+      const response = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(input)}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.predictions) && data.predictions.length > 0) {
+          const serverPreds: Prediction[] = data.predictions.slice(0, 5).map((p: any) => {
+            const coords = estimateEdmontonGridCoords(p.description || '');
+            return {
+              description: p.description,
+              place_id: p.place_id,
+              main_text: p.structured_formatting?.main_text || p.description.split(',')[0],
+              secondary_text: p.structured_formatting?.secondary_text || 'Edmonton, AB',
+              lat: coords?.lat,
+              lng: coords?.lng,
+              tag: 'Verified'
+            };
+          });
+          const seenDesc = new Set(serverPreds.map(s => s.main_text.toLowerCase()));
+          setPredictions([
+            ...serverPreds,
+            ...localSmart.filter(l => !seenDesc.has(l.main_text.toLowerCase()))
+          ].slice(0, 7));
+        }
+      }
+    } catch {
+      // Local smart predictions are already displayed
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    const coords = estimateEdmontonGridCoords(newVal);
+    onChange(newVal, coords);
+    setJustAutoFilled(false);
+
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+
+    // Immediate local smart predictions + debounced remote enrichment
+    const immediateLocal = buildInstantLocalPredictions(newVal);
+    setPredictions(immediateLocal);
+    setHighlightedIndex(0);
+    setIsOpen(true);
+
+    debounceTimer.current = setTimeout(() => {
+      fetchPredictions(newVal);
+    }, 150);
+  };
+
+  const handleSelect = (prediction: Prediction) => {
+    // Format clean street + city for form & dispatch clarity
+    const cleanAddress = prediction.description.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    const coords =
+      prediction.lat !== undefined && prediction.lng !== undefined
+        ? { lat: prediction.lat, lng: prediction.lng }
+        : estimateEdmontonGridCoords(cleanAddress);
+    onChange(cleanAddress, coords);
+    if (onSelect) {
+      onSelect({
+        description: cleanAddress,
+        place_id: prediction.place_id,
+        placeId: prediction.place_id,
+        main_text: prediction.main_text,
+        mainText: prediction.main_text,
+        secondary_text: prediction.secondary_text,
+        secondaryText: prediction.secondary_text,
+        lat: coords?.lat,
+        lng: coords?.lng,
+        tag: prediction.tag
+      });
+    }
+    setIsOpen(false);
+    setJustAutoFilled(true);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -209,117 +548,158 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex((prev) => (prev < predictions.length - 1 ? prev + 1 : 0));
+      setHighlightedIndex((prev) => (prev + 1) % predictions.length);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : predictions.length - 1));
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      // Auto-populate immediately upon Enter or Tab
-      const target = selectedIndex >= 0 ? predictions[selectedIndex] : predictions[0];
-      if (target) {
-        if (e.key === 'Enter') e.preventDefault();
-        handleSelectPrediction(target);
-      }
+      setHighlightedIndex((prev) => (prev - 1 + predictions.length) % predictions.length);
+    } else if (e.key === 'Enter' && predictions[highlightedIndex]) {
+      e.preventDefault();
+      handleSelect(predictions[highlightedIndex]);
     } else if (e.key === 'Escape') {
       setIsOpen(false);
     }
   };
 
-  // When input is blurred, if there is a matching prediction, auto-populate right away
-  const handleBlur = () => {
-    // Delay slightly to allow click event to register
-    setTimeout(() => {
-      if (predictions.length > 0 && selectedIndex >= 0) {
-        const target = predictions[selectedIndex];
-        if (target && value.length > 3) {
-          handleSelectPrediction(target);
-        }
-      }
-      setIsOpen(false);
-    }, 200);
-  };
+  const isDark = theme === 'dark';
 
   return (
-    <div ref={containerRef} className="relative w-full">
-      <div className="relative">
-        <MapPin className="w-4 h-4 text-pink-600 absolute left-3 top-3 pointer-events-none" />
+    <div ref={wrapperRef} className="relative w-full">
+      <div className="relative flex items-center">
         <input
           id={id}
+          name={name}
           type="text"
+          autoComplete="street-address"
           value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          onFocus={() => {
+            const list = buildInstantLocalPredictions(value);
+            setPredictions(list);
+            setHighlightedIndex(0);
             setIsOpen(true);
           }}
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          onFocus={() => {
-            if (predictions.length > 0) {
-              setIsOpen(true);
-            } else if (!value || value.trim().length === 0) {
-              // Show top Edmonton corridors immediately on focus
-              const initialDefaults = EDMONTON_INSTANT_CORRIDORS.slice(0, 5).map((s, idx) => ({
-                description: s,
-                placeId: `default-${idx}`,
-                mainText: s.split(',')[0],
-                secondaryText: s.split(',').slice(1).join(',').trim(),
-              }));
-              setPredictions(initialDefaults);
-              setIsOpen(true);
-              setSelectedIndex(0);
-            }
-          }}
-          required={required}
-          autoFocus={autoFocus}
+          onBlur={onBlur}
           placeholder={placeholder}
-          autoComplete="off"
-          className={`w-full pl-9 pr-9 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 font-medium ${className}`}
+          required={required}
+          disabled={disabled}
+          className={`w-full pr-16 ${className}`}
         />
-        {isLoading && (
-          <div className="absolute right-3 top-3 pointer-events-none">
-            <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
-          </div>
-        )}
-      </div>
-
-      {/* Autocomplete Dropdown with Instant Auto-Fill */}
-      {isOpen && predictions.length > 0 && (
-        <ul
-          role="listbox"
-          className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl divide-y divide-slate-100 text-xs animate-fadeIn"
-        >
-          {predictions.map((p, idx) => (
-            <li
-              key={p.placeId || idx}
-              role="option"
-              aria-selected={selectedIndex === idx}
-              onMouseDown={(e) => {
-                e.preventDefault(); // Prevents input blur before select executes
-                handleSelectPrediction(p);
+        <div className="absolute right-3 flex items-center gap-1.5">
+          {value && showClearButton && !disabled && (
+            <button
+              type="button"
+              onClick={() => {
+                onChange('', undefined);
+                setPredictions(buildInstantLocalPredictions(''));
+                setIsOpen(true);
               }}
-              onClick={() => handleSelectPrediction(p)}
-              className={`p-2.5 cursor-pointer flex items-start gap-2.5 transition-colors ${
-                selectedIndex === idx ? 'bg-purple-100/90 text-purple-950 font-semibold' : 'hover:bg-purple-50/70 text-slate-800'
+              title="Clear address"
+              className={`p-1 rounded-full transition-colors ${
+                isDark
+                  ? 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                  : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
               }`}
             >
-              <MapPin className="w-3.5 h-3.5 text-pink-600 shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1">
-                <div className="font-bold text-slate-900 leading-snug truncate">
-                  {p.mainText}
-                </div>
-                {p.secondaryText && (
-                  <div className="text-[11px] text-slate-500 truncate">
-                    {p.secondaryText}
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {isLoading ? (
+            <Loader2 className={`w-4 h-4 animate-spin ${isDark ? 'text-pink-400' : 'text-pink-500'}`} />
+          ) : justAutoFilled || (value && value.trim().length > 6) ? (
+            <CheckCircle2 className={`w-4 h-4 ${isDark ? 'text-pink-400' : 'text-emerald-500'}`} />
+          ) : (
+            <MapPin className={`w-4 h-4 pointer-events-none ${isDark ? 'text-pink-500/80' : 'text-slate-400'}`} />
+          )}
+        </div>
+      </div>
+
+      {isOpen && predictions.length > 0 && (
+        <div
+          className={`absolute z-[120] w-full mt-1.5 rounded-2xl shadow-2xl border overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150 ${
+            isDark
+              ? 'bg-zinc-950/98 border-pink-500/40 shadow-[0_12px_40px_rgba(236,72,153,0.28)]'
+              : 'bg-white border-slate-200 shadow-xl'
+          }`}
+        >
+          <div
+            className={`px-3.5 py-2 border-b flex items-center justify-between ${
+              isDark ? 'bg-zinc-900/90 border-zinc-800' : 'bg-slate-50 border-slate-100'
+            }`}
+          >
+            <span
+              className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${
+                isDark ? 'text-pink-400' : 'text-slate-500'
+              }`}
+            >
+              <Sparkles className="w-3 h-3 text-pink-500" />
+              {value.trim() ? 'Instant Address Auto-Fill (Click or Press Enter)' : 'Popular Edmonton & Area Corridors'}
+            </span>
+            <span className={`text-[9px] font-bold ${isDark ? 'text-zinc-500' : 'text-slate-400'}`}>
+              ↑↓ Navigate • Enter
+            </span>
+          </div>
+          <ul className="max-h-64 overflow-y-auto divide-y divide-slate-100/10">
+            {predictions.map((prediction, idx) => {
+              const isHighlighted = idx === highlightedIndex;
+              return (
+                <li
+                  key={prediction.place_id}
+                  onMouseEnter={() => setHighlightedIndex(idx)}
+                  onMouseDown={(e) => {
+                    // Use onMouseDown so selection triggers before input onBlur
+                    e.preventDefault();
+                    handleSelect(prediction);
+                  }}
+                  className={`px-4 py-2.5 cursor-pointer transition-colors flex items-start gap-3 ${
+                    isDark
+                      ? isHighlighted
+                        ? 'bg-pink-500/20 text-white'
+                        : 'hover:bg-zinc-900 text-zinc-200'
+                      : isHighlighted
+                      ? 'bg-pink-50 text-slate-900'
+                      : 'hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <Navigation
+                    className={`w-4 h-4 mt-0.5 shrink-0 ${
+                      isHighlighted ? 'text-pink-500' : isDark ? 'text-zinc-500' : 'text-slate-400'
+                    }`}
+                  />
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`text-sm font-black truncate ${
+                          isDark ? 'text-white' : 'text-slate-900'
+                        }`}
+                      >
+                        {prediction.main_text}
+                      </span>
+                      {prediction.tag && (
+                        <span
+                          className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md shrink-0 ${
+                            isDark
+                              ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
+                              : 'bg-pink-50 text-pink-700 border border-pink-200'
+                          }`}
+                        >
+                          {prediction.tag}
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      className={`text-xs truncate ${
+                        isDark ? 'text-zinc-400' : 'text-slate-500'
+                      }`}
+                    >
+                      {prediction.secondary_text}
+                    </span>
                   </div>
-                )}
-              </div>
-              <div className="flex items-center gap-1 shrink-0 ml-auto mt-0.5 text-[10px] text-purple-700 font-bold bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
-                <span>Auto-Fill</span>
-                <ArrowRight className="w-3 h-3 text-purple-600" />
-              </div>
-            </li>
-          ))}
-        </ul>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
     </div>
   );

@@ -2429,6 +2429,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                 <div className={`flex-1 rounded-xl ${voiceCapturedFields.address ? 'ring-2 ring-[#00ff66]' : ''}`}>
                   <AddressAutocompleteInput
                     value={serviceAddress}
+                    theme="dark"
                     onChange={(val) => {
                       setServiceAddress(val);
                       liveValuesRef.current.address = val;
@@ -2437,10 +2438,36 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                       const full = pred.description || pred.mainText;
                       setServiceAddress(full);
                       liveValuesRef.current.address = full;
+                      triggerFieldHighlight('address', full.split(',')[0]);
+                      const lowerDesc = full.toLowerCase();
+                      if (lowerDesc.includes('st. albert') || lowerDesc.includes('st albert')) {
+                        setCity('St. Albert');
+                        liveValuesRef.current.city = 'St. Albert';
+                        triggerFieldHighlight('city', 'St. Albert');
+                      } else if (lowerDesc.includes('sherwood park')) {
+                        setCity('Sherwood Park');
+                        liveValuesRef.current.city = 'Sherwood Park';
+                        triggerFieldHighlight('city', 'Sherwood Park');
+                      } else if (lowerDesc.includes('leduc')) {
+                        setCity('Leduc');
+                        liveValuesRef.current.city = 'Leduc';
+                        triggerFieldHighlight('city', 'Leduc');
+                      } else if (lowerDesc.includes('spruce grove')) {
+                        setCity('Spruce Grove');
+                        liveValuesRef.current.city = 'Spruce Grove';
+                        triggerFieldHighlight('city', 'Spruce Grove');
+                      } else if (lowerDesc.includes('edmonton')) {
+                        setCity('Edmonton');
+                        liveValuesRef.current.city = 'Edmonton';
+                      }
                       geocodeAddressOnQuickMap(full);
                     }}
                     placeholder="Start typing street address (e.g. 7221 Chivers Place SW)..."
-                    className="text-xs"
+                    className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold placeholder-slate-500 focus:outline-none transition-all ${
+                      voiceCapturedFields.address
+                        ? 'bg-[#091f14] border-2 border-[#00ff66] text-[#6bffa3] focus:border-[#00ff66]'
+                        : 'bg-[#171b29] border border-slate-700/80 text-white focus:border-pink-500'
+                    }`}
                   />
                 </div>
                 <button

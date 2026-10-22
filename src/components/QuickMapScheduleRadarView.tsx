@@ -29,6 +29,7 @@ import { Technician } from '../types/dispatch';
 import { ScheduledJobItem, getEdmontonToday, getCleanerColor } from '../data/jobberCalendarData';
 import { JobberQuote } from '../services/jobberSyncModules';
 import { forwardGeocode, reverseGeocode, calculateDistanceKm, calculateDriveEstimates } from '../services/geocodingService';
+import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 
 export interface DroppedRadarPin {
   id: string;
@@ -217,6 +218,8 @@ export const QuickMapScheduleRadarView: React.FC<QuickMapScheduleRadarViewProps>
   >('ALL');
   const [showRadarRings, setShowRadarRings] = useState<boolean>(true);
   const [showCleanerLines, setShowCleanerLines] = useState<boolean>(true);
+  const [selectedSingleHubTechId, setSelectedSingleHubTechId] = useState<string>('ALL'); // 'ALL' | 'OFF' | tech.id
+  const [selectedSingleLiveTechId, setSelectedSingleLiveTechId] = useState<string>('ALL'); // 'ALL' | 'OFF' | tech.id
   const [wheelZoomEnabled, setWheelZoomEnabled] = useState<boolean>(mode === 'FULL_PAGE');
   const [inspectorTab, setInspectorTab] = useState<
     'CLEANERS_AND_HUBS' | 'DAY_SCHEDULE' | 'LEADS_QUOTES' | 'DROPPED_PINS'
@@ -943,20 +946,21 @@ export const QuickMapScheduleRadarView: React.FC<QuickMapScheduleRadarViewProps>
                 )}
               </div>
 
-              {/* Quick Add Any New Pin by Address Search */}
+              {/* Quick Add Any New Pin by Address Search with Real-Time Autocomplete */}
               <div className="flex items-center gap-1.5 flex-1 max-w-md">
-                <input
-                  type="text"
-                  value={newPinSearchInput}
-                  onChange={(e) => setNewPinSearchInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && newPinSearchInput.trim()) {
-                      handleAddPin(newPinSearchInput.trim());
-                    }
-                  }}
-                  placeholder={`Type an address to drop as Pin #${pins.length + 1}...`}
-                  className="w-full px-3 py-1.5 rounded-xl bg-white border border-sky-300 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
+                <div className="flex-1">
+                  <AddressAutocompleteInput
+                    value={newPinSearchInput}
+                    onChange={(val) => setNewPinSearchInput(val)}
+                    onSelect={(pred) => {
+                      const addr = pred.description || pred.mainText;
+                      setNewPinSearchInput(addr);
+                      handleAddPin(addr);
+                    }}
+                    placeholder={`Type an address to drop as Pin #${pins.length + 1}...`}
+                    className="w-full px-3 py-1.5 rounded-xl bg-white border border-sky-300 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={() => handleAddPin(newPinSearchInput.trim() || undefined)}
@@ -1071,23 +1075,44 @@ export const QuickMapScheduleRadarView: React.FC<QuickMapScheduleRadarViewProps>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={pin.address}
-                        onChange={(e) => {
-                          const next = [...pins];
-                          next[idx] = { ...next[idx], address: e.target.value };
-                          setPins(next);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleGeocodePinAtIndex(idx);
-                          }
-                        }}
-                        placeholder={`Enter Edmonton street address for Pin ${idx + 1}...`}
-                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-300 text-xs font-bold text-slate-900 focus:outline-none focus:bg-white focus:border-sky-500"
-                      />
+                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex-1">
+                        <AddressAutocompleteInput
+                          value={pin.address}
+                          onChange={(val) => {
+                            const next = [...pins];
+                            next[idx] = { ...next[idx], address: val };
+                            setPins(next);
+                          }}
+                          onSelect={async (pred) => {
+                            const fullAddr = pred.description || pred.mainText;
+                            const next = [...pins];
+                            next[idx] = { ...next[idx], address: fullAddr };
+                            setPins(next);
+                            setIsGeocodingPin(true);
+                            try {
+                              const geo = await forwardGeocode(fullAddr);
+                              const updated = [...pins];
+                              updated[idx] = {
+                                ...updated[idx],
+                                address: geo.formattedAddress || fullAddr,
+                                lat: geo.lat,
+                                lng: geo.lng,
+                              };
+                              setPins(updated);
+                              setActivePinIndex(idx);
+                              setMapCenter({ lat: geo.lat, lng: geo.lng });
+                              setMapZoom((z) => Math.max(z, 15));
+                            } catch {
+                              // keep
+                            } finally {
+                              setIsGeocodingPin(false);
+                            }
+                          }}
+                          placeholder={`Enter Edmonton street address for Pin ${idx + 1}...`}
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-300 text-xs font-bold text-slate-900 focus:outline-none focus:bg-white focus:border-sky-500"
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -1304,6 +1329,72 @@ export const QuickMapScheduleRadarView: React.FC<QuickMapScheduleRadarViewProps>
                   {tab.label}
                 </button>
               ))}
+
+              {/* All 15 Hubs vs Single Hub Selector */}
+              <select
+                value={selectedSingleHubTechId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedSingleHubTechId(val);
+                  if (val !== 'ALL' && val !== 'OFF') {
+                    const rc = rankedCleaners.find((c) => c.tech.id === val);
+                    if (rc) {
+                      setMapCenter({ lat: rc.hubLat, lng: rc.hubLng });
+                      setMapZoom(14);
+                    }
+                  }
+                }}
+                className="px-2.5 py-1 rounded-xl text-[11px] font-black bg-purple-100 text-purple-900 border border-purple-300 cursor-pointer"
+                title="Show All 15 Cleaners' Home Hubs, Just 1 Cleaner's Home Hub, or Hide Home Hubs"
+              >
+                <option value="ALL">🏠 All {technicians.length} Home Hubs (ON)</option>
+                <option value="OFF">🚫 Hide Home Hubs (OFF)</option>
+                {rankedCleaners.map((rc) => (
+                  <option key={`qmap-hub-${rc.tech.id}`} value={rc.tech.id}>
+                    🏠 Just 1 Hub: {rc.tech.name} ({rc.hubDistKm} km)
+                  </option>
+                ))}
+              </select>
+
+              {/* All 15 Live Vans vs Single Live Van Selector */}
+              <select
+                value={selectedSingleLiveTechId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedSingleLiveTechId(val);
+                  if (val !== 'ALL' && val !== 'OFF') {
+                    const rc = rankedCleaners.find((c) => c.tech.id === val);
+                    if (rc) {
+                      setMapCenter({ lat: rc.tech.currentLocation.lat, lng: rc.tech.currentLocation.lng });
+                      setMapZoom(14);
+                    }
+                  }
+                }}
+                className="px-2.5 py-1 rounded-xl text-[11px] font-black bg-pink-100 text-pink-900 border border-pink-300 cursor-pointer"
+                title="Show All 15 Live Van Locations, Just 1 Live Van, or Hide Live Vans"
+              >
+                <option value="ALL">🚐 All {technicians.length} Live Vans (ON)</option>
+                <option value="OFF">🚫 Hide Live Vans (OFF)</option>
+                {rankedCleaners.map((rc) => {
+                  const liveDist = activePin
+                    ? Math.round(
+                        calculateDriveEstimates(
+                          calculateDistanceKm(
+                            activePin.lat,
+                            activePin.lng,
+                            rc.tech.currentLocation.lat,
+                            rc.tech.currentLocation.lng
+                          )
+                        ).drivingDistanceKm * 10
+                      ) / 10
+                    : 0;
+                  return (
+                    <option key={`qmap-live-${rc.tech.id}`} value={rc.tech.id}>
+                      🚐 Just 1 Live: {rc.tech.name} ({liveDist} km)
+                    </option>
+                  );
+                })}
+              </select>
             </div>
 
             {/* Map Tile Style Switcher (Detailed Streets, Voyager Retina, Satellite, Google Embed) */}
@@ -1561,9 +1652,12 @@ export const QuickMapScheduleRadarView: React.FC<QuickMapScheduleRadarViewProps>
                     );
                   })}
 
-                {/* 15 Cleaner Home Hub Pins */}
+                {/* 15 Cleaner Home Hub Pins (Cleaners' Home Addresses) */}
                 {showHubs &&
-                  rankedCleaners.map((rc, idx) => {
+                  selectedSingleHubTechId !== 'OFF' &&
+                  rankedCleaners
+                    .filter((rc) => selectedSingleHubTechId === 'ALL' || rc.tech.id === selectedSingleHubTechId)
+                    .map((rc, idx) => {
                     const pos = projectToViewportPx(rc.hubLat, rc.hubLng);
                     if (
                       pos.x < -80 ||
@@ -1612,11 +1706,74 @@ export const QuickMapScheduleRadarView: React.FC<QuickMapScheduleRadarViewProps>
                           className="w-5 h-5 rounded-lg border-2 border-white shadow-md flex items-center justify-center text-white text-[8px] font-black"
                           style={{ backgroundColor: rc.tech.color || '#0284C7' }}
                         >
-                          H
+                          🏠
                         </div>
                       </div>
                     );
                   })}
+
+                {/* 15 Cleaner Live Van Locations */}
+                {showHubs &&
+                  selectedSingleLiveTechId !== 'OFF' &&
+                  rankedCleaners
+                    .filter((rc) => selectedSingleLiveTechId === 'ALL' || rc.tech.id === selectedSingleLiveTechId)
+                    .map((rc) => {
+                      const liveLat = rc.tech.currentLocation.lat;
+                      const liveLng = rc.tech.currentLocation.lng;
+                      const pos = projectToViewportPx(liveLat, liveLng);
+                      if (
+                        pos.x < -80 ||
+                        pos.x > viewportSize.width + 80 ||
+                        pos.y < -80 ||
+                        pos.y > viewportSize.height + 80
+                      ) {
+                        return null;
+                      }
+                      const liveDistKm = activePin
+                        ? Math.round(
+                            calculateDriveEstimates(
+                              calculateDistanceKm(activePin.lat, activePin.lng, liveLat, liveLng)
+                            ).drivingDistanceKm * 10
+                          ) / 10
+                        : 0;
+                      return (
+                        <div
+                          key={`live-van-marker-${rc.tech.id}`}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePinDirectoryItem(
+                              {
+                                title: `${rc.tech.name} Live Van`,
+                                subtitle: `${rc.tech.vanNumber} • ${liveDistKm} km`,
+                                address: rc.tech.currentLocation.address || rc.hubAddr,
+                                phone: rc.tech.phone,
+                                lat: liveLat,
+                                lng: liveLng,
+                                type: 'HUB',
+                              },
+                              e.shiftKey || mapClickBehavior === 'DROP_NEW_PIN'
+                            );
+                          }}
+                          style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
+                          className="absolute -translate-x-1/2 -translate-y-1/2 z-15 flex flex-col items-center cursor-pointer group"
+                          title={`${rc.tech.name} Live Van: ${rc.tech.currentLocation.address} (${liveDistKm} km) — Click to pin`}
+                        >
+                          <div className="px-1.5 py-0.5 rounded-full text-[9px] font-black shadow border bg-slate-900/95 text-white border-pink-400 whitespace-nowrap mb-0.5 flex items-center gap-1 transition-transform group-hover:scale-110">
+                            <span>🚐 {rc.tech.name.split(' ')[0]}</span>
+                            <span className="font-mono text-[8px] px-1 rounded bg-pink-500/30 text-pink-200">
+                              {liveDistKm}km
+                            </span>
+                          </div>
+                          <div
+                            className="w-5 h-5 rounded-full border-2 border-white shadow-md flex items-center justify-center text-white text-[9px] font-black"
+                            style={{ backgroundColor: rc.tech.color || '#EC4899' }}
+                          >
+                            🚐
+                          </div>
+                        </div>
+                      );
+                    })}
 
                 {/* Scheduled Visits on Selected Date */}
                 {showScheduleVisits &&

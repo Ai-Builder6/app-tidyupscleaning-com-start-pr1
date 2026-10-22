@@ -33,7 +33,8 @@ import {
   PhoneCall,
   UserCheck,
   Edit2,
-  Route
+  Route,
+  Home
 } from 'lucide-react';
 import { 
   ScheduledJobItem, 
@@ -43,6 +44,7 @@ import {
   getEdmontonToday
 } from '../data/jobberCalendarData';
 import { VanHubEditModal } from './VanHubEditModal';
+import { AddressAutocompleteInput, estimateEdmontonGridCoords } from './AddressAutocompleteInput';
 
 interface TerritoryMapProps {
   technicians: Technician[];
@@ -562,12 +564,32 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     setShowScheduleDrawer(true);
   };
 
-  // 2-Address Route & Distance Comparison Tool + Closest Cleaner Distance Finder on Map
+  // 2-Address Route & Distance Comparison Tool + Caller Pin Drop & Hub/Live/Same-Day Distance Finder
   const [showTwoAddressPanel, setShowTwoAddressPanel] = useState<boolean>(false);
   const [showClosestCleanersPanel, setShowClosestCleanersPanel] = useState<boolean>(false);
-  const [radarSearchAddress, setRadarSearchAddress] = useState<string>('10405 Jasper Ave NW, Edmonton, AB');
+  const [radarSearchAddress, setRadarSearchAddress] = useState<string>('10420 Jasper Ave NW, Edmonton, AB');
+  const [droppedPinCoordsOverride, setDroppedPinCoordsOverride] = useState<{ lat: number; lng: number } | null>(null);
+  const [isClickToDropPinEnabled, setIsClickToDropPinEnabled] = useState<boolean>(false);
+  const [pinDistanceSourceMode, setPinDistanceSourceMode] = useState<'HOME_HUBS' | 'LIVE_VANS' | 'SAME_DAY_JOB' | 'BEST_COMBINED'>('HOME_HUBS');
+  const [hubFilterTechId, setHubFilterTechId] = useState<string>('ALL');
+  const [liveVanFilterTechId, setLiveVanFilterTechId] = useState<string>('ALL');
+  const [selectedSameDayJobOriginId, setSelectedSameDayJobOriginId] = useState<string>('');
   const [addressAInput, setAddressAInput] = useState<string>('10420 103 Ave NW, Edmonton, AB');
   const [addressBInput, setAddressBInput] = useState<string>('5230 Windermere Blvd SW, Edmonton, AB');
+
+  // Visible Cleaners' Home Hubs (All 15 or Just 1 Selected Cleaner Hub)
+  const visibleHomeHubTechs = (() => {
+    if (!showDepots || hubFilterTechId === 'NONE') return [];
+    if (hubFilterTechId === 'ALL') return technicians;
+    return technicians.filter((t) => t.id === hubFilterTechId);
+  })();
+
+  // Visible Cleaners' Live Van Locations (All 15 or Just 1 Selected Cleaner Live Van)
+  const visibleLiveVanTechs = (() => {
+    if (!showVehicles || liveVanFilterTechId === 'NONE') return [];
+    if (liveVanFilterTechId === 'ALL') return technicians;
+    return technicians.filter((t) => t.id === liveVanFilterTechId);
+  })();
 
   const resolveEdmontonAddressCoords = (addr: string, fallbackLat: number, fallbackLng: number) => {
     const clean = (addr || '').trim();
@@ -588,7 +610,10 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     );
     if (matchedTicket) return { lat: matchedTicket.location.lat, lng: matchedTicket.location.lng };
 
-    if (lower.includes('windermere') || lower.includes('amblesside')) return { lat: 53.4312, lng: -113.6054 };
+    const gridEst = estimateEdmontonGridCoords(clean);
+    if (gridEst) return gridEst;
+
+    if (lower.includes('windermere') || lower.includes('ambleside')) return { lat: 53.4312, lng: -113.6054 };
     if (lower.includes('summerside')) return { lat: 53.4148, lng: -113.4625 };
     if (lower.includes('st. albert') || lower.includes('st albert')) return { lat: 53.6305, lng: -113.6256 };
     if (lower.includes('sherwood')) return { lat: 53.5168, lng: -113.3187 };
@@ -611,7 +636,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
 
   const coordsA = resolveEdmontonAddressCoords(addressAInput, 53.5461, -113.4938);
   const coordsB = resolveEdmontonAddressCoords(addressBInput, 53.4312, -113.6054);
-  const radarTargetCoords = resolveEdmontonAddressCoords(radarSearchAddress, 53.5412, -113.4988);
+  const radarTargetCoords = droppedPinCoordsOverride || resolveEdmontonAddressCoords(radarSearchAddress, 53.5409, -113.4994);
 
   const calcRoadDistKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
     const R = 6371;
@@ -700,14 +725,47 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     return activeDateForCleaners;
   })();
 
-  // Ranked cleaners by distance to radarSearchAddress (accounting for both their Home Hub and any Scheduled Job on activeDateForCleaners)
+  // Jobs scheduled on the currently inspected date (or all jobs if none on that date) for Same-Day Job -> Caller Pin measurement
+  const jobsOnActiveDate = (() => {
+    const dayJobs = (scheduledJobs || []).filter((j) => String(j.startAt || '').slice(0, 10) === activeDateForCleaners);
+    return dayJobs.length > 0 ? dayJobs : horizonFilteredScheduledJobs;
+  })();
+
+  const selectedSameDayOriginJob = (scheduledJobs || []).find((j) => j.id === selectedSameDayJobOriginId) || null;
+  const sameDayOriginToPinDistKm = selectedSameDayOriginJob
+    ? calcRoadDistKm(selectedSameDayOriginJob.lat, selectedSameDayOriginJob.lng, radarTargetCoords.lat, radarTargetCoords.lng)
+    : null;
+  const sameDayOriginToPinMins = sameDayOriginToPinDistKm !== null ? Math.max(4, Math.round(sameDayOriginToPinDistKm * 1.65 + 4)) : null;
+
+  // Ranked cleaners by distance to Dropped Caller Pin (radarTargetCoords)
+  // Supports measuring from:
+  // 1. HOME_HUBS: Cleaners' Home Hubs (🏠 tech.depotLocation) — ideal when caller wants a future date
+  // 2. LIVE_VANS: Cleaners' Live Van Locations (🚐 tech.currentLocation) — ideal for right-now dispatch
+  // 3. SAME_DAY_JOB: From a Same-Day Scheduled Job (📅) to the Dropped Caller Pin
+  // 4. BEST_COMBINED: Closest of Home Hub, Live Van, or Day's Scheduled Job
   const rankedCleanersToTarget = (() => {
     return technicians
+      .filter((tech) => {
+        if (pinDistanceSourceMode === 'HOME_HUBS' && hubFilterTechId !== 'ALL' && hubFilterTechId !== 'NONE') {
+          return tech.id === hubFilterTechId;
+        }
+        if (pinDistanceSourceMode === 'LIVE_VANS' && liveVanFilterTechId !== 'ALL' && liveVanFilterTechId !== 'NONE') {
+          return tech.id === liveVanFilterTechId;
+        }
+        return true;
+      })
       .map((tech) => {
         const homeLat = tech.depotLocation?.lat || tech.currentLocation.lat;
         const homeLng = tech.depotLocation?.lng || tech.currentLocation.lng;
         const homeAddress = tech.depotLocation?.address || tech.homeAddress || tech.currentLocation.address;
         const homeDistKm = calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, homeLat, homeLng);
+        const homeMins = Math.max(4, Math.round(homeDistKm * 1.65 + 4));
+
+        const liveLat = tech.currentLocation.lat;
+        const liveLng = tech.currentLocation.lng;
+        const liveAddress = tech.currentLocation.address || homeAddress;
+        const liveDistKm = calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, liveLat, liveLng);
+        const liveMins = Math.max(4, Math.round(liveDistKm * 1.65 + 4));
 
         const techFirstName = tech.name.split(' ')[0].toLowerCase();
         const jobsForTechOnDay = (scheduledJobs || []).filter((j) => {
@@ -718,23 +776,79 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           );
         });
 
-        const firstJobOnDay = jobsForTechOnDay[0];
-        const jobDistKm = firstJobOnDay
-          ? calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, firstJobOnDay.lat, firstJobOnDay.lng)
+        const referenceJob = selectedSameDayOriginJob || jobsForTechOnDay[0] || null;
+        const jobDistKm = referenceJob
+          ? calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, referenceJob.lat, referenceJob.lng)
           : null;
+        const jobMins = jobDistKm !== null ? Math.max(4, Math.round(jobDistKm * 1.65 + 4)) : null;
 
-        const bestDistKm = jobDistKm !== null ? Math.min(homeDistKm, jobDistKm) : homeDistKm;
-        const bestMins = Math.max(4, Math.round(bestDistKm * 1.65 + 4));
-        const closestFrom = jobDistKm !== null && jobDistKm < homeDistKm ? `Job (${firstJobOnDay.clientName})` : 'Home Hub';
+        let activeDistKm = homeDistKm;
+        let activeMins = homeMins;
+        let closestFrom = '🏠 Home Hub';
+        let originCoords = { lat: homeLat, lng: homeLng };
+
+        if (pinDistanceSourceMode === 'HOME_HUBS') {
+          activeDistKm = homeDistKm;
+          activeMins = homeMins;
+          closestFrom = '🏠 Home Hub';
+          originCoords = { lat: homeLat, lng: homeLng };
+        } else if (pinDistanceSourceMode === 'LIVE_VANS') {
+          activeDistKm = liveDistKm;
+          activeMins = liveMins;
+          closestFrom = '🚐 Live Van';
+          originCoords = { lat: liveLat, lng: liveLng };
+        } else if (pinDistanceSourceMode === 'SAME_DAY_JOB') {
+          if (jobDistKm !== null && jobMins !== null && referenceJob) {
+            activeDistKm = jobDistKm;
+            activeMins = jobMins;
+            closestFrom = `📅 Job (${referenceJob.clientName})`;
+            originCoords = { lat: referenceJob.lat, lng: referenceJob.lng };
+          } else {
+            activeDistKm = homeDistKm;
+            activeMins = homeMins;
+            closestFrom = '🏠 Home Hub (No Job on Date)';
+            originCoords = { lat: homeLat, lng: homeLng };
+          }
+        } else {
+          // BEST_COMBINED
+          const candidates: { dist: number; mins: number; label: string; coords: { lat: number; lng: number } }[] = [
+            { dist: homeDistKm, mins: homeMins, label: '🏠 Home Hub', coords: { lat: homeLat, lng: homeLng } },
+            { dist: liveDistKm, mins: liveMins, label: '🚐 Live Van', coords: { lat: liveLat, lng: liveLng } },
+          ];
+          if (jobDistKm !== null && jobMins !== null && referenceJob) {
+            candidates.push({
+              dist: jobDistKm,
+              mins: jobMins,
+              label: `📅 Job (${referenceJob.clientName})`,
+              coords: { lat: referenceJob.lat, lng: referenceJob.lng },
+            });
+          }
+          candidates.sort((a, b) => a.dist - b.dist);
+          activeDistKm = candidates[0].dist;
+          activeMins = candidates[0].mins;
+          closestFrom = candidates[0].label;
+          originCoords = candidates[0].coords;
+        }
 
         return {
           tech,
           homeAddress,
+          homeLat,
+          homeLng,
           homeDistKm,
+          homeMins,
+          liveAddress,
+          liveLat,
+          liveLng,
+          liveDistKm,
+          liveMins,
           jobDistKm,
-          bestDistKm,
-          bestMins,
+          jobMins,
+          referenceJob,
+          bestDistKm: activeDistKm,
+          bestMins: activeMins,
           closestFrom,
+          originCoords,
           jobsOnDay: jobsForTechOnDay,
         };
       })
@@ -991,25 +1105,25 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             <button
               onClick={() => setShowVehicles(!showVehicles)}
               className={`min-h-[38px] px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
-                showVehicles ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:text-slate-900'
+                showVehicles ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="Toggle 15 Cleaning Techs"
-              aria-label="Toggle 15 cleaning techs"
+              title="Toggle Cleaners' Live Van Locations (Cars/Vans)"
+              aria-label="Toggle live van locations"
             >
               <Truck className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden sm:inline">15 Techs</span>
+              <span className="hidden sm:inline">Live Vans ({visibleLiveVanTechs.length})</span>
             </button>
 
             <button
               onClick={() => setShowDepots(!showDepots)}
               className={`min-h-[38px] px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
-                showDepots ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:text-slate-900'
+                showDepots ? 'bg-emerald-50 text-emerald-800 font-bold' : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="Toggle Depots"
-              aria-label="Toggle regional depots"
+              title="Toggle Cleaners' Home Addresses (Home Hubs)"
+              aria-label="Toggle cleaner home hubs"
             >
-              <Building2 className="w-3.5 h-3.5 text-indigo-600" />
-              <span className="hidden sm:inline">Hubs</span>
+              <Home className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden sm:inline">Home Hubs ({visibleHomeHubTechs.length})</span>
             </button>
 
             <button
@@ -1113,8 +1227,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               </button>
             </div>
 
-            {/* Right Controls: Layer Toggles + Collapse Button */}
-            <div className="flex items-center bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 p-1 shadow-md pointer-events-auto shrink-0 gap-0.5">
+            {/* Right Controls: Jobs + Live Vans (All/1/Off) + Home Hubs (All/1/Off) + Map Type */}
+            <div className="flex items-center bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 p-1 shadow-md pointer-events-auto shrink-0 gap-1 flex-wrap">
               <button
                 id="toggle-scheduled-jobs-layer"
                 onClick={() => setShowScheduledJobs(!showScheduledJobs)}
@@ -1131,33 +1245,87 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 <span className="hidden sm:inline">Jobs ({scheduledJobs.length})</span>
               </button>
 
-              <button
-                id="toggle-vehicles-layer"
-                onClick={() => setShowVehicles(!showVehicles)}
-                aria-pressed={showVehicles}
-                aria-label="Toggle display of 15 cleaning techs on map"
-                className={`min-h-[38px] px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
-                  showVehicles ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Toggle 15 Cleaning Techs"
-              >
-                <Truck className="w-4 h-4 text-blue-600" aria-hidden="true" />
-                <span className="hidden sm:inline">15 Techs</span>
-              </button>
+              {/* LIVE VANS (CARS/VANS = LIVE LOCATIONS) ON/OFF + ALL vs 1 VAN */}
+              <div className={`flex items-center rounded-lg border transition-colors ${showVehicles ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
+                <button
+                  id="toggle-vehicles-layer"
+                  onClick={() => setShowVehicles(!showVehicles)}
+                  aria-pressed={showVehicles}
+                  aria-label="Toggle display of live van locations on map"
+                  className={`min-h-[36px] px-2 py-1 text-xs font-bold flex items-center gap-1 cursor-pointer ${
+                    showVehicles ? 'text-blue-800' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title="Turn Live Van Locations ON or OFF"
+                >
+                  <Truck className="w-3.5 h-3.5 text-blue-600" aria-hidden="true" />
+                  <span className="hidden md:inline">🚐 Live Vans</span>
+                </button>
+                {showVehicles && (
+                  <select
+                    value={liveVanFilterTechId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'NONE') {
+                        setShowVehicles(false);
+                      } else {
+                        setShowVehicles(true);
+                        setLiveVanFilterTechId(val);
+                      }
+                    }}
+                    className="bg-white/90 border-l border-blue-200 text-[10px] font-black text-blue-900 px-1.5 py-1 rounded-r-lg focus:outline-none cursor-pointer max-w-[115px]"
+                    title="Show All 15 Live Vans or Just 1 Cleaner's Live Van"
+                  >
+                    <option value="ALL">All 15 Live</option>
+                    {technicians.map((t) => (
+                      <option key={`live-opt-${t.id}`} value={t.id}>
+                        Only {t.name.split(' ')[0]}
+                      </option>
+                    ))}
+                    <option value="NONE">Hide Live Vans</option>
+                  </select>
+                )}
+              </div>
 
-              <button
-                id="toggle-depots-layer"
-                onClick={() => setShowDepots(!showDepots)}
-                aria-pressed={showDepots}
-                aria-label="Toggle display of regional logistics hubs"
-                className={`min-h-[38px] px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
-                  showDepots ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title="Toggle Regional Depots"
-              >
-                <Building2 className="w-4 h-4 text-indigo-600" aria-hidden="true" />
-                <span className="hidden sm:inline">Hubs</span>
-              </button>
+              {/* HOME HUBS (HUBS = CLEANERS' HOMES) ON/OFF + ALL vs 1 HUB */}
+              <div className={`flex items-center rounded-lg border transition-colors ${showDepots ? 'bg-emerald-50 border-emerald-300' : 'bg-slate-50 border-slate-200'}`}>
+                <button
+                  id="toggle-depots-layer"
+                  onClick={() => setShowDepots(!showDepots)}
+                  aria-pressed={showDepots}
+                  aria-label="Toggle display of cleaners' home hubs"
+                  className={`min-h-[36px] px-2 py-1 text-xs font-bold flex items-center gap-1 cursor-pointer ${
+                    showDepots ? 'text-emerald-900' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title="Turn Cleaners' Home Hubs ON or OFF"
+                >
+                  <Home className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
+                  <span className="hidden md:inline">🏠 Home Hubs</span>
+                </button>
+                {showDepots && (
+                  <select
+                    value={hubFilterTechId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'NONE') {
+                        setShowDepots(false);
+                      } else {
+                        setShowDepots(true);
+                        setHubFilterTechId(val);
+                      }
+                    }}
+                    className="bg-white/90 border-l border-emerald-200 text-[10px] font-black text-emerald-900 px-1.5 py-1 rounded-r-lg focus:outline-none cursor-pointer max-w-[115px]"
+                    title="Show All 15 Cleaner Home Hubs or Just 1 Cleaner's Home Hub"
+                  >
+                    <option value="ALL">All 15 Hubs</option>
+                    {technicians.map((t) => (
+                      <option key={`hub-opt-${t.id}`} value={t.id}>
+                        Only {t.name.split(' ')[0]}&apos;s Hub
+                      </option>
+                    ))}
+                    <option value="NONE">Hide Hubs</option>
+                  </select>
+                )}
+              </div>
 
               <button
                 id="toggle-maptype-layer"
@@ -1189,7 +1357,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           </div>
         )}
 
-        {/* Schedule Horizon, Any-Date Picker, Day-of-Week Selector & Closest Cleaner Radar Bar */}
+        {/* Schedule Horizon, Any-Date Picker, Day-of-Week Selector & Caller Pin Drop Radar Bar */}
         <div className="pointer-events-auto flex flex-col gap-1.5 bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 px-2.5 py-2 shadow-md self-start max-w-full">
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="flex items-center gap-1 pr-1.5 border-r border-slate-200 flex-wrap">
@@ -1294,21 +1462,40 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               </button>
             </div>
 
-            {/* Closest Cleaners to Any Address Toggle */}
+            {/* Caller Pin Drop & Hub / Live / Same-Day Job Distance Toggle */}
             <button
               type="button"
               onClick={() => setShowClosestCleanersPanel(!showClosestCleanersPanel)}
               className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer border ${
                 showClosestCleanersPanel
-                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
-                  : 'bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100'
+                  ? 'bg-pink-600 text-white border-pink-700 shadow-2xs'
+                  : 'bg-pink-50 text-pink-950 border-pink-300 hover:bg-pink-100'
               }`}
             >
-              <Compass className="w-3.5 h-3.5" />
+              <MapPin className="w-3.5 h-3.5" />
               <span>
-                Closest Cleaners to Address (#1: {rankedCleanersToTarget[0]?.tech.name.split(' ')[0]} •{' '}
+                📌 Drop Caller Pin • Hub/Live/Job Distance (#1: {rankedCleanersToTarget[0]?.tech.name.split(' ')[0]} •{' '}
                 {rankedCleanersToTarget[0]?.bestDistKm} km)
               </span>
+            </button>
+
+            {/* Click Map to Drop Pin Quick Toggle */}
+            <button
+              type="button"
+              onClick={() => {
+                const next = !isClickToDropPinEnabled;
+                setIsClickToDropPinEnabled(next);
+                if (next) setShowClosestCleanersPanel(true);
+              }}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer border ${
+                isClickToDropPinEnabled
+                  ? 'bg-rose-600 text-white border-rose-700 animate-pulse shadow-xs'
+                  : 'bg-white text-rose-700 border-rose-300 hover:bg-rose-50'
+              }`}
+              title="Click anywhere on the map to drop the caller's address pin and measure distance to all cleaner hubs or live vans"
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span>{isClickToDropPinEnabled ? '📍 Click Map Active (Tap Map)' : '📍 Tap Map to Drop Pin'}</span>
             </button>
 
             {/* 2-Address Picker Toggle */}
@@ -1380,102 +1567,338 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           )}
         </div>
 
-        {/* Expandable Closest Cleaners to Any Address & Date Radar Panel */}
+        {/* Expandable Caller Pin Drop & Cleaner Home Hubs / Live Vans / Same-Day Job Distance Panel */}
         {showClosestCleanersPanel && (
-          <div className="pointer-events-auto bg-white/98 backdrop-blur-md border-2 border-emerald-300 rounded-2xl p-3.5 shadow-2xl max-w-3xl w-full animate-fadeIn space-y-2.5">
+          <div className="pointer-events-auto bg-white/98 backdrop-blur-md border-2 border-pink-400 rounded-2xl p-3.5 shadow-2xl max-w-4xl w-full animate-fadeIn space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
               <div className="flex items-center gap-2">
-                <span className="p-1.5 rounded-lg bg-emerald-600 text-white">
-                  <Compass className="w-4 h-4" />
+                <span className="p-1.5 rounded-lg bg-pink-600 text-white shadow-xs">
+                  <MapPin className="w-4 h-4" />
                 </span>
                 <div>
-                  <h4 className="text-xs sm:text-sm font-black text-slate-900">
-                    Closest Cleaners &amp; Hubs Distance Finder • {formattedInspectDateLabel}
+                  <h4 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-2 flex-wrap">
+                    <span>📌 Caller Pin-Drop &amp; Distance Finder</span>
+                    <span className="px-2 py-0.5 rounded-full bg-pink-50 border border-pink-200 text-pink-800 text-[10px] font-extrabold">
+                      🏠 Hubs = Cleaners&apos; Homes • 🚐 Vans = Live Locations
+                    </span>
                   </h4>
-                  <p className="text-[10px] text-slate-500">
-                    Type any address or pick a scheduled job on {formattedInspectDateLabel} to see which cleaners are closest (from Home Hub or Day&apos;s Job)
+                  <p className="text-[10px] text-slate-600">
+                    Type caller&apos;s address (auto-completes) or click the map to drop a pin. Measure from <strong>Cleaners&apos; Home Hubs</strong> (for future dates), <strong>Live Vans</strong>, or a <strong>Same-Day Job</strong>.
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowClosestCleanersPanel(false)}
-                className="text-slate-400 hover:text-slate-700 font-bold text-xs px-2 py-1 rounded-lg hover:bg-slate-100 cursor-pointer"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setIsClickToDropPinEnabled(!isClickToDropPinEnabled)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black border cursor-pointer transition-all ${
+                    isClickToDropPinEnabled
+                      ? 'bg-rose-600 text-white border-rose-700 animate-pulse'
+                      : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
+                  }`}
+                >
+                  {isClickToDropPinEnabled ? '📍 Click Anywhere on Map to Move Pin' : '📍 Enable Click-Map Pin Drop'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowClosestCleanersPanel(false)}
+                  className="text-slate-400 hover:text-slate-700 font-bold text-xs px-2 py-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
+            {/* Row 1: Caller Address Auto-Complete Input + Same-Day Job Origin Selector */}
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
               <div className="sm:col-span-7">
-                <input
-                  type="text"
+                <label className="block text-[9.5px] font-black uppercase tracking-wider text-pink-700 mb-0.5">
+                  📍 Caller&apos;s Address Pin (Auto-Completes &amp; Auto-Fills):
+                </label>
+                <AddressAutocompleteInput
                   value={radarSearchAddress}
-                  onChange={(e) => setRadarSearchAddress(e.target.value)}
-                  placeholder="Type street address, postal code, or neighborhood..."
-                  className="w-full px-3 py-1.5 text-xs bg-emerald-50/50 border border-emerald-400 rounded-xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  onChange={(newAddr, coords) => {
+                    setRadarSearchAddress(newAddr);
+                    setDroppedPinCoordsOverride(coords || null);
+                  }}
+                  placeholder="Type caller street address, house #, or neighborhood..."
+                  className="px-3 py-1.5 text-xs bg-pink-50/50 border border-pink-400 rounded-xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-pink-500"
                 />
               </div>
               <div className="sm:col-span-5">
+                <label className="block text-[9.5px] font-black uppercase tracking-wider text-purple-800 mb-0.5">
+                  📅 Same-Day Job → Caller Pin ({formattedInspectDateLabel}):
+                </label>
                 <select
-                  value=""
+                  value={selectedSameDayJobOriginId}
                   onChange={(e) => {
-                    if (e.target.value) setRadarSearchAddress(e.target.value);
+                    const jobId = e.target.value;
+                    setSelectedSameDayJobOriginId(jobId);
+                    if (jobId) {
+                      setPinDistanceSourceMode('SAME_DAY_JOB');
+                    }
                   }}
-                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-purple-300 rounded-xl font-bold text-purple-950"
+                  className="w-full px-2.5 py-1.5 text-xs bg-purple-50/70 border border-purple-300 rounded-xl font-bold text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
-                  <option value="">Or pick a job on {formattedInspectDateLabel} ({horizonFilteredScheduledJobs.length})...</option>
-                  {(horizonFilteredScheduledJobs.length > 0 ? horizonFilteredScheduledJobs : scheduledJobs).map((j) => (
-                    <option key={`radar-j-${j.id}`} value={j.serviceAddress}>
-                      {j.startAt.slice(0, 10)} • {j.clientName} ({j.serviceAddress.split(',')[0]})
+                  <option value="">
+                    Auto: Each Cleaner&apos;s Job on {formattedInspectDateLabel} ({jobsOnActiveDate.length} jobs)...
+                  </option>
+                  {(jobsOnActiveDate.length > 0 ? jobsOnActiveDate : scheduledJobs).map((j) => (
+                    <option key={`same-day-origin-${j.id}`} value={j.id}>
+                      From {j.clientName} ({j.serviceAddress.split(',')[0]}) • {j.assignedCleaners.join(', ')}
                     </option>
                   ))}
                 </select>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 max-h-[230px] overflow-y-auto pr-1">
+            {/* If a specific Same-Day Job is selected, show direct Same-Day Job -> Caller Pin banner */}
+            {selectedSameDayOriginJob && sameDayOriginToPinDistKm !== null && (
+              <div className="bg-purple-900 text-white rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs shadow-sm">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-pink-500 text-white font-black text-[10px] uppercase">
+                    Same-Day Job → Caller Pin
+                  </span>
+                  <span className="font-bold">
+                    From <strong>{selectedSameDayOriginJob.clientName}</strong> ({selectedSameDayOriginJob.serviceAddress.split(',')[0]}) →{' '}
+                    <strong>{radarSearchAddress.split(',')[0] || 'Caller Pin'}</strong>
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-emerald-400 text-slate-950 font-mono font-black text-xs">
+                    {sameDayOriginToPinDistKm} km • ~{sameDayOriginToPinMins} mins drive
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSameDayJobOriginId('')}
+                    className="text-[10px] font-bold text-purple-200 hover:text-white underline cursor-pointer"
+                  >
+                    Clear Job Origin
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Row 2: Distance Source Mode Switcher + All/Single Hub & All/Single Live Van Toggles */}
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2">
+              {/* Measure Distance From Mode */}
+              <div className="flex items-center gap-1 flex-wrap">
+                <span className="text-[10px] font-black uppercase text-slate-600 mr-1">
+                  Measure Distance From:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinDistanceSourceMode('HOME_HUBS');
+                    setShowDepots(true);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all ${
+                    pinDistanceSourceMode === 'HOME_HUBS'
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'bg-white text-emerald-900 border border-emerald-200 hover:bg-emerald-50'
+                  }`}
+                  title="Measure how far the caller's pin is from Cleaners' Home Hubs (best when booking a future date)"
+                >
+                  <span>🏠 Cleaners&apos; Home Hubs</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinDistanceSourceMode('LIVE_VANS');
+                    setShowVehicles(true);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all ${
+                    pinDistanceSourceMode === 'LIVE_VANS'
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'bg-white text-blue-900 border border-blue-200 hover:bg-blue-50'
+                  }`}
+                  title="Measure how far the caller's pin is from Cleaners' Live Van Locations right now"
+                >
+                  <span>🚐 Live Van Locations</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinDistanceSourceMode('SAME_DAY_JOB');
+                    setShowScheduledJobs(true);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all ${
+                    pinDistanceSourceMode === 'SAME_DAY_JOB'
+                      ? 'bg-purple-600 text-white shadow-2xs'
+                      : 'bg-white text-purple-900 border border-purple-200 hover:bg-purple-50'
+                  }`}
+                  title="Measure how far the caller's pin is from a Same-Day Scheduled Job"
+                >
+                  <span>📅 Same-Day Job → Pin</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPinDistanceSourceMode('BEST_COMBINED')}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all ${
+                    pinDistanceSourceMode === 'BEST_COMBINED'
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>⚡ Compare All</span>
+                </button>
+              </div>
+
+              {/* Granular Map Visibility: All Hubs vs 1 Hub | All Live Vans vs 1 Live Van */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-0.5">
+                  <span className="text-[9.5px] font-black text-emerald-900">🏠 Hubs:</span>
+                  <select
+                    value={showDepots ? hubFilterTechId : 'NONE'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'NONE') {
+                        setShowDepots(false);
+                      } else {
+                        setShowDepots(true);
+                        setHubFilterTechId(val);
+                      }
+                    }}
+                    className="bg-transparent text-[10px] font-black text-emerald-950 focus:outline-none cursor-pointer"
+                  >
+                    <option value="ALL">Show All 15 Home Hubs</option>
+                    {technicians.map((t) => (
+                      <option key={`panel-hub-${t.id}`} value={t.id}>
+                        Just 1 Hub: {t.name}
+                      </option>
+                    ))}
+                    <option value="NONE">Turn Off Hubs</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-lg px-2 py-0.5">
+                  <span className="text-[9.5px] font-black text-blue-900">🚐 Live:</span>
+                  <select
+                    value={showVehicles ? liveVanFilterTechId : 'NONE'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'NONE') {
+                        setShowVehicles(false);
+                      } else {
+                        setShowVehicles(true);
+                        setLiveVanFilterTechId(val);
+                      }
+                    }}
+                    className="bg-transparent text-[10px] font-black text-blue-950 focus:outline-none cursor-pointer"
+                  >
+                    <option value="ALL">Show All 15 Live Vans</option>
+                    {technicians.map((t) => (
+                      <option key={`panel-live-${t.id}`} value={t.id}>
+                        Just 1 Live Van: {t.name}
+                      </option>
+                    ))}
+                    <option value="NONE">Turn Off Live Vans</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Row 3: Ranked Cleaners Distance Cards (Showing Home Hub Distance, Live Van Distance & Same-Day Job Distance) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 max-h-[245px] overflow-y-auto pr-1">
               {rankedCleanersToTarget.map((item, idx) => (
                 <div
                   key={item.tech.id}
                   onClick={() => {
                     onSelectTech(item.tech.id);
-                    setActiveInfoWindow({
-                      type: 'TECH',
-                      id: item.tech.id,
-                      position: { lat: item.tech.currentLocation.lat, lng: item.tech.currentLocation.lng },
-                    });
+                    if (pinDistanceSourceMode === 'HOME_HUBS') {
+                      setShowDepots(true);
+                      setActiveInfoWindow({
+                        type: 'DEPOT',
+                        id: item.tech.id,
+                        position: { lat: item.homeLat, lng: item.homeLng },
+                      });
+                    } else {
+                      setShowVehicles(true);
+                      setActiveInfoWindow({
+                        type: 'TECH',
+                        id: item.tech.id,
+                        position: { lat: item.tech.currentLocation.lat, lng: item.tech.currentLocation.lng },
+                      });
+                    }
                   }}
-                  className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-2 ${
+                  className={`p-2.5 rounded-xl border cursor-pointer transition-all flex flex-col justify-between gap-1.5 ${
                     idx === 0
-                      ? 'bg-emerald-50 border-emerald-400 ring-1 ring-emerald-300 shadow-xs'
+                      ? 'bg-emerald-50/90 border-emerald-500 ring-1 ring-emerald-300 shadow-xs'
                       : 'bg-slate-50 hover:bg-emerald-50/40 border-slate-200'
                   }`}
                 >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className="w-5 h-5 rounded-full text-white text-[10px] font-black flex items-center justify-center shrink-0"
-                        style={{ backgroundColor: item.tech.color || '#7C3AED' }}
-                      >
-                        #{idx + 1}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="w-5 h-5 rounded-full text-white text-[10px] font-black flex items-center justify-center shrink-0"
+                          style={{ backgroundColor: item.tech.color || '#7C3AED' }}
+                        >
+                          #{idx + 1}
+                        </span>
+                        <span className="text-xs font-black text-slate-900 truncate">{item.tech.name}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-700 font-semibold truncate mt-0.5" title={item.homeAddress}>
+                        🏠 Home Hub: {item.homeAddress.split(',')[0]}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-mono text-[10px] font-black block">
+                        {item.bestDistKm} km
                       </span>
-                      <span className="text-xs font-black text-slate-900 truncate">{item.tech.name}</span>
-                    </div>
-                    <div className="text-[10px] text-slate-600 truncate mt-0.5">
-                      🏠 Hub: {item.homeAddress}
-                    </div>
-                    <div className="text-[9.5px] font-bold text-purple-800 truncate">
-                      {item.jobsOnDay.length > 0
-                        ? `📅 ${item.jobsOnDay.length} job(s) on ${activeDateForCleaners.slice(5)} (${item.closestFrom})`
-                        : `✓ Free on ${activeDateForCleaners.slice(5)} (From Home Hub)`}
+                      <span className="text-[9.5px] font-mono text-slate-600 font-bold">~{item.bestMins} min</span>
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-mono text-[10px] font-black block">
-                      {item.bestDistKm} km
-                    </span>
-                    <span className="text-[9.5px] font-mono text-slate-600 font-bold">~{item.bestMins} min</span>
+
+                  {/* Side-by-side breakdown: Home Hub vs Live Van vs Same-Day Job + Quick Isolate Buttons */}
+                  <div className="pt-1.5 border-t border-slate-200/80 flex flex-col gap-1 text-[9.5px]">
+                    <div className="flex items-center justify-between gap-1 font-bold">
+                      <span className={pinDistanceSourceMode === 'HOME_HUBS' ? 'text-emerald-800 font-black' : 'text-slate-600'}>
+                        🏠 Hub: {item.homeDistKm} km (~{item.homeMins}m)
+                      </span>
+                      <span className={pinDistanceSourceMode === 'LIVE_VANS' ? 'text-blue-800 font-black' : 'text-slate-600'}>
+                        🚐 Live: {item.liveDistKm} km (~{item.liveMins}m)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-bold text-purple-800 truncate">
+                        {item.jobDistKm !== null && item.referenceJob
+                          ? `📅 From Job (${item.referenceJob.clientName.split(' ')[0]}): ${item.jobDistKm} km (~${item.jobMins}m)`
+                          : `✓ Free on ${activeDateForCleaners.slice(5)}`}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowDepots(true);
+                            setHubFilterTechId(hubFilterTechId === item.tech.id ? 'ALL' : item.tech.id);
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[8.5px] font-black border cursor-pointer ${
+                            showDepots && hubFilterTechId === item.tech.id
+                              ? 'bg-emerald-700 text-white border-emerald-800'
+                              : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                          }`}
+                          title="Show only this cleaner's Home Hub on map (click again for All 15)"
+                        >
+                          {showDepots && hubFilterTechId === item.tech.id ? 'All Hubs' : '1 Hub'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowVehicles(true);
+                            setLiveVanFilterTechId(liveVanFilterTechId === item.tech.id ? 'ALL' : item.tech.id);
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[8.5px] font-black border cursor-pointer ${
+                            showVehicles && liveVanFilterTechId === item.tech.id
+                              ? 'bg-blue-700 text-white border-blue-800'
+                              : 'bg-white text-blue-800 border-blue-300 hover:bg-blue-100'
+                          }`}
+                          title="Show only this cleaner's Live Van on map (click again for All 15)"
+                        >
+                          {showVehicles && liveVanFilterTechId === item.tech.id ? 'All Vans' : '1 Van'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1493,7 +1916,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 </span>
                 <div>
                   <h4 className="text-xs font-black text-slate-900">Compare Two Addresses &amp; Route Distance</h4>
-                  <p className="text-[10px] text-slate-500">Type any 2 addresses or select directly from scheduled jobs</p>
+                  <p className="text-[10px] text-slate-500">Type any 2 addresses (auto-completes) or select directly from scheduled jobs</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -1538,12 +1961,11 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                     ))}
                   </select>
                 </div>
-                <input
-                  type="text"
+                <AddressAutocompleteInput
                   value={addressAInput}
-                  onChange={(e) => setAddressAInput(e.target.value)}
+                  onChange={(val) => setAddressAInput(val)}
                   placeholder="Enter first address..."
-                  className="w-full px-2 py-1.5 text-xs bg-white border border-emerald-300 rounded-md font-semibold text-slate-900 focus:outline-none focus:border-emerald-600"
+                  className="px-2 py-1.5 text-xs bg-white border border-emerald-300 rounded-md font-semibold text-slate-900 focus:outline-none focus:border-emerald-600"
                 />
               </div>
 
@@ -1568,12 +1990,11 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                     ))}
                   </select>
                 </div>
-                <input
-                  type="text"
+                <AddressAutocompleteInput
                   value={addressBInput}
-                  onChange={(e) => setAddressBInput(e.target.value)}
+                  onChange={(val) => setAddressBInput(val)}
                   placeholder="Enter second address..."
-                  className="w-full px-2 py-1.5 text-xs bg-white border border-rose-300 rounded-md font-semibold text-slate-900 focus:outline-none focus:border-rose-600"
+                  className="px-2 py-1.5 text-xs bg-white border border-rose-300 rounded-md font-semibold text-slate-900 focus:outline-none focus:border-rose-600"
                 />
               </div>
             </div>
@@ -1907,6 +2328,22 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               className="w-full h-full"
               colorScheme="LIGHT"
               internalUsageAttributionIds={["gmp_mcp_codeassist_v1_aistudio"]}
+              onClick={(ev: any) => {
+                if (isClickToDropPinEnabled && ev?.detail?.latLng) {
+                  const lat = Number(ev.detail.latLng.lat.toFixed(5));
+                  const lng = Number(ev.detail.latLng.lng.toFixed(5));
+                  setDroppedPinCoordsOverride({ lat, lng });
+                  setRadarSearchAddress(`Dropped Caller Pin (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+                  setShowClosestCleanersPanel(true);
+                  reverseGeocode(lat, lng)
+                    .then((res) => {
+                      if (res?.formattedAddress) {
+                        setRadarSearchAddress(res.formattedAddress);
+                      }
+                    })
+                    .catch(() => {});
+                }
+              }}
             >
               {/* Custom Zoom and View Reset Controls */}
               <GoogleMapZoomControls />
@@ -1921,34 +2358,75 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               tickets={tickets}
             />
 
-            {/* Regional Depots Markers */}
-            {showDepots &&
-              HVAC_DEPOTS.map((depot) => (
+            {/* Dropped Caller Pin Marker on Google Map */}
+            {(showClosestCleanersPanel || isClickToDropPinEnabled || Boolean(droppedPinCoordsOverride)) && (
+              <AdvancedMarker
+                position={radarTargetCoords}
+                onClick={() => setShowClosestCleanersPanel(true)}
+              >
+                <div className="flex flex-col items-center cursor-pointer z-50">
+                  <div className="px-2.5 py-1 rounded-full bg-pink-600 text-white border-2 border-white shadow-2xl text-[10px] font-black whitespace-nowrap mb-1 flex items-center gap-1.5">
+                    <span>📍 CALLER PIN: {radarSearchAddress.split(',')[0]}</span>
+                    {rankedCleanersToTarget[0] && (
+                      <span className="px-1.5 py-0.2 rounded bg-black/30 font-mono text-[9px]">
+                        #1 {rankedCleanersToTarget[0].tech.name.split(' ')[0]} ({rankedCleanersToTarget[0].bestDistKm} km)
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative flex items-center justify-center">
+                    <span className="absolute -inset-2 rounded-full bg-pink-500/50 animate-ping" />
+                    <div className="w-9 h-9 rounded-full bg-pink-600 border-2 border-white shadow-2xl flex items-center justify-center text-white font-black text-sm relative">
+                      📍
+                    </div>
+                  </div>
+                </div>
+              </AdvancedMarker>
+            )}
+
+            {/* 15 Cleaners' Home Hubs (🏠 Hubs = Cleaners' Homes) */}
+            {visibleHomeHubTechs.map((tech) => {
+              const homeLat = tech.depotLocation?.lat || tech.currentLocation.lat;
+              const homeLng = tech.depotLocation?.lng || tech.currentLocation.lng;
+              const distToPinKm = calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, homeLat, homeLng);
+              const isIsolated = hubFilterTechId === tech.id;
+
+              return (
                 <AdvancedMarker
-                  key={depot.id}
-                  position={{ lat: depot.lat, lng: depot.lng }}
+                  key={`home-hub-${tech.id}`}
+                  position={{ lat: homeLat, lng: homeLng }}
                   onClick={() => {
                     setActiveInfoWindow({
                       type: 'DEPOT',
-                      id: depot.id,
-                      position: { lat: depot.lat, lng: depot.lng },
+                      id: tech.id,
+                      position: { lat: homeLat, lng: homeLng },
                     });
                   }}
                 >
-                  <div className="flex flex-col items-center group cursor-pointer">
-                    <div className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md text-[10px] font-bold text-white shadow-lg whitespace-nowrap mb-1">
-                      🏢 {depot.name.split(' ')[0]} Hub
+                  <div className={`flex flex-col items-center group cursor-pointer transition-transform ${isIsolated ? 'scale-125 z-40' : 'hover:scale-110 z-20'}`}>
+                    <div
+                      className="px-2 py-0.5 bg-slate-900 border rounded-md text-[10px] font-bold text-white shadow-lg whitespace-nowrap mb-1 flex items-center gap-1"
+                      style={{ borderColor: tech.color || '#10B981' }}
+                    >
+                      <span>🏠 {tech.name.split(' ')[0]}&apos;s Hub</span>
+                      {(showClosestCleanersPanel || isClickToDropPinEnabled) && (
+                        <span className="px-1 rounded bg-emerald-500/30 text-emerald-300 font-mono text-[9px]">
+                          {distToPinKm} km
+                        </span>
+                      )}
                     </div>
-                    <div className="w-7 h-7 rounded-xl bg-indigo-600 border-2 border-white shadow-xl flex items-center justify-center text-white">
-                      <Building2 className="w-4 h-4" />
+                    <div
+                      className="w-7 h-7 rounded-xl border-2 border-white shadow-xl flex items-center justify-center text-white"
+                      style={{ backgroundColor: tech.color || '#059669' }}
+                    >
+                      <Home className="w-4 h-4" />
                     </div>
                   </div>
                 </AdvancedMarker>
-              ))}
+              );
+            })}
 
-            {/* 2 Mobile Cleaning Service Vans */}
-            {showVehicles &&
-              technicians.map((tech) => {
+            {/* 15 Cleaners' Live Van Locations (🚐 Vans/Cars = Live Locations) */}
+            {visibleLiveVanTechs.map((tech) => {
                 const isSelected = selectedTechId === tech.id;
                 const isOnSite = tech.status === 'ON_SITE';
                 const isEnRoute = tech.status === 'EN_ROUTE';
@@ -2349,6 +2827,20 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                         </a>
                       </div>
 
+                      {/* Quick Button: Measure from this Same-Day Job to Caller Pin */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSameDayJobOriginId(job.id);
+                          setPinDistanceSourceMode('SAME_DAY_JOB');
+                          setShowClosestCleanersPanel(true);
+                        }}
+                        className="w-full py-1.5 px-2 rounded-lg bg-pink-600 hover:bg-pink-700 text-white text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                      >
+                        <MapPin className="w-3.5 h-3.5" />
+                        <span>Measure from This Job → Caller Pin</span>
+                      </button>
+
                       {/* Assigned Cleaner & Quick Toggle */}
                       <div className="pt-1.5 border-t border-slate-200 space-y-1.5 text-xs">
                         <div className="flex items-center justify-between">
@@ -2503,36 +2995,72 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
 
             {activeInfoWindow && activeInfoWindow.type === 'DEPOT' && (
               (() => {
-                const depot = HVAC_DEPOTS.find((d) => d.id === activeInfoWindow.id);
-                if (!depot) return null;
+                const techHub = technicians.find((t) => t.id === activeInfoWindow.id);
+                const fallbackDepot = HVAC_DEPOTS.find((d) => d.id === activeInfoWindow.id);
+                if (!techHub && !fallbackDepot) return null;
+
+                const hubLat = techHub ? (techHub.depotLocation?.lat || techHub.currentLocation.lat) : fallbackDepot!.lat;
+                const hubLng = techHub ? (techHub.depotLocation?.lng || techHub.currentLocation.lng) : fallbackDepot!.lng;
+                const hubAddress = techHub
+                  ? (techHub.depotLocation?.address || techHub.homeAddress || techHub.currentLocation.address)
+                  : fallbackDepot!.address;
+                const distToCallerPinKm = calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, hubLat, hubLng);
+                const minsToCallerPin = Math.max(4, Math.round(distToCallerPinKm * 1.65 + 4));
 
                 return (
                   <InfoWindow
-                    position={{ lat: depot.lat, lng: depot.lng }}
+                    position={{ lat: hubLat, lng: hubLng }}
                     onCloseClick={() => setActiveInfoWindow(null)}
                   >
-                    <div className="p-3 max-w-[260px] text-slate-800">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className="text-base">🏢</span>
-                        <h4 className="font-bold text-sm text-slate-900 leading-tight">{depot.name}</h4>
+                    <div className="p-2.5 max-w-[275px] text-slate-800 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">🏠</span>
+                          <h4 className="font-black text-sm text-slate-900 leading-tight">
+                            {techHub ? `${techHub.name}'s Home Hub` : fallbackDepot?.name}
+                          </h4>
+                        </div>
+                        {techHub && (
+                          <span
+                            className="px-2 py-0.5 rounded-full text-[9px] font-black text-white"
+                            style={{ backgroundColor: techHub.color || '#059669' }}
+                          >
+                            {techHub.vanNumber}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-slate-600 text-xs mb-2">📍 {depot.address}</p>
-                      <div className="p-2 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-900 text-[11px] mb-2.5">
-                        Central Logistics, Cleaning Supplies &amp; Fleet Staging Hub.
+                      <p className="text-slate-600 text-xs font-semibold">📍 {hubAddress}</p>
+                      <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-950 text-[11px] font-bold flex items-center justify-between">
+                        <span>📌 To Caller Pin:</span>
+                        <span className="font-mono font-black text-emerald-700">
+                          {distToCallerPinKm} km (~{minsToCallerPin} min)
+                        </span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (technicians.length > 0) {
-                            setEditingVanHubTech(technicians[0]);
-                            setIsVanHubModalOpen(true);
-                          }
-                        }}
-                        className="w-full py-1.5 px-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
-                      >
-                        <Edit2 className="w-3.5 h-3.5 text-purple-400" />
-                        <span>Edit Hub &amp; Fleet Names</span>
-                      </button>
+                      {techHub && (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowDepots(true);
+                              setHubFilterTechId(hubFilterTechId === techHub.id ? 'ALL' : techHub.id);
+                            }}
+                            className="py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black cursor-pointer"
+                          >
+                            {hubFilterTechId === techHub.id ? 'Show All 15 Hubs' : 'Isolate Only This Hub'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingVanHubTech(techHub);
+                              setIsVanHubModalOpen(true);
+                            }}
+                            className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[10px] font-black flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <Edit2 className="w-3 h-3 text-purple-400" />
+                            <span>Edit Home Hub</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </InfoWindow>
                 );
@@ -2550,11 +3078,34 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
+            onClick={(e) => {
+              if (!isClickToDropPinEnabled || !vectorContainerRef.current) return;
+              const rect = vectorContainerRef.current.getBoundingClientRect();
+              const clickX = e.clientX - rect.left;
+              const clickY = e.clientY - rect.top;
+              const centerX = rect.width / 2;
+              const centerY = rect.height / 2;
+              const unscaledX = (clickX - centerX - panOffset.x) / zoomLevel + centerX;
+              const unscaledY = (clickY - centerY - panOffset.y) / zoomLevel + centerY;
+              const pctX = Math.max(0, Math.min(100, (unscaledX / rect.width) * 100));
+              const pctY = Math.max(0, Math.min(100, (unscaledY / rect.height) * 100));
+              const lng = Number(
+                (EDMONTON_BOUNDS.minLng + (pctX / 100) * (EDMONTON_BOUNDS.maxLng - EDMONTON_BOUNDS.minLng)).toFixed(5)
+              );
+              const lat = Number(
+                (EDMONTON_BOUNDS.maxLat - (pctY / 100) * (EDMONTON_BOUNDS.maxLat - EDMONTON_BOUNDS.minLat)).toFixed(5)
+              );
+              setDroppedPinCoordsOverride({ lat, lng });
+              setRadarSearchAddress(`Dropped Caller Pin (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+              setShowClosestCleanersPanel(true);
+            }}
             onWheel={(e) => {
               const delta = e.deltaY < 0 ? 0.2 : -0.2;
               setZoomLevel((prev) => Math.max(0.8, Math.min(3.5, Number((prev + delta).toFixed(2)))));
             }}
-            className={`w-full h-full relative bg-slate-200 overflow-hidden cursor-${isDragging ? 'grabbing' : 'grab'}`}
+            className={`w-full h-full relative bg-slate-200 overflow-hidden ${
+              isClickToDropPinEnabled ? 'cursor-crosshair' : isDragging ? 'cursor-grabbing' : 'cursor-grab'
+            }`}
           >
             {/* Real Web Mercator Street & Satellite Tile Layer + Live Route Polylines */}
             <div
@@ -2629,7 +3180,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 )}
               </div>
 
-              {/* Live Route Polylines Between Techs and Assigned Tickets */}
+              {/* Live Route Polylines Between Techs and Assigned Tickets + Caller Pin Distance Lines */}
               <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
                 {showRoutes &&
                   technicians.map((tech) => {
@@ -2664,38 +3215,127 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                       </g>
                     );
                   })}
+
+                {/* Distance Lines from Active Cleaners' Home Hubs / Live Vans / Same-Day Job to Dropped Caller Pin */}
+                {(showClosestCleanersPanel || isClickToDropPinEnabled || Boolean(droppedPinCoordsOverride)) && (() => {
+                  const pinPos = projectCoords(radarTargetCoords.lat, radarTargetCoords.lng);
+                  const itemsToDraw =
+                    (pinDistanceSourceMode === 'HOME_HUBS' && hubFilterTechId !== 'ALL') ||
+                    (pinDistanceSourceMode === 'LIVE_VANS' && liveVanFilterTechId !== 'ALL')
+                      ? rankedCleanersToTarget
+                      : rankedCleanersToTarget.slice(0, 5);
+
+                  return (
+                    <>
+                      {selectedSameDayOriginJob && (
+                        <line
+                          x1={projectCoords(selectedSameDayOriginJob.lat, selectedSameDayOriginJob.lng).x}
+                          y1={projectCoords(selectedSameDayOriginJob.lat, selectedSameDayOriginJob.lng).y}
+                          x2={pinPos.x}
+                          y2={pinPos.y}
+                          stroke="#EC4899"
+                          strokeWidth="0.95"
+                          strokeDasharray="1.4,0.7"
+                        />
+                      )}
+                      {itemsToDraw.map((item, idx) => {
+                        const origPos = projectCoords(item.originCoords.lat, item.originCoords.lng);
+                        return (
+                          <line
+                            key={`pin-dist-line-${item.tech.id}`}
+                            x1={origPos.x}
+                            y1={origPos.y}
+                            x2={pinPos.x}
+                            y2={pinPos.y}
+                            stroke={idx === 0 ? '#10B981' : item.tech.color || '#6366F1'}
+                            strokeWidth={idx === 0 ? '0.85' : '0.45'}
+                            strokeOpacity={idx === 0 ? 0.95 : 0.65}
+                            strokeDasharray="1.2,0.8"
+                          />
+                        );
+                      })}
+                    </>
+                  );
+                })()}
               </svg>
 
-              {/* Regional Depots */}
-              {showDepots &&
-                HVAC_DEPOTS.map((depot) => {
-                  const pos = projectCoords(depot.lat, depot.lng);
-                  return (
-                    <div
-                      key={depot.id}
-                      onClick={() =>
-                        setActiveInfoWindow({
-                          type: 'DEPOT',
-                          id: depot.id,
-                          position: { lat: depot.lat, lng: depot.lng },
-                        })
-                      }
-                      style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
-                      className="absolute -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center cursor-pointer group"
-                    >
-                      <div className="px-2 py-0.5 bg-slate-900 text-white rounded text-[9px] font-bold shadow-md whitespace-nowrap mb-1">
-                        🏢 {depot.name.split(' ')[0]}
-                      </div>
-                      <div className="w-7 h-7 rounded-xl bg-indigo-600 border-2 border-white shadow-xl flex items-center justify-center text-white">
-                        <Building2 className="w-3.5 h-3.5" />
+              {/* Dropped Caller Pin on Interactive Street/Satellite Map */}
+              {(showClosestCleanersPanel || isClickToDropPinEnabled || Boolean(droppedPinCoordsOverride)) && (() => {
+                const pinPos = projectCoords(radarTargetCoords.lat, radarTargetCoords.lng);
+                return (
+                  <div
+                    style={{ left: `${pinPos.x}%`, top: `${pinPos.y}%` }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowClosestCleanersPanel(true);
+                    }}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 z-50 flex flex-col items-center cursor-pointer"
+                  >
+                    <div className="px-2.5 py-0.5 rounded-full bg-pink-600 text-white border-2 border-white shadow-xl text-[9.5px] font-black whitespace-nowrap mb-1 flex items-center gap-1">
+                      <span>📍 CALLER PIN: {radarSearchAddress.split(',')[0]}</span>
+                      {rankedCleanersToTarget[0] && (
+                        <span className="px-1 rounded bg-black/30 font-mono text-[8.5px]">
+                          #1 {rankedCleanersToTarget[0].tech.name.split(' ')[0]} ({rankedCleanersToTarget[0].bestDistKm} km)
+                        </span>
+                      )}
+                    </div>
+                    <div className="relative flex items-center justify-center">
+                      <span className="absolute -inset-2 rounded-full bg-pink-500/50 animate-ping" />
+                      <div className="w-8 h-8 rounded-full bg-pink-600 border-2 border-white shadow-2xl flex items-center justify-center text-white font-black text-xs relative">
+                        📍
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                );
+              })()}
 
-              {/* 2 Mobile Cleaning Service Vans */}
-              {showVehicles &&
-                technicians.map((tech) => {
+              {/* 15 Cleaners' Home Hubs (🏠 Hubs = Cleaners' Homes) */}
+              {visibleHomeHubTechs.map((tech) => {
+                const homeLat = tech.depotLocation?.lat || tech.currentLocation.lat;
+                const homeLng = tech.depotLocation?.lng || tech.currentLocation.lng;
+                const pos = projectCoords(homeLat, homeLng);
+                const distToPinKm = calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, homeLat, homeLng);
+                const isIsolated = hubFilterTechId === tech.id;
+
+                return (
+                  <div
+                    key={`vec-home-hub-${tech.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveInfoWindow({
+                        type: 'DEPOT',
+                        id: tech.id,
+                        position: { lat: homeLat, lng: homeLng },
+                      });
+                    }}
+                    style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 z-25 flex flex-col items-center cursor-pointer group transition-transform ${
+                      isIsolated ? 'scale-125 z-40' : 'hover:scale-115'
+                    }`}
+                  >
+                    <div
+                      className="px-2 py-0.5 bg-slate-900 text-white border rounded text-[9px] font-bold shadow-md whitespace-nowrap mb-1 flex items-center gap-1"
+                      style={{ borderColor: tech.color || '#10B981' }}
+                    >
+                      <span>🏠 {tech.name.split(' ')[0]}&apos;s Hub</span>
+                      {(showClosestCleanersPanel || isClickToDropPinEnabled) && (
+                        <span className="px-1 rounded bg-emerald-500/30 text-emerald-300 font-mono text-[8px]">
+                          {distToPinKm} km
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className="w-7 h-7 rounded-xl border-2 border-white shadow-xl flex items-center justify-center text-white"
+                      style={{ backgroundColor: tech.color || '#059669' }}
+                    >
+                      <Home className="w-3.5 h-3.5" />
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* 15 Cleaners' Live Van Locations (🚐 Vans/Cars = Live Locations) */}
+              {visibleLiveVanTechs.map((tech) => {
                   const pos = projectCoords(tech.currentLocation.lat, tech.currentLocation.lng);
                   const isSelected = selectedTechId === tech.id;
                   const isOnSite = tech.status === 'ON_SITE';
@@ -2705,7 +3345,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                   return (
                     <div
                       key={tech.id}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         onSelectTech(tech.id);
                         setActiveInfoWindow({
                           type: 'TECH',
@@ -2927,7 +3568,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                   return (
                     <div
                       key={`vec-job-${job.id}`}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         onSelectScheduledJob?.(job.id);
                         setActiveInfoWindow({
                           type: 'JOB',
@@ -3024,8 +3666,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                       : activeInfoWindow.type === 'JOB'
                       ? 'Scheduled Cleaner Job'
                       : activeInfoWindow.type === 'TECH'
-                      ? 'Technician Profile'
-                      : 'Regional Hub'}
+                      ? 'Live Van Location (🚐)'
+                      : 'Cleaner Home Hub (🏠)'}
                   </div>
                   <button
                     onClick={() => setActiveInfoWindow(null)}
@@ -3102,6 +3744,20 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                           <ExternalLink className="w-3.5 h-3.5 text-purple-600 shrink-0 mt-0.5" />
                         </a>
                       </div>
+
+                      {/* Quick Button: Measure from this Same-Day Job to Caller Pin */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSameDayJobOriginId(job.id);
+                          setPinDistanceSourceMode('SAME_DAY_JOB');
+                          setShowClosestCleanersPanel(true);
+                        }}
+                        className="w-full py-1.5 px-2 rounded-lg bg-pink-600 hover:bg-pink-700 text-white text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                      >
+                        <MapPin className="w-3.5 h-3.5" />
+                        <span>Measure from This Job → Caller Pin</span>
+                      </button>
 
                       {/* Cleaner & Quick Status Toggle */}
                       <div className="pt-2 border-t border-slate-100 space-y-1.5 text-xs">
@@ -3221,29 +3877,65 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 })()}
 
                 {activeInfoWindow.type === 'DEPOT' && (() => {
-                  const depot = HVAC_DEPOTS.find((d) => d.id === activeInfoWindow.id);
-                  if (!depot) return null;
+                  const techHub = technicians.find((t) => t.id === activeInfoWindow.id);
+                  const fallbackDepot = HVAC_DEPOTS.find((d) => d.id === activeInfoWindow.id);
+                  if (!techHub && !fallbackDepot) return null;
+
+                  const hubLat = techHub ? (techHub.depotLocation?.lat || techHub.currentLocation.lat) : fallbackDepot!.lat;
+                  const hubLng = techHub ? (techHub.depotLocation?.lng || techHub.currentLocation.lng) : fallbackDepot!.lng;
+                  const hubAddress = techHub
+                    ? (techHub.depotLocation?.address || techHub.homeAddress || techHub.currentLocation.address)
+                    : fallbackDepot!.address;
+                  const distToCallerPinKm = calcRoadDistKm(radarTargetCoords.lat, radarTargetCoords.lng, hubLat, hubLng);
+                  const minsToCallerPin = Math.max(4, Math.round(distToCallerPinKm * 1.65 + 4));
 
                   return (
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900 mb-1">🏢 {depot.name}</h4>
-                      <p className="text-slate-600 text-xs mb-2">📍 {depot.address}</p>
-                      <div className="p-2 bg-indigo-50 border border-indigo-200 rounded-lg text-indigo-900 text-[11px] mb-2.5">
-                        Central Logistics, Cleaning Supplies &amp; Fleet Staging Hub.
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="font-black text-sm text-slate-900">
+                          🏠 {techHub ? `${techHub.name}'s Home Hub` : fallbackDepot?.name}
+                        </h4>
+                        {techHub && (
+                          <span
+                            className="px-2 py-0.5 rounded-full text-[9px] font-black text-white"
+                            style={{ backgroundColor: techHub.color || '#059669' }}
+                          >
+                            {techHub.vanNumber}
+                          </span>
+                        )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (technicians.length > 0) {
-                            setEditingVanHubTech(technicians[0]);
-                            setIsVanHubModalOpen(true);
-                          }
-                        }}
-                        className="w-full py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
-                      >
-                        <Edit2 className="w-3.5 h-3.5 text-purple-400" />
-                        <span>Edit Hub &amp; Fleet Names</span>
-                      </button>
+                      <p className="text-slate-600 text-xs font-semibold">📍 {hubAddress}</p>
+                      <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-950 text-[11px] font-bold flex items-center justify-between">
+                        <span>📌 Distance to Caller Pin:</span>
+                        <span className="font-mono font-black text-emerald-700">
+                          {distToCallerPinKm} km (~{minsToCallerPin} min)
+                        </span>
+                      </div>
+                      {techHub && (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowDepots(true);
+                              setHubFilterTechId(hubFilterTechId === techHub.id ? 'ALL' : techHub.id);
+                            }}
+                            className="py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black cursor-pointer"
+                          >
+                            {hubFilterTechId === techHub.id ? 'Show All 15 Hubs' : 'Only This Hub'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingVanHubTech(techHub);
+                              setIsVanHubModalOpen(true);
+                            }}
+                            className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[10px] font-black flex items-center justify-center gap-1 cursor-pointer shadow-xs"
+                          >
+                            <Edit2 className="w-3 h-3 text-purple-400" />
+                            <span>Edit Home Hub</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

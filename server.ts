@@ -6843,7 +6843,9 @@ app.post("/api/public/book", async (req, res) => {
   try {
     const projectId = getProjectId(req);
     const {
-      customerName,
+      firstName: rawFirstName,
+      lastName: rawLastName,
+      customerName: rawCustomerName,
       customerPhone,
       customerEmail,
       serviceType,
@@ -6865,8 +6867,14 @@ app.post("/api/public/book", async (req, res) => {
       bookingFormVariant,
     } = req.body || {};
 
+    const combinedFromSplit = `${String(rawFirstName || "").trim()} ${String(rawLastName || "").trim()}`.trim();
+    const customerName = String(rawCustomerName || combinedFromSplit || "").trim();
+    const nameParts = customerName.split(/\s+/).filter(Boolean);
+    const firstName = String(rawFirstName || nameParts[0] || "").trim();
+    const lastName = String(rawLastName || nameParts.slice(1).join(" ") || "").trim();
+
     if (!customerName || !customerPhone || !address) {
-      return res.status(400).json({ error: "Name, phone, and address are required." });
+      return res.status(400).json({ error: "First name, last name, phone, and address are required." });
     }
 
     // Normalize the 3 core customer service options ("Move out", "Basic", "Deep")
@@ -6924,7 +6932,19 @@ app.post("/api/public/book", async (req, res) => {
         ? curStore.serviceCatalog
         : CANONICAL_SERVICE_CATALOG;
 
-    const requestedCrewNum = Number(cleanerCount) >= 1 && Number(cleanerCount) <= 3 ? Number(cleanerCount) : undefined;
+    // Enforce strict Cleaner Crew rules by Service Type:
+    // - Basic Cleaning: 1 Cleaner only
+    // - Deep Cleaning: Minimum 2 Cleaners (min 2 hrs)
+    // - Move-Out Cleaning: 2 Cleaners (min 3 hrs) OR 1 Cleaner (starts at 6 hrs)
+    let requestedCrewNum = Number(cleanerCount) >= 1 && Number(cleanerCount) <= 3 ? Number(cleanerCount) : undefined;
+    if (canonicalServiceLabel === "Basic Cleaning") {
+      requestedCrewNum = 1;
+    } else if (canonicalServiceLabel === "Deep Cleaning") {
+      requestedCrewNum = Math.max(2, requestedCrewNum || 2);
+    } else if (canonicalServiceLabel === "Move-Out Cleaning") {
+      requestedCrewNum = requestedCrewNum === 1 ? 1 : 2;
+    }
+
     const matchedCatalog = matchCatalogItem(
       catalogLookupService,
       bedrooms || "3 Bedrooms",
@@ -6935,12 +6955,18 @@ app.post("/api/public/book", async (req, res) => {
 
     const resolvedCrewCount = matchedCatalog?.cleanersCount || requestedCrewNum || 2;
     const crewLabel = `${resolvedCrewCount} Cleaner${resolvedCrewCount > 1 ? "s" : ""}`;
-    const itemQty = matchedCatalog?.quantity || matchedCatalog?.baseHours || 3;
-    const itemUnitPrice = matchedCatalog?.unitPrice || 105;
-    const catalogBaseTotal =
-      matchedCatalog?.total ||
-      matchedCatalog?.basePrice ||
-      Math.round(itemQty * itemUnitPrice * 100) / 100;
+    let itemQty = matchedCatalog?.quantity || matchedCatalog?.baseHours || 3;
+    if (canonicalServiceLabel === "Move-Out Cleaning") {
+      itemQty = resolvedCrewCount === 1 ? Math.max(6, itemQty) : Math.max(3, itemQty);
+    } else if (canonicalServiceLabel === "Deep Cleaning") {
+      itemQty = Math.max(2, itemQty);
+    }
+    const itemUnitPrice =
+      matchedCatalog?.unitPrice || (resolvedCrewCount === 1 ? 52.5 : resolvedCrewCount === 3 ? 157.5 : 105);
+    const catalogBaseTotal = Math.max(
+      matchedCatalog?.total || matchedCatalog?.basePrice || 0,
+      Math.round(itemQty * itemUnitPrice * 100) / 100
+    );
 
     // Match any selected add-ons directly from the Service Catalog
     const addonsList = Array.isArray(selectedAddons) ? selectedAddons : [];
@@ -7144,6 +7170,8 @@ app.post("/api/public/book", async (req, res) => {
 
     const newLead = {
       id: `lead-book-${Date.now().toString(36)}`,
+      firstName,
+      lastName,
       customerName,
       phone: cleanPhone,
       email: customerEmail || "",
@@ -7176,6 +7204,8 @@ app.post("/api/public/book", async (req, res) => {
 
     const newClient = {
       id: jobberClientId || `cli-book-${Date.now().toString(36)}`,
+      firstName,
+      lastName,
       name: customerName,
       phone: cleanPhone,
       email: customerEmail || "",
