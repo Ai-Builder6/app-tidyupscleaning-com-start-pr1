@@ -1016,6 +1016,141 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
       {/* Tab 6: Cost & Line Routing */}
       {activeTab === 'COST_LINES' && (
         <div className="space-y-6">
+          {/* 1-to-1 Twilio -> Quo Line Pairing Table */}
+          <div className="p-5 rounded-2xl bg-[#131722] border border-emerald-500/40 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="font-extrabold text-base text-white flex items-center gap-2">
+                  <span>1-to-1 Twilio Shield ➔ Quo (OpenPhone) Line Pairings</span>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-mono">
+                    {Object.keys(config.lineMappings || {}).length} Active Pairs
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Every call to a paired Twilio number goes through the Spam Shield first (dropping blocked callers &amp; area codes like <code className="text-rose-300">1408*</code> for $0.00) before forwarding clean callers to Quo.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fourLineBounceBack: Record<string, string> = {
+                      '+15872063733': '+15875708005',
+                      '+15879063015': '+15875708005',
+                      '+15878050247': '+15875708005',
+                      '+18886145145': '+15875708005',
+                    };
+                    handleSaveConfig({
+                      lineMappings: fourLineBounceBack,
+                      forwardDestinationNumber: '+15875708005',
+                    });
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer shadow transition-all"
+                >
+                  4 Lines ➔ Quo Dispatch (587-570-8005)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fourLineDirect: Record<string, string> = {
+                      '+15872063733': '+15879007223',
+                      '+15879063015': '+15874169181',
+                      '+15878050247': '+15877422500',
+                      '+18886145145': '+18338439877',
+                    };
+                    handleSaveConfig({
+                      lineMappings: fourLineDirect,
+                      forwardDestinationNumber: '+15879007223',
+                    });
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-extrabold cursor-pointer shadow transition-all"
+                >
+                  4 Lines ➔ 1-to-1 Quo Inboxes
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {Object.entries(config.lineMappings || {}).map(([twilioNum, quoTarget]) => (
+                <div
+                  key={twilioNum}
+                  className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                >
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <span className="px-2.5 py-1 rounded-lg bg-violet-500/20 border border-violet-400/30 text-violet-200 font-mono font-bold">
+                      Twilio Shield: {twilioNum}
+                    </span>
+                    <ArrowRight className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <select
+                      value={quoTarget}
+                      onChange={(e) => {
+                        const updated = { ...(config.lineMappings || {}), [twilioNum]: e.target.value };
+                        handleSaveConfig({ lineMappings: updated });
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-slate-950 border border-emerald-500/50 text-emerald-300 font-mono font-bold text-xs cursor-pointer"
+                    >
+                      <option value="+15879007223">Quo: +1 (587) 900-7223 — Tidyups Cleaning - GMB Direct</option>
+                      <option value="+15874169181">Quo: +1 (587) 416-9181 — Tidyups Cleaning &amp; Jobber (Main)</option>
+                      <option value="+15877422500">Quo: +1 (587) 742-2500 — Cleaning Services Ads</option>
+                      <option value="+15875708005">Quo: +1 (587) 570-8005 — Primary Dispatch</option>
+                      <option value="+18338439877">Quo: +1 (833) 843-9877 — Toll Free TIDYUPS</option>
+                      <option value="+15876027792">Quo: +1 (587) 602-7792 — Door Hangers &amp; Signs</option>
+                      <option value="+17807185092">Direct: +1 (780) 718-5092 — Richard Direct / Forwarding Line</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = { ...(config.lineMappings || {}) };
+                      delete updated[twilioNum];
+                      handleSaveConfig({ lineMappings: updated });
+                    }}
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/80 text-slate-400 hover:text-white transition-colors cursor-pointer self-end sm:self-auto"
+                    title="Remove 1-to-1 pair"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Add New 1-to-1 Pair */}
+            <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row gap-2.5">
+              <input
+                type="text"
+                value={mapTwilioNumber}
+                onChange={(e) => setMapTwilioNumber(e.target.value)}
+                placeholder="Twilio Number (e.g. +15872063733)"
+                className="flex-1 bg-slate-900 border border-slate-700 text-white px-3.5 py-2 rounded-xl text-xs font-mono"
+              />
+              <select
+                value={mapQuoNumber}
+                onChange={(e) => setMapQuoNumber(e.target.value)}
+                className="flex-1 bg-slate-900 border border-slate-700 text-emerald-300 px-3.5 py-2 rounded-xl text-xs font-mono cursor-pointer"
+              >
+                <option value="+15879007223">+1 (587) 900-7223 (Tidyups Cleaning - GMB Direct)</option>
+                <option value="+15874169181">+1 (587) 416-9181 (Tidyups Cleaning &amp; Jobber Main)</option>
+                <option value="+15877422500">+1 (587) 742-2500 (Cleaning Services Ads)</option>
+                <option value="+15875708005">+1 (587) 570-8005 (Primary Dispatch)</option>
+                <option value="+18338439877">+1 (833) 843-9877 (Toll Free TIDYUPS)</option>
+                <option value="+15876027792">+1 (587) 602-7792 (Door Hangers &amp; Signs)</option>
+                <option value="+17807185092">+1 (780) 718-5092 (Richard Direct / Forwarding Line)</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!mapTwilioNumber.trim()) return;
+                  const updated = { ...(config.lineMappings || {}), [mapTwilioNumber.trim()]: mapQuoNumber };
+                  handleSaveConfig({ lineMappings: updated });
+                  setMapTwilioNumber('');
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shrink-0"
+              >
+                + Pair Twilio ➔ Quo
+              </button>
+            </div>
+          </div>
+
           <div className="p-5 rounded-2xl bg-[#131722] border border-slate-800 space-y-3">
             <h3 className="font-extrabold text-base text-white">Twilio Webhook Configuration</h3>
             <p className="text-xs text-slate-400">
@@ -1040,9 +1175,9 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
           </div>
 
           <div className="p-5 rounded-2xl bg-[#131722] border border-slate-800 space-y-3">
-            <h3 className="font-extrabold text-base text-white">Clean Call Forward Destination</h3>
+            <h3 className="font-extrabold text-base text-white">Default Fallback Quo Destination</h3>
             <p className="text-xs text-slate-400">
-              When a genuine customer calls (not a robocall or spammer), Twilio forwards the live call to:
+              When a genuine customer calls any Twilio number not listed above, Twilio forwards the live call to:
             </p>
             <div className="flex flex-col sm:flex-row gap-2.5">
               <input
@@ -1057,7 +1192,7 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
                 onClick={() => handleSaveConfig({ forwardDestinationNumber: forwardNumberInput.trim() })}
                 className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shrink-0"
               >
-                Save Forward Destination
+                Save Fallback Destination
               </button>
             </div>
           </div>

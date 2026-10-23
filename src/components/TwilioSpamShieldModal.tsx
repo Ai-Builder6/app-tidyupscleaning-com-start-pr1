@@ -283,14 +283,16 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
     setStatusNotice(`Mapped 1-to-1 route: ${mapTwilioNumber.trim()} ➔ ${mapQuoNumber.trim()}`);
   };
 
-  // Helper to resolve Quo marketing line labels
+  // Helper to resolve Quo marketing line labels across all 6 Quo numbers + Richard Direct 780-718-5092
   const getQuoLineLabel = (target: string) => {
     const digits = target.replace(/\D/g, "");
+    if (digits.endsWith("4169181")) return "Tidyups Cleaning & Jobber (Main)";
+    if (digits.endsWith("9007223")) return "Tidyups Cleaning - GMB Direct";
+    if (digits.endsWith("7422500")) return "Cleaning Services Ads";
     if (digits.endsWith("5708005")) return "Primary Dispatch";
     if (digits.endsWith("8439877")) return "Toll Free TIDYUPS";
-    if (digits.endsWith("7422500")) return "Cleaning Services Ads";
     if (digits.endsWith("6027792")) return "Door Hangers & Signs";
-    if (digits.endsWith("9007223")) return "Google My Business Direct";
+    if (digits.endsWith("7185092")) return "Richard Direct (780-718-5092)";
     return "Custom Quo Line";
   };
 
@@ -1438,13 +1440,25 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
                   </div>
                 </div>
 
-                {/* Display Current 5 Quo Marketing Lines */}
+                {/* Display Current 6 Quo Marketing Lines */}
                 <div className="p-4 bg-[#0f121d] rounded-xl border border-slate-800 space-y-2.5 mt-2">
                   <div className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                    <span>Your Current 5 Quo (OpenPhone) Marketing Lines:</span>
-                    <span className="text-[11px] text-slate-500 font-normal">All active and ready for webhook transcripts</span>
+                    <span>Your Current 6 Quo (OpenPhone) Marketing Lines:</span>
+                    <span className="text-[11px] text-slate-500 font-normal">All 6 active and paired to your Twilio Shield numbers</span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1 text-xs">
+                    <div className="p-2.5 bg-[#141824] rounded-lg border border-slate-800/80">
+                      <div className="font-semibold text-white">Tidyups Cleaning &amp; Jobber (Main)</div>
+                      <div className="font-mono text-emerald-400 text-[11px]">+1 (587) 416-9181</div>
+                    </div>
+                    <div className="p-2.5 bg-[#141824] rounded-lg border border-slate-800/80">
+                      <div className="font-semibold text-white">Tidyups Cleaning - GMB Direct</div>
+                      <div className="font-mono text-emerald-400 text-[11px]">+1 (587) 900-7223</div>
+                    </div>
+                    <div className="p-2.5 bg-[#141824] rounded-lg border border-slate-800/80">
+                      <div className="font-semibold text-white">Cleaning Services Ads</div>
+                      <div className="font-mono text-emerald-400 text-[11px]">+1 (587) 742-2500</div>
+                    </div>
                     <div className="p-2.5 bg-[#141824] rounded-lg border border-slate-800/80">
                       <div className="font-semibold text-white">Primary Dispatch</div>
                       <div className="font-mono text-emerald-400 text-[11px]">+1 (587) 570-8005</div>
@@ -1454,16 +1468,8 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
                       <div className="font-mono text-emerald-400 text-[11px]">+1 (833) 843-9877</div>
                     </div>
                     <div className="p-2.5 bg-[#141824] rounded-lg border border-slate-800/80">
-                      <div className="font-semibold text-white">Cleaning Services Ads</div>
-                      <div className="font-mono text-emerald-400 text-[11px]">+1 (587) 742-2500</div>
-                    </div>
-                    <div className="p-2.5 bg-[#141824] rounded-lg border border-slate-800/80">
                       <div className="font-semibold text-white">Door Hangers &amp; Signs</div>
                       <div className="font-mono text-emerald-400 text-[11px]">+1 (587) 602-7792</div>
-                    </div>
-                    <div className="p-2.5 bg-[#141824] rounded-lg border border-slate-800/80">
-                      <div className="font-semibold text-white">Google My Business Direct</div>
-                      <div className="font-mono text-emerald-400 text-[11px]">+1 (587) 900-7223</div>
                     </div>
                   </div>
                 </div>
@@ -1537,6 +1543,60 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Quick 1-Click 4-Line Setup Presets */}
+                  <div className="p-3.5 bg-emerald-950/25 rounded-xl border border-emerald-500/40 space-y-2.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-black text-emerald-300">
+                          1-Click 4-Line Shield Routing Setup (~$40/mo for 4 Shielded Lines)
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-0.5">
+                          Choose how your 4 main lines (<strong>GMB 7223</strong>, <strong>Main 9181</strong>, <strong>Ads 2500</strong>, <strong>Toll-Free 9877</strong>) route after passing the Twilio Spam Shield:
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const fourLineBounceBack: Record<string, string> = {
+                              '+15872063733': '+15875708005',
+                              '+15879063015': '+15875708005',
+                              '+15878050247': '+15875708005',
+                              '+18886145145': '+15875708005',
+                            };
+                            handleSaveConfig({
+                              lineMappings: fourLineBounceBack,
+                              forwardDestinationNumber: '+15875708005',
+                            });
+                            setStatusNotice('4-Line Quo ➔ Twilio Shield ➔ Quo Primary Dispatch (+15875708005) active!');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-extrabold cursor-pointer shadow transition-all"
+                        >
+                          4 Lines ➔ Quo Dispatch (587-570-8005)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const fourLineDirect: Record<string, string> = {
+                              '+15872063733': '+15879007223',
+                              '+15879063015': '+15874169181',
+                              '+15878050247': '+15877422500',
+                              '+18886145145': '+18338439877',
+                            };
+                            handleSaveConfig({
+                              lineMappings: fourLineDirect,
+                              forwardDestinationNumber: '+15879007223',
+                            });
+                            setStatusNotice('4-Line 1-to-1 Twilio ➔ Quo Inboxes (7223, 9181, 2500, 9877) active!');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-extrabold cursor-pointer shadow transition-all"
+                        >
+                          4 Lines ➔ 1-to-1 Quo Inboxes
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Active Mappings Table */}
                   <div className="space-y-2">
                     {uniqueMappings.length === 0 ? (
@@ -1563,10 +1623,27 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
                                   <span>Twilio: {inbound}</span>
                                 </div>
                                 <ArrowRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                                <div className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 rounded-lg font-mono font-semibold flex items-center gap-1.5">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                                  <span>Quo: {target}</span>
-                                </div>
+                                <select
+                                  value={target}
+                                  onChange={(e) => {
+                                    const newTarget = e.target.value;
+                                    const updated = { ...(config.lineMappings || {}) };
+                                    if (allKeys && allKeys.length > 0) {
+                                      allKeys.forEach((k) => delete updated[k]);
+                                    }
+                                    updated[inbound] = newTarget;
+                                    handleSaveConfig({ lineMappings: updated });
+                                  }}
+                                  className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 rounded-lg font-mono font-semibold text-xs cursor-pointer focus:outline-none"
+                                >
+                                  <option value="+15879007223" className="bg-slate-900 text-emerald-300">Quo: +15879007223 (GMB Direct)</option>
+                                  <option value="+15874169181" className="bg-slate-900 text-emerald-300">Quo: +15874169181 (Main / Jobber)</option>
+                                  <option value="+15877422500" className="bg-slate-900 text-emerald-300">Quo: +15877422500 (Cleaning Ads)</option>
+                                  <option value="+18338439877" className="bg-slate-900 text-emerald-300">Quo: +18338439877 (Toll Free TIDYUPS)</option>
+                                  <option value="+15875708005" className="bg-slate-900 text-emerald-300">Quo: +15875708005 (Primary Dispatch)</option>
+                                  <option value="+15876027792" className="bg-slate-900 text-emerald-300">Quo: +15876027792 (Door Hangers &amp; Signs)</option>
+                                  <option value="+17807185092" className="bg-slate-900 text-emerald-300">Direct: +17807185092 (Richard Direct)</option>
+                                </select>
                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
                                   {campaignLabel}
                                 </span>
@@ -1620,16 +1697,18 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
                           onChange={(e) => setMapQuoNumber(e.target.value)}
                           className="w-full px-3 py-2 bg-[#141824] border border-slate-700 rounded-lg text-xs text-white font-mono focus:outline-none focus:border-emerald-500 cursor-pointer"
                         >
+                          <option value="+15879007223">+1 (587) 900-7223 (Tidyups Cleaning - GMB Direct)</option>
+                          <option value="+15874169181">+1 (587) 416-9181 (Tidyups Cleaning &amp; Jobber Main)</option>
+                          <option value="+15877422500">+1 (587) 742-2500 (Cleaning Services Ads)</option>
                           <option value="+15875708005">+1 (587) 570-8005 (Primary Dispatch)</option>
                           <option value="+18338439877">+1 (833) 843-9877 (Toll Free TIDYUPS)</option>
-                          <option value="+15877422500">+1 (587) 742-2500 (Cleaning Services Ads)</option>
                           <option value="+15876027792">+1 (587) 602-7792 (Door Hangers &amp; Signs)</option>
-                          <option value="+15879007223">+1 (587) 900-7223 (Google My Business Direct)</option>
+                          <option value="+17807185092">+1 (780) 718-5092 (Richard Direct / Forwarding Line)</option>
                         </select>
                       </div>
                     </div>
                     <div className="flex items-center justify-between pt-1">
-                      <span className="text-[11px] text-slate-500">Pick any of your 5 Quo lines or enter custom number</span>
+                      <span className="text-[11px] text-slate-500">Pick any of your 6 Quo lines to pair 1-to-1</span>
                       <button
                         type="button"
                         onClick={handleAddLineMapping}

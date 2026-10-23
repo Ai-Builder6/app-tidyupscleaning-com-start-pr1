@@ -217,7 +217,9 @@ export function saveStore(
           byId.set(c.id, { ...(prev || {}), ...c });
         }
       }
-      return Array.from(byId.values());
+      return Array.from(byId.values()).sort((a: any, b: any) =>
+        String(b?.timestamp || "").localeCompare(String(a?.timestamp || ""))
+      );
     })();
 
     const cleanStore = { ...store };
@@ -289,8 +291,8 @@ export function saveStore(
         (v: any) => !v?.startAt || String(v.startAt) >= "2026-10-01"
       );
     }
-    if (Array.isArray(merged.quoCallLogs) && merged.quoCallLogs.length > 25) {
-      merged.quoCallLogs = merged.quoCallLogs.slice(0, 25);
+    if (Array.isArray(merged.quoCallLogs) && merged.quoCallLogs.length > 120) {
+      merged.quoCallLogs = merged.quoCallLogs.slice(0, 120);
     }
 
     // Replace Quo "AC" + 32 hex call IDs with "QUO_" so GitHub Push Protection never mistakes them for a Twilio SID

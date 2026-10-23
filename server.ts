@@ -3347,6 +3347,13 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     if (!Array.isArray(store.spamShieldConfig.blockedPrefixes)) {
       store.spamShieldConfig.blockedPrefixes = [...DEFAULT_SPAM_SHIELD_CONFIG.blockedPrefixes];
       mutated = true;
+    } else {
+      for (const reqPrefix of ["1408*", "1301*", "1406*"]) {
+        if (!store.spamShieldConfig.blockedPrefixes.includes(reqPrefix)) {
+          store.spamShieldConfig.blockedPrefixes.unshift(reqPrefix);
+          mutated = true;
+        }
+      }
     }
     if (!Array.isArray(store.spamShieldConfig.blockedCountryCodes)) {
       store.spamShieldConfig.blockedCountryCodes = [...DEFAULT_SPAM_SHIELD_CONFIG.blockedCountryCodes];
@@ -3355,6 +3362,26 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     if (!Array.isArray(store.spamShieldConfig.unblockedNumbers)) {
       store.spamShieldConfig.unblockedNumbers = [];
       mutated = true;
+    }
+    if (!store.spamShieldConfig.lineMappings || typeof store.spamShieldConfig.lineMappings !== "object") {
+      store.spamShieldConfig.lineMappings = { ...DEFAULT_SPAM_SHIELD_CONFIG.lineMappings };
+      mutated = true;
+    } else {
+      for (const [twNum, quoTarget] of Object.entries(DEFAULT_SPAM_SHIELD_CONFIG.lineMappings)) {
+        if (!store.spamShieldConfig.lineMappings[twNum]) {
+          store.spamShieldConfig.lineMappings[twNum] = quoTarget;
+          mutated = true;
+        }
+      }
+      // Ensure +15879063015 pairs 1-to-1 to Tidyups Cleaning & Jobber (+15874169181) so all 6 Quo lines have a dedicated Twilio pair
+      if (store.spamShieldConfig.lineMappings["+15879063015"] !== "+15874169181") {
+        store.spamShieldConfig.lineMappings["+15879063015"] = "+15874169181";
+        mutated = true;
+      }
+      if (store.spamShieldConfig.lineMappings["+1 (825) 533 - 4317"]) {
+        delete store.spamShieldConfig.lineMappings["+1 (825) 533 - 4317"];
+        mutated = true;
+      }
     }
   }
 
@@ -3376,44 +3403,62 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       const cDigits = normalizePhoneDigits(call.callerPhone);
       if (!cDigits || TIDYUPS_OWN_PHONE_DIGITS.has(cDigits)) continue;
 
-      const isExplicitlyUnblocked = unblockedDigitsSet.has(cDigits);
-      const isCleaningLead =
-        Boolean(call.hasCleaningIntent) ||
-        Boolean(call.isPotentialOrGoodLead) ||
-        call.leadVerdict === "GOOD_LEAD" ||
-        call.leadVerdict === "POTENTIAL_JOB" ||
-        call.status === "CLEANING_LEAD" ||
-        call.status === "POTENTIAL_JOB" ||
+      const isExplicitlyUnblocked = unblockedDigitsSet.has(cDigits) || Boolean(call.manuallyMarkedGoodLead);
+      const isMatchedJobOrQuote =
         call.status === "MATCHED_TO_JOB" ||
         call.status === "MATCHED_TO_QUOTE" ||
-        call.status === "AUTO_CREATED_LEAD";
+        Boolean(call.matchedJobId);
+
+      const ruleEval = evaluateSpamCallRule(call.callerPhone, store.spamShieldConfig);
+
+      const isCleaningLead =
+        !ruleEval.isBlocked &&
+        (Boolean(call.hasCleaningIntent) ||
+          Boolean(call.isPotentialOrGoodLead) ||
+          call.leadVerdict === "GOOD_LEAD" ||
+          call.leadVerdict === "POTENTIAL_JOB" ||
+          call.status === "CLEANING_LEAD" ||
+          call.status === "POTENTIAL_JOB" ||
+          isMatchedJobOrQuote ||
+          call.status === "AUTO_CREATED_LEAD");
 
       const isScreenedSpamOrSolicitor =
-        !isCleaningLead &&
-        (call.status === "SOLICITOR_BLOCKED" ||
+        !isMatchedJobOrQuote &&
+        (!isCleaningLead || ruleEval.isBlocked || Boolean(call.manuallyBlocked)) &&
+        (ruleEval.isBlocked ||
+          call.status === "SOLICITOR_BLOCKED" ||
           Boolean(call.isBlocked) ||
           Boolean(call.manuallyBlocked) ||
           call.callCategory === "SALES_OR_MARKETING" ||
           call.callCategory === "SHORT_HANGUP");
 
-      const ruleEval = evaluateSpamCallRule(call.callerPhone, store.spamShieldConfig);
-
-      if (!isExplicitlyUnblocked && (isScreenedSpamOrSolicitor || ruleEval.isBlocked)) {
+      if (!isExplicitlyUnblocked && !isMatchedJobOrQuote && (isScreenedSpamOrSolicitor || ruleEval.isBlocked)) {
         const formattedE164 = cDigits.length === 10 ? `+1${cDigits}` : `+${cDigits}`;
         if (!blockedDigitsSet.has(cDigits)) {
           store.spamShieldConfig.blockedNumbers.unshift(formattedE164);
           blockedDigitsSet.add(cDigits);
           mutated = true;
         }
-        if (call.status !== "SOLICITOR_BLOCKED" || !call.isBlocked) {
+        if (
+          call.status !== "SOLICITOR_BLOCKED" ||
+          !call.isBlocked ||
+          call.leadVerdict !== "BAD_LEAD" ||
+          call.isPotentialOrGoodLead ||
+          call.hasCleaningIntent
+        ) {
           call.status = "SOLICITOR_BLOCKED";
           call.isBlocked = true;
+          call.hasCleaningIntent = false;
+          call.isPotentialOrGoodLead = false;
+          call.leadVerdict = "BAD_LEAD";
+          call.leadVerdictLabel = "🚫 Bad Lead — Solicitor / Spam";
           call.blockedReason =
             call.blockedReason ||
             ruleEval.reason ||
             (call.callCategory === "SALES_OR_MARKETING"
               ? `Screened Sales / Solicitor Call (${call.callerName || call.callerPhone})`
               : `Screened Robocall / Short Hangup (${call.callerPhone})`);
+          call.leadVerdictReason = call.blockedReason;
           mutated = true;
         }
         // Ensure it also appears in blockedCallsHistory so the Spam Shield log & Screened Call list match
@@ -3429,11 +3474,32 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
             countryCode: "+1",
             reason:
               call.blockedReason ||
+              ruleEval.reason ||
               (call.summary ? `Sonia AI Screened: ${String(call.summary).slice(0, 90)}` : "Screened Call Auto-Blocked"),
           });
           mutated = true;
         }
       }
+    }
+  }
+
+  // Purge any unquoted voice/call leads from store.adLeads whose phone number matches a blocked number or blocked area code/prefix
+  if (Array.isArray(store.adLeads)) {
+    const beforeLeadCount = store.adLeads.length;
+    store.adLeads = store.adLeads.filter((l: any) => {
+      if (!l) return false;
+      if (l.quoteId || l.quoteNumber || l.isJobberSynced) return true;
+      const lDigits = normalizePhoneDigits(l.phone);
+      if (!lDigits) return true;
+      if (unblockedDigitsSet.has(lDigits)) return true;
+      const ruleCheck = evaluateSpamCallRule(l.phone, store.spamShieldConfig);
+      if (ruleCheck.isBlocked || blockedDigitsSet.has(lDigits)) {
+        return false;
+      }
+      return true;
+    });
+    if (store.adLeads.length !== beforeLeadCount) {
+      mutated = true;
     }
   }
 
@@ -9404,6 +9470,11 @@ function upsertCallLeadIntoCleanSheet(
   const callerDigits = normalizePhoneDigits(callLogEntry.callerPhone);
   if (!callerDigits || TIDYUPS_OWN_PHONE_DIGITS.has(callerDigits)) return null;
 
+  // Never insert or update a Clean Sheet lead if the call is blocked by Spam Shield (e.g. area code 408)
+  if (!forceInclude && (callLogEntry.isBlocked || callLogEntry.status === "SOLICITOR_BLOCKED" || analysis.leadVerdict === "BAD_LEAD")) {
+    return null;
+  }
+
   // Find if this caller already exists in store.adLeads
   const existingLead = store.adLeads.find((l: any) => {
     const lDigits = normalizePhoneDigits(l.phone);
@@ -9777,19 +9848,34 @@ async function processQuoCallEvent(
     } else {
       analysis.leadVerdictReason = "Verified Good Lead — Potential Cleaning Job";
     }
+  } else if (spamEval.isBlocked || Boolean(existingCallLog?.manuallyBlocked)) {
+    // Strictly enforce Spam Shield area code / prefix / number block (e.g. 1408*) over generic call-length heuristics
+    analysis.hasCleaningIntent = false;
+    analysis.isPotentialOrGoodLead = false;
+    analysis.leadVerdict = "BAD_LEAD";
+    analysis.callCategory = "SALES_OR_MARKETING";
+    analysis.leadVerdictReason =
+      existingCallLog?.blockedReason ||
+      spamEval.reason ||
+      `Blocked by Spam Shield (${cleanCallerPhone})`;
   }
 
   const isAutoSolicitorOrSpam =
     !matchedJob &&
     !matchedQuote &&
-    !analysis.isPotentialOrGoodLead &&
     !isExplicitlyUnblocked &&
+    !existingCallLog?.manuallyMarkedGoodLead &&
     (spamEval.isBlocked ||
       Boolean(existingCallLog?.manuallyBlocked) ||
-      analysis.leadVerdict === "BAD_LEAD");
+      (!analysis.isPotentialOrGoodLead && analysis.leadVerdict === "BAD_LEAD"));
 
-  // If this call is a Good Lead or Potential Job, ensure it is NOT mistakenly in blockedNumbers
-  if ((analysis.isPotentialOrGoodLead || matchedQuote || matchedJob) && callerDigits && !existingCallLog?.manuallyBlocked) {
+  // Only remove from blockedNumbers if explicitly unblocked or matched to a real Jobber quote/visit (NEVER if matched by a blocked prefix/number)
+  if (
+    (matchedQuote || matchedJob || isExplicitlyUnblocked || existingCallLog?.manuallyMarkedGoodLead) &&
+    callerDigits &&
+    !existingCallLog?.manuallyBlocked &&
+    !spamEval.isBlocked
+  ) {
     store.spamShieldConfig.blockedNumbers = (store.spamShieldConfig.blockedNumbers || []).filter(
       (b: string) => normalizePhoneDigits(b) !== callerDigits
     );
@@ -11138,16 +11224,15 @@ const DEFAULT_SPAM_SHIELD_CONFIG = {
   forwardDestinationNumber: "+15879007223",
   callerIdMode: "caller" as const,
   lineMappings: {
-    "+15872063733": "+15879007223", // Stony Plain -> Google My Business Direct
-    "+15877130465": "+15876027792", // Sherwood Park -> Door Hangers & Signs
-    "+15878050247": "+15877422500", // Saint Albert -> Cleaning Services Ads
-    "+18253053456": "+15875708005", // Calgary -> Primary Dispatch
-    "+18255334317": "+18338439877", // Calgary -> Toll Free TIDYUPS
-    "+1 (825) 533 - 4317": "+18338439877",
-    "+15877138443": "+18338439877", // Sherwood Park GMB833 -> Toll Free TIDYUPS
-    "+18886145145": "+18338439877", // Toll Free 888 -> Toll Free TIDYUPS
-    "+15879063015": "+15879007223", // Leduc -> GMB / Dispatch
-    "+15872063277": "+15879007223", // Stony Plain -> GMB / Dispatch
+    "+15872063733": "+15879007223", // Stony Plain -> Tidyups Cleaning - GMB (+1 587-900-7223)
+    "+15879063015": "+15874169181", // Leduc -> Tidyups Cleaning & Jobber Main Line (+1 587-416-9181)
+    "+15878050247": "+15877422500", // Saint Albert -> Cleaning Services Ads (+1 587-742-2500)
+    "+18253053456": "+15875708005", // Calgary -> Primary Dispatch (+1 587-570-8005)
+    "+18255334317": "+18338439877", // Calgary -> Toll Free TIDYUPS (+1 833-843-9877)
+    "+15877130465": "+15876027792", // Sherwood Park -> Door Hangers & Signs (+1 587-602-7792)
+    "+15877138443": "+18338439877", // Sherwood Park GMB833 -> Toll Free TIDYUPS (+1 833-843-9877)
+    "+18886145145": "+18338439877", // Toll Free 888 -> Toll Free TIDYUPS (+1 833-843-9877)
+    "+15872063277": "+15879007223", // Stony Plain -> Tidyups Cleaning - GMB (+1 587-900-7223)
   } as Record<string, string>,
 };
 
@@ -11377,28 +11462,54 @@ app.post("/api/twilio/block-number", (req, res) => {
     });
   }
 
-  // Also update matching calls in quoCallLogs so Screened Call List & Spam Shield stay 100% synced
-  if (Array.isArray(store.quoCallLogs) && type === "number") {
-    const targetDigits = normalizePhoneDigits(appliedRuleLabel);
-    if (targetDigits) {
-      if (Array.isArray((store.spamShieldConfig as any).unblockedNumbers)) {
-        (store.spamShieldConfig as any).unblockedNumbers = (store.spamShieldConfig as any).unblockedNumbers.filter(
-          (n: string) => normalizePhoneDigits(n) !== targetDigits
-        );
-      }
-      store.quoCallLogs = store.quoCallLogs.map((c: any) => {
-        if (normalizePhoneDigits(c.callerPhone) === targetDigits) {
-          return {
-            ...c,
-            status: "SOLICITOR_BLOCKED",
-            isBlocked: true,
-            manuallyBlocked: true,
-            blockedReason: reason || `Manually blocked (${appliedRuleLabel})`,
-          };
+  // Also update matching calls in quoCallLogs & purge unquoted adLeads for ALL block types (number, areacode, prefix, country)
+  const targetDigits = normalizePhoneDigits(appliedRuleLabel);
+  if (Array.isArray((store.spamShieldConfig as any).unblockedNumbers)) {
+    (store.spamShieldConfig as any).unblockedNumbers = (store.spamShieldConfig as any).unblockedNumbers.filter((n: string) => {
+      const nDigits = normalizePhoneDigits(n);
+      if (targetDigits && nDigits === targetDigits) return false;
+      return !evaluateSpamCallRule(n, store.spamShieldConfig).isBlocked;
+    });
+  }
+
+  if (Array.isArray(store.quoCallLogs)) {
+    store.quoCallLogs = store.quoCallLogs.map((c: any) => {
+      const cDigits = normalizePhoneDigits(c.callerPhone);
+      const ruleMatch = evaluateSpamCallRule(c.callerPhone, store.spamShieldConfig);
+      if ((targetDigits && cDigits === targetDigits) || ruleMatch.isBlocked) {
+        if (cDigits && !TIDYUPS_OWN_PHONE_DIGITS.has(cDigits)) {
+          const e164 = cDigits.length === 10 ? `+1${cDigits}` : `+${cDigits}`;
+          if (!store.spamShieldConfig.blockedNumbers.some((b: string) => normalizePhoneDigits(b) === cDigits)) {
+            store.spamShieldConfig.blockedNumbers.unshift(e164);
+          }
         }
-        return c;
-      });
-    }
+        const appliedReason = reason || ruleMatch.reason || `Manually blocked (${appliedRuleLabel})`;
+        return {
+          ...c,
+          status: "SOLICITOR_BLOCKED",
+          isBlocked: true,
+          manuallyBlocked: true,
+          manuallyMarkedGoodLead: false,
+          hasCleaningIntent: false,
+          isPotentialOrGoodLead: false,
+          leadVerdict: "BAD_LEAD",
+          leadVerdictLabel: "🚫 Bad Lead — Solicitor / Spam",
+          leadVerdictReason: appliedReason,
+          blockedReason: appliedReason,
+        };
+      }
+      return c;
+    });
+  }
+
+  if (Array.isArray(store.adLeads)) {
+    store.adLeads = store.adLeads.filter((l: any) => {
+      if (l.quoteId || l.quoteNumber || l.isJobberSynced) return true;
+      const lDigits = normalizePhoneDigits(l.phone);
+      if (!lDigits) return true;
+      if (targetDigits && lDigits === targetDigits) return false;
+      return !evaluateSpamCallRule(l.phone, store.spamShieldConfig).isBlocked;
+    });
   }
 
   // Also record a block log item
@@ -11524,10 +11635,11 @@ app.post("/api/twilio/test-number", (req, res) => {
     }
   }
 
-  const outboundCallerId = calledNumber ? String(calledNumber) : "+18338439877";
+  const callerIdMode = config.callerIdMode || "caller";
+  const outboundCallerIdAttr = callerIdMode === "line" && calledNumber ? ` callerId="${String(calledNumber)}"` : "";
   const twimlPreview = evaluation.isBlocked
-    ? `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Reject reason="${rejectionAction}"/>\n</Response>`
-    : `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Say voice="alice">Connecting call...</Say>\n  <Dial timeout="25" callerId="${outboundCallerId}">${forwardTarget}</Dial>\n</Response>`;
+    ? `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Pause length="1"/>\n  <Hangup/>\n</Response>`
+    : `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Dial timeout="25" answerOnBridge="true"${outboundCallerIdAttr}>${forwardTarget}</Dial>\n</Response>`;
 
   res.json({
     success: true,
@@ -11536,7 +11648,7 @@ app.post("/api/twilio/test-number", (req, res) => {
     isBlocked: evaluation.isBlocked,
     reason: evaluation.reason || "Allowed caller — passes all filter rules",
     countryCode: evaluation.countryCode || "+1",
-    action: evaluation.isBlocked ? `Rejected (${rejectionAction})` : `Forwarded to Quo / Dispatch line (${forwardTarget})`,
+    action: evaluation.isBlocked ? `Terminated (<Hangup/> — prevents Sona AI fallback)` : `Forwarded to Quo / Dispatch line (${forwardTarget})`,
     twimlPreview,
   });
 });
@@ -11619,10 +11731,15 @@ const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) =
       saveStore(store, projectId);
     }
 
-    const action = config.rejectionAction || "busy";
+    // CRITICAL FOR OPENPHONE FORWARDING:
+    // If OpenPhone forwards a call (e.g. 587-900-7223 -> Twilio +18255334317) and Twilio returns <Reject reason="busy"/>,
+    // OpenPhone treats the forward as "unanswered" and pulls the spammer back into Sona AI on 587-900-7223!
+    // By answering for 1 second of silence and immediately hanging up (<Pause length="1"/><Hangup/>),
+    // OpenPhone sees the forwarded call as answered & completed, killing the call completely so Sona AI never picks up.
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Reject reason="${action}"/>
+  <Pause length="1"/>
+  <Hangup/>
 </Response>`;
     return res.send(twiml);
   }
@@ -11665,8 +11782,7 @@ const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) =
 
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="alice">Thank you for calling. Connecting you now.</Say>
-  <Dial timeout="25" action="/api/twilio/voice/dial-status"${callerIdAttr}>${cleanDestination}</Dial>
+  <Dial timeout="25" answerOnBridge="true"${callerIdAttr}>${cleanDestination}</Dial>
 </Response>`;
   return res.send(twiml);
 };

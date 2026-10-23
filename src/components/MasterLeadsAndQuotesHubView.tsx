@@ -326,16 +326,30 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
   const sheetUploadInputRef = useRef<HTMLInputElement>(null);
 
   const isCallerPhoneBlocked = (rawPhone?: string, callObj?: any): boolean => {
-    if (callObj?.isBlocked || callObj?.status === 'SOLICITOR_BLOCKED') return true;
+    if (callObj?.isBlocked || callObj?.status === 'SOLICITOR_BLOCKED' || callObj?.leadVerdict === 'BAD_LEAD') return true;
     const digits = String(rawPhone || '').replace(/\D/g, '');
     const norm = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
     if (!norm) return false;
     const list: string[] = spamShieldConfig?.blockedNumbers || [];
-    return list.some((b) => {
+    const exactBlocked = list.some((b) => {
       const bDigits = String(b || '').replace(/\D/g, '');
       const bNorm = bDigits.length === 11 && bDigits.startsWith('1') ? bDigits.slice(1) : bDigits;
       return bNorm === norm;
     });
+    if (exactBlocked) return true;
+
+    const prefixes: string[] = spamShieldConfig?.blockedPrefixes || [];
+    const prefixBlocked = prefixes.some((prefixPattern) => {
+      const cleanPattern = String(prefixPattern || '').replace(/\*/g, '').replace(/\D/g, '');
+      if (!cleanPattern) return false;
+      const normPattern = cleanPattern.length >= 4 && cleanPattern.startsWith('1') ? cleanPattern.slice(1) : cleanPattern;
+      return (
+        digits.startsWith(cleanPattern) ||
+        norm.startsWith(cleanPattern) ||
+        (Boolean(normPattern) && norm.startsWith(normPattern))
+      );
+    });
+    return prefixBlocked;
   };
 
   // Block 1: Paste Table states
@@ -659,6 +673,9 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
     const uniqueLeads = leads.filter((l) => {
       if (!l || !l.id) return false;
       if (seenLeadIds.has(l.id)) return false;
+      if (!l.quoteId && !l.quoteNumber && !(l as any).isJobberSynced && isCallerPhoneBlocked(l.phone)) {
+        return false;
+      }
       seenLeadIds.add(l.id);
       return filterLead(l);
     });
@@ -707,7 +724,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
         pastedLeads.length +
         jobberQuotesFiltered.length,
     };
-  }, [leads, quotes, masterSearchQuery]);
+  }, [leads, quotes, masterSearchQuery, spamShieldConfig]);
 
   // Block 3: Filtered Schedule & Search results
   const filteredScheduleJobs = useMemo(() => {
