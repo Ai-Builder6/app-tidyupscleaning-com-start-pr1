@@ -127,6 +127,27 @@ export function loadStore(_projectId?: string): AppPersistentStore | null {
     }
 
     if (newestStore) {
+      if (Array.isArray(newestStore.quoCallLogs)) {
+        const deduped = new Map<string, any>();
+        for (const c of newestStore.quoCallLogs) {
+          if (!c) continue;
+          const normId = String(c.id || c.callId || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
+          if (!normId) continue;
+          const normalizedCall = { ...c, id: normId, callId: normId };
+          const prev = deduped.get(normId);
+          if (!prev) {
+            deduped.set(normId, normalizedCall);
+          } else {
+            deduped.set(normId, {
+              ...prev,
+              ...normalizedCall,
+              transcriptText: normalizedCall.transcriptText || prev.transcriptText,
+              summary: normalizedCall.summary || prev.summary,
+            });
+          }
+        }
+        newestStore.quoCallLogs = Array.from(deduped.values());
+      }
       return newestStore;
     }
   } catch (err) {
@@ -196,25 +217,43 @@ export function saveStore(
     const mergedQuoCallLogs = (() => {
       const existingLogs = Array.isArray(existing.quoCallLogs) ? existing.quoCallLogs : [];
       const incomingLogs = Array.isArray(store.quoCallLogs) ? store.quoCallLogs : null;
-      if (!incomingLogs) return existingLogs;
+      const normalizeId = (rawId: any) => String(rawId || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
 
       const byId = new Map<string, any>();
       for (const c of existingLogs) {
-        if (c && c.id) byId.set(c.id, c);
+        if (!c) continue;
+        const nid = normalizeId(c.id || c.callId);
+        if (!nid) continue;
+        byId.set(nid, { ...c, id: nid, callId: nid });
       }
-      for (const c of incomingLogs) {
-        if (!c || !c.id) continue;
-        const prev = byId.get(c.id);
-        if (prev && (prev.manuallyBlocked || prev.status === 'SOLICITOR_BLOCKED') && c.manuallyBlocked !== false && !explicitReplace) {
-          byId.set(c.id, {
-            ...prev,
-            ...c,
-            status: 'SOLICITOR_BLOCKED',
-            isBlocked: true,
-            manuallyBlocked: true,
-          });
-        } else {
-          byId.set(c.id, { ...(prev || {}), ...c });
+      if (incomingLogs) {
+        for (const c of incomingLogs) {
+          if (!c) continue;
+          const nid = normalizeId(c.id || c.callId);
+          if (!nid) continue;
+          const normalizedItem = { ...c, id: nid, callId: nid };
+          const prev = byId.get(nid);
+          if (
+            prev &&
+            (prev.manuallyBlocked || prev.status === 'SOLICITOR_BLOCKED') &&
+            normalizedItem.manuallyBlocked !== false &&
+            !explicitReplace
+          ) {
+            byId.set(nid, {
+              ...prev,
+              ...normalizedItem,
+              status: 'SOLICITOR_BLOCKED',
+              isBlocked: true,
+              manuallyBlocked: true,
+            });
+          } else {
+            byId.set(nid, {
+              ...(prev || {}),
+              ...normalizedItem,
+              transcriptText: normalizedItem.transcriptText || prev?.transcriptText || '',
+              summary: normalizedItem.summary || prev?.summary || '',
+            });
+          }
         }
       }
       return Array.from(byId.values()).sort((a: any, b: any) =>

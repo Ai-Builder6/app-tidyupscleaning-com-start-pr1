@@ -9637,11 +9637,16 @@ async function processQuoCallEvent(
   const eventType = event.type || event.event || "call.completed";
   const dataObj = event.data?.object || event.call || event.data || event;
 
-  const callId = dataObj.callId || dataObj.id || `call_${Date.now()}`;
+  const rawIncomingCallId = String(dataObj.callId || dataObj.id || `call_${Date.now()}`);
+  const callId = rawIncomingCallId.replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
+  const openPhoneApiCallId = rawIncomingCallId.replace(/^QUO_([0-9a-f]{32})$/i, "AC$1");
   const apiKey = getEffectiveQuoApiKey();
 
   // Check if we already have this call's transcript & summary cached in store.quoCallLogs
-  const cachedCallLog = (store.quoCallLogs || []).find((c: any) => c.callId === callId || c.id === callId);
+  const cachedCallLog = (store.quoCallLogs || []).find((c: any) => {
+    const cid = String(c?.callId || c?.id || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
+    return cid === callId;
+  });
 
   let remoteCall: any = dataObj.direction && dataObj.createdAt ? dataObj : null;
   let remoteTranscript: any = null;
@@ -9653,17 +9658,17 @@ async function processQuoCallEvent(
     eventType.includes("transcript") ||
     eventType.includes("summary");
 
-  if (apiKey && callId && String(callId).startsWith("AC") && (needsTranscriptFetch || !remoteCall)) {
+  if (apiKey && openPhoneApiCallId && String(openPhoneApiCallId).startsWith("AC") && (needsTranscriptFetch || !remoteCall)) {
     try {
       const [cRes, tRes, sRes] = await Promise.all([
         !remoteCall
-          ? fetch(`https://api.openphone.com/v1/calls/${callId}`, { headers: { Authorization: apiKey } }).catch(() => null)
+          ? fetch(`https://api.openphone.com/v1/calls/${openPhoneApiCallId}`, { headers: { Authorization: apiKey } }).catch(() => null)
           : Promise.resolve(null),
         !cachedCallLog?.transcriptText
-          ? fetch(`https://api.openphone.com/v1/call-transcripts/${callId}`, { headers: { Authorization: apiKey } }).catch(() => null)
+          ? fetch(`https://api.openphone.com/v1/call-transcripts/${openPhoneApiCallId}`, { headers: { Authorization: apiKey } }).catch(() => null)
           : Promise.resolve(null),
         !cachedCallLog?.summary || cachedCallLog.summary === "Inbound voice call completed"
-          ? fetch(`https://api.openphone.com/v1/call-summaries/${callId}`, { headers: { Authorization: apiKey } }).catch(() => null)
+          ? fetch(`https://api.openphone.com/v1/call-summaries/${openPhoneApiCallId}`, { headers: { Authorization: apiKey } }).catch(() => null)
           : Promise.resolve(null),
       ]);
       if (cRes && cRes.ok) remoteCall = (await cRes.json()).data;
@@ -10073,12 +10078,15 @@ async function processQuoCallEvent(
     store.clients.unshift(newClientRecord as any);
   }
 
-  // 3. STORE OR UPDATE IN GLOBAL QUO CALL LOGS (Deduplicated by callId)
-  const existingLogIdx = store.quoCallLogs.findIndex((c: any) => c.callId === callId || c.id === callId);
+  // 3. STORE OR UPDATE IN GLOBAL QUO CALL LOGS (Deduplicated by normalized QUO_ callId)
+  const existingLogIdx = store.quoCallLogs.findIndex((c: any) => {
+    const cid = String(c?.callId || c?.id || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
+    return cid === callId;
+  });
   if (existingLogIdx >= 0) {
-    store.quoCallLogs[existingLogIdx] = { ...store.quoCallLogs[existingLogIdx], ...callLogEntry };
+    store.quoCallLogs[existingLogIdx] = { ...store.quoCallLogs[existingLogIdx], ...callLogEntry, id: callId, callId };
   } else {
-    store.quoCallLogs.unshift(callLogEntry);
+    store.quoCallLogs.unshift({ ...callLogEntry, id: callId, callId });
   }
   if (store.quoCallLogs.length > 300) {
     store.quoCallLogs = store.quoCallLogs.slice(0, 300);
@@ -12153,9 +12161,21 @@ app.get("/api/twilio/live-calls", async (req, res) => {
         if (Array.isArray(remData.quoCallLogs)) {
           if (!Array.isArray(store.quoCallLogs)) store.quoCallLogs = [];
           for (const rq of remData.quoCallLogs.slice(0, 10)) {
-            const exists = store.quoCallLogs.some((lq: any) => (lq.callId || lq.id) === (rq.callId || rq.id));
-            if (!exists) {
-              store.quoCallLogs.unshift(rq);
+            const rqNormId = String(rq.callId || rq.id || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
+            if (!rqNormId) continue;
+            const existsIdx = store.quoCallLogs.findIndex(
+              (lq: any) => String(lq.callId || lq.id || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1") === rqNormId
+            );
+            if (existsIdx < 0) {
+              store.quoCallLogs.unshift({ ...rq, id: rqNormId, callId: rqNormId });
+              storeUpdated = true;
+            } else if (!store.quoCallLogs[existsIdx].transcriptText && rq.transcriptText) {
+              store.quoCallLogs[existsIdx] = {
+                ...store.quoCallLogs[existsIdx],
+                ...rq,
+                id: rqNormId,
+                callId: rqNormId,
+              };
               storeUpdated = true;
             }
           }

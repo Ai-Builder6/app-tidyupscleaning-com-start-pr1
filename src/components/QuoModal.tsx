@@ -680,7 +680,7 @@ export const QuoModal: React.FC<QuoModalProps> = ({
 
                       return (
                         <div
-                          key={call.id || idx}
+                          key={`${call.id || 'call'}-${idx}`}
                           className={`bg-white p-4 rounded-xl border shadow-2xs space-y-2.5 transition-all ${
                             isBad
                               ? 'border-rose-200 bg-rose-50/20'

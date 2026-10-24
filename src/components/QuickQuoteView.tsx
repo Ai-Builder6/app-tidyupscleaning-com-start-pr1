@@ -1365,9 +1365,13 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     }
   };
 
-  // Live Call Capture Timer + Speaker/Earbuds Mode (bookmycleaning.net workflow)
+  // Live Call Capture Timer + Phone Call / Computer Mic Mode (bookmycleaning.net workflow)
   const [callCaptureElapsedSec, setCallCaptureElapsedSec] = useState<number>(0);
   const [isCallTimerStopped, setIsCallTimerStopped] = useState<boolean>(false);
+  const [liveCallTab, setLiveCallTab] = useState<'call' | 'mic'>('mic');
+  const [liveActiveCall, setLiveActiveCall] = useState<any | null>(null);
+  const [latestCompletedCall, setLatestCompletedCall] = useState<any | null>(null);
+  const lastAutoExtractedCallSigRef = useRef<string>('');
   const [micMode, setMicMode] = useState<'speaker' | 'earbuds'>(() => {
     try {
       return localStorage.getItem('bmc.callCapture.micMode') === 'earbuds' ? 'earbuds' : 'speaker';
@@ -1383,6 +1387,64 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     }, 1000);
     return () => clearInterval(t);
   }, [isRecording, isCallTimerStopped]);
+
+  // Continuously watch /api/twilio/live-calls (just like bookmycleaning.net's NewBookingPage)
+  // so whether you answer at the computer, answer upstairs on the telephone, or let the receptionist pick up,
+  // the form fills itself in automatically on your computer screen!
+  useEffect(() => {
+    let mounted = true;
+    const pollCallUpdates = async () => {
+      try {
+        const res = await fetch(`/api/twilio/live-calls?project=${projectId}`);
+        if (!res.ok || !mounted) return;
+        const data = await res.json();
+        const active = Array.isArray(data.liveHudCalls) ? data.liveHudCalls[0] || null : null;
+        const recent = Array.isArray(data.recentCalls) ? data.recentCalls[0] || null : null;
+        if (mounted) {
+          setLiveActiveCall(active);
+          setLatestCompletedCall(active || recent);
+        }
+        const target = active || recent;
+        if (target && target.status !== 'BLOCKED') {
+          const ageMs = Date.now() - new Date(target.timestamp || 0).getTime();
+          // If this call happened within the last 30 minutes and now has a transcript or summary, auto-fill the form boxes!
+          if (ageMs <= 30 * 60 * 1000 && (target.transcriptText || target.summary)) {
+            const sig = `${target.id}|${target.transcriptText || ''}|${target.summary || ''}`;
+            if (sig !== lastAutoExtractedCallSigRef.current) {
+              lastAutoExtractedCallSigRef.current = sig;
+              const combinedText = [target.transcriptText, target.summary].filter(Boolean).join('\n');
+              if (target.callerNumber && !liveValuesRef.current.phone) {
+                setCustomerPhone(target.callerNumber);
+                liveValuesRef.current.phone = target.callerNumber;
+                triggerFieldHighlight('phone', target.callerNumber);
+              }
+              if (
+                target.callerName &&
+                !target.callerName.includes('Inbound Caller') &&
+                !target.callerName.includes('Verified Customer') &&
+                !liveValuesRef.current.name
+              ) {
+                setCustomerName(target.callerName);
+                liveValuesRef.current.name = target.callerName;
+                triggerFieldHighlight('name', target.callerName);
+              }
+              setVoiceTranscript(combinedText);
+              applyLiveSpeechExtraction(combinedText, true);
+              handleExtractFromTranscript(combinedText);
+            }
+          }
+        }
+      } catch {
+        // ignore transient network errors
+      }
+    };
+    pollCallUpdates();
+    const timer = setInterval(pollCallUpdates, 2500);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [projectId, applyLiveSpeechExtraction, triggerFieldHighlight]);
 
   const formatCallCaptureTimer = (sec: number) => {
     const mins = String(Math.floor(sec / 60)).padStart(2, '0');
@@ -1400,11 +1462,11 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
   };
 
   const handleQuickBlockFromQuoteHeader = async (mode: 'caller' | 'areacode') => {
-    const rawPhone = customerPhone || (initialLead as any)?.phone || '';
+    const rawPhone = customerPhone || liveActiveCall?.callerNumber || (initialLead as any)?.phone || '';
     const digits = rawPhone.replace(/\D/g, '');
     const normalized10 = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
-    const areaCode = (initialLead as any)?.areaCode || normalized10.slice(0, 3);
-    const callSid = (initialLead as any)?.callSid || 'quick-quote-header';
+    const areaCode = liveActiveCall?.areaCode || (initialLead as any)?.areaCode || normalized10.slice(0, 3);
+    const callSid = liveActiveCall?.callSid || (initialLead as any)?.callSid || 'quick-quote-header';
     try {
       const res = await fetch(`/api/twilio/live-calls/${encodeURIComponent(callSid)}/action?project=${projectId}`, {
         method: 'POST',
@@ -2213,55 +2275,130 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           </div>
         </div>
 
-        {/* Main Row: Description + Speaker/Earbuds Mode + GIANT BLINKING RED BUTTON */}
+        {/* Main Row: Phone Call (Receptionist / Upstairs Phone) + Computer Mic (Speaker / Earbuds) + BIG BLINKING RED BUTTON */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-2">
-            <h2 className="text-lg sm:text-xl font-extrabold text-white">
-              {isRecording
-                ? '🔴 Listening Live — Speak or Put Caller on Speaker to Auto-Fill Boxes in Green!'
-                : 'Incoming Call Auto-Listen & Instant Quote Builder'}
-            </h2>
+          <div className="space-y-2.5 flex-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-lg sm:text-xl font-extrabold text-white">
+                {isRecording
+                  ? '🔴 Live Call Capture Active — Boxes Fill in Green Automatically!'
+                  : 'Live Call & Automatic Quote Filler'}
+              </h2>
 
-            {/* Speakerphone vs Earbuds Mode Selector (from bookmycleaning.net) */}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setMicMode('speaker');
-                  try {
-                    localStorage.setItem('bmc.callCapture.micMode', 'speaker');
-                  } catch {}
-                }}
-                className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                  micMode === 'speaker'
-                    ? 'bg-red-600/30 border-red-400 text-white'
-                    : 'bg-slate-900/80 border-slate-700 text-slate-400 hover:text-white'
-                }`}
-              >
-                🔊 Speakerphone Mode
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMicMode('earbuds');
-                  try {
-                    localStorage.setItem('bmc.callCapture.micMode', 'earbuds');
-                  } catch {}
-                }}
-                className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                  micMode === 'earbuds'
-                    ? 'bg-red-600/30 border-red-400 text-white'
-                    : 'bg-slate-900/80 border-slate-700 text-slate-400 hover:text-white'
-                }`}
-              >
-                🎧 Earbuds / Headset Mode
-              </button>
-              <span className="text-xs text-slate-300">
-                {micMode === 'speaker'
-                  ? 'Put the caller on speaker so your computer hears both sides and fills every box in green.'
-                  : 'Wearing earbuds? Repeat details back out loud ("So that\'s 10405 Jasper Ave, 3 bedrooms, 2 bathrooms...") and it fills itself in!'}
-              </span>
+              {/* Phone Call vs Computer Mic Mode Switcher (exact bookmycleaning.net workflow) */}
+              <div className="inline-flex rounded-xl border border-white/15 overflow-hidden bg-slate-950/80">
+                <button
+                  type="button"
+                  onClick={() => setLiveCallTab('call')}
+                  className={`px-3 py-1.5 text-xs font-extrabold transition-colors cursor-pointer ${
+                    liveCallTab === 'call'
+                      ? 'bg-pink-600 text-white'
+                      : 'text-slate-300 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  📞 Phone Call / Receptionist
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLiveCallTab('mic')}
+                  className={`px-3 py-1.5 text-xs font-extrabold transition-colors cursor-pointer ${
+                    liveCallTab === 'mic'
+                      ? 'bg-pink-600 text-white'
+                      : 'text-slate-300 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  🎙️ Computer Mic
+                </button>
+              </div>
             </div>
+
+            {liveCallTab === 'call' ? (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-300">
+                  No need to hunt for your phone: whether your receptionist picks up or you answer on the phone upstairs and walk down here, <strong className="text-emerald-300">this form fills itself in automatically</strong> from the call.
+                </p>
+                {latestCompletedCall && (
+                  <div className="rounded-xl border border-white/15 bg-slate-950/70 px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          liveActiveCall ? 'bg-green-400 animate-pulse' : 'bg-emerald-400'
+                        }`}
+                      />
+                      <span className="font-bold text-white">
+                        {latestCompletedCall.callerName &&
+                        !latestCompletedCall.callerName.includes('Inbound Caller')
+                          ? `${latestCompletedCall.callerName} (${latestCompletedCall.callerNumber})`
+                          : latestCompletedCall.callerNumber}
+                      </span>
+                      <span className="text-slate-400">
+                        —{' '}
+                        {liveActiveCall
+                          ? `On the phone now (Dialed ${latestCompletedCall.originalDialedNumber})`
+                          : `Dialed ${latestCompletedCall.originalDialedNumber} (${latestCompletedCall.campaignLabel})`}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const txt = [latestCompletedCall.transcriptText, latestCompletedCall.summary]
+                          .filter(Boolean)
+                          .join('\n');
+                        if (txt) {
+                          setVoiceTranscript(txt);
+                          applyLiveSpeechExtraction(txt, true);
+                          handleExtractFromTranscript(txt);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer"
+                    >
+                      Read Call Again
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Speakerphone vs Earbuds Mode Selector (from bookmycleaning.net) */
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMicMode('speaker');
+                    try {
+                      localStorage.setItem('bmc.callCapture.micMode', 'speaker');
+                    } catch {}
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                    micMode === 'speaker'
+                      ? 'bg-red-600/30 border-red-400 text-white'
+                      : 'bg-slate-900/80 border-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  🔊 Call on Speaker
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMicMode('earbuds');
+                    try {
+                      localStorage.setItem('bmc.callCapture.micMode', 'earbuds');
+                    } catch {}
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                    micMode === 'earbuds'
+                      ? 'bg-red-600/30 border-red-400 text-white'
+                      : 'bg-slate-900/80 border-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  🎧 Earbuds In
+                </button>
+                <span className="text-xs text-slate-300">
+                  {micMode === 'speaker'
+                    ? 'Put the caller on speaker — or answer upstairs and watch the Phone Call tab fill every box in green!'
+                    : 'Wearing earbuds? Repeat details back out loud ("So that\'s 10405 Jasper Ave, 3 bedrooms, 2 bathrooms...") and it fills itself in!'}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap shrink-0">

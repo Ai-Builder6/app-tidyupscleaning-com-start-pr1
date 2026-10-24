@@ -2077,7 +2077,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                     return true;
                   })
                   .slice(0, 60)
-                  .map((call) => {
+                  .map((call, idx) => {
                     const blocked = isCallerPhoneBlocked(call.callerPhone, call);
                     const isConfirmedCleaning = !blocked && (Boolean(call.hasCleaningIntent) || call.leadVerdict === 'GOOD_LEAD');
                     const isPotentialJob =
@@ -2139,7 +2139,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
 
                     return (
                       <div
-                        key={call.id}
+                        key={`${call.id || 'call'}-${idx}`}
                         className={`p-3 rounded-2xl border text-xs flex flex-col justify-between gap-2 transition-all ${
                           blocked
                             ? 'bg-rose-950/40 border-rose-500/50'
