@@ -7967,6 +7967,18 @@ app.post("/api/public/book", async (req, res) => {
       curStore.clients = [newClient as any, ...(curStore.clients || [])];
       curStore.scheduledVisits = [newVisit as any, ...(curStore.scheduledVisits || [])];
       curStore.unscheduledJobs = [newUnscheduledJob as any, ...(curStore.unscheduledJobs || [])];
+      await sendOwnerNewLeadNotification(curStore, {
+        sourceLabel: `Online Booking (${routePathLabel})`,
+        customerName,
+        phone: cleanPhone,
+        email: customerEmail || "",
+        serviceType: canonicalServiceLabel,
+        bedrooms: bedrooms || "3 Bedrooms",
+        bathrooms: bathrooms || "2 Bathrooms",
+        preferredDate: reqDate,
+        address: `${address}, ${city || "Edmonton"}`,
+        quoteNumber,
+      });
       curStore.lastSavedAt = new Date().toISOString();
       saveStore(curStore, projectId);
       saveStore(curStore, "tidyups");
@@ -9007,13 +9019,17 @@ const DEFAULT_FB_BOT_SETTINGS = {
     process.env.FB_WEBHOOK_VERIFY_TOKEN ||
     "tidyups_fb_verify_2026",
   greetingTemplate:
-    "Hi {{name}}! 👋 Thanks for messaging {{page}}! I'd love to get you an exact cleaning price and check our schedule. What type of cleaning are you looking for (Standard, Deep Clean, or Move-Out), and how many bedrooms & bathrooms is the home?",
+    "Hi {{name}}! 👋 Thanks for messaging {{page}}! We'd love to put together a custom cleaning quote for your home. To get started, what type of cleaning are you looking for (Standard, Deep Clean, or Move-Out), and how many bedrooms & bathrooms does the property have?",
   systemPrompt:
-    "You are a warm, friendly, concise booking assistant for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). First answer any questions the customer asks about pricing or what is included. Then naturally guide the conversation to collect: (1) Service Type (Standard, Deep Clean, or Move-Out), (2) How many Bedrooms & Bathrooms, (3) Preferred Date & Time (Morning or Afternoon), and (4) Property Address & Phone Number so we can lock in their quote and send confirmation. Keep messages short (2-3 sentences max) like a real Facebook Messenger human dispatcher.",
+    "You are a warm, friendly, concise intake assistant for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). STRICT RULE: NEVER discuss, estimate, or quote prices, hourly rates, or dollar amounts with clients. If a client asks how much it costs or asks for a price, warmly explain that every home is custom-quoted based on its layout and condition, and that you will gather their details right now so our owner can review the draft and send them an official personalized quote right away. Focus on gathering as much helpful information as possible: (1) Service Type (Standard, Deep Clean, or Move-Out/Move-In) & any special add-ons/requests (inside oven, inside fridge, baseboards, interior windows, basement, pets), (2) How many Bedrooms, Bathrooms & approximate sq ft/levels, (3) Preferred Date & Time Window (Morning or Afternoon), and (4) Property Street Address, Phone Number & Email so we can send their official quote. Keep messages short (2-3 sentences max) like a real human dispatcher.",
   pricingRulesSummary:
-    "• 1 Cleaner: $52.50/hr | 2 Cleaners: $105.00/hr\n• Standard 3 Bed / 2 Bath: ~3 to 4 hrs ($191–$249)\n• Deep Clean / Move-Out 3 Bed / 2.5 Bath: ~3.5 to 4.5 hrs with 2 Cleaners ($367.50–$472.50 + $12.50 fuel surcharge + 12.5% tax)\n• Add-ons: Inside Oven, Inside Fridge, Baseboards, Interior Windows, Inside Cabinets ($45 each or included in hourly Move-Out package)\n• Deposit: $60–$100 to lock in the booking spot.",
+    "• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts, hourly rates, or price estimates with the customer in Messenger.\n• What IS Included to Mention: We bring all professional eco-friendly supplies, vacuums, and equipment. 100% satisfaction guarantee on Move-Out, Deep, and Standard cleans.\n• Information to Gather for Owner's Draft Quote:\n  1. Cleaning Type (Standard, Deep Clean, Move-Out/Move-In)\n  2. Bedrooms, Bathrooms, levels & approximate square footage\n  3. Any special areas (Inside Oven, Inside Fridge, Baseboards, Interior Windows, Cabinets, Pets)\n  4. Preferred Date & Morning/Afternoon window\n  5. Property Street Address + Client Phone Number & Email (so we can send their official quote).",
   autoSyncToGoogleSheet: true,
   autoCreateJobberQuote: true,
+  notifyOwnerOnNewLead: true,
+  ownerNotificationPhone: process.env.OWNER_NOTIFY_PHONE || "+1 (587) 416-9181",
+  notifyViaSms: true,
+  notifyViaInAppChat: true,
 };
 
 function getInitialFbThreads(): any[] {
@@ -9057,11 +9073,38 @@ function ensureFbStoreInitialized(store: any) {
   }
   if (!store.fbBotSettings) {
     store.fbBotSettings = { ...DEFAULT_FB_BOT_SETTINGS };
-  } else if (
-    process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK &&
-    store.fbBotSettings.verifyToken === "tidyups_fb_verify_2026"
-  ) {
-    store.fbBotSettings.verifyToken = process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK;
+  } else {
+    if (
+      process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK &&
+      store.fbBotSettings.verifyToken === "tidyups_fb_verify_2026"
+    ) {
+      store.fbBotSettings.verifyToken = process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK;
+    }
+    // Auto-upgrade old price-quoting bot prompt to the new Strict No-Price / Info-Gathering Mode
+    if (
+      String(store.fbBotSettings.pricingRulesSummary || "").includes("$52.50/hr") ||
+      String(store.fbBotSettings.systemPrompt || "").includes("questions the customer asks about pricing")
+    ) {
+      store.fbBotSettings.greetingTemplate = DEFAULT_FB_BOT_SETTINGS.greetingTemplate;
+      store.fbBotSettings.systemPrompt = DEFAULT_FB_BOT_SETTINGS.systemPrompt;
+      store.fbBotSettings.pricingRulesSummary = DEFAULT_FB_BOT_SETTINGS.pricingRulesSummary;
+    }
+    if (typeof store.fbBotSettings.notifyOwnerOnNewLead !== "boolean") {
+      store.fbBotSettings.notifyOwnerOnNewLead = true;
+    }
+    if (!store.fbBotSettings.ownerNotificationPhone) {
+      store.fbBotSettings.ownerNotificationPhone =
+        process.env.OWNER_NOTIFY_PHONE || "+1 (587) 416-9181";
+    }
+    if (typeof store.fbBotSettings.notifyViaSms !== "boolean") {
+      store.fbBotSettings.notifyViaSms = true;
+    }
+    if (typeof store.fbBotSettings.notifyViaInAppChat !== "boolean") {
+      store.fbBotSettings.notifyViaInAppChat = true;
+    }
+  }
+  if (!Array.isArray(store.ownerLeadNotifications)) {
+    store.ownerLeadNotifications = [];
   }
   if (!Array.isArray(store.fbMessengerThreads)) {
     store.fbMessengerThreads = [];
@@ -9085,6 +9128,150 @@ function ensureFbStoreInitialized(store: any) {
       return true;
     });
   }
+}
+
+async function sendOwnerNewLeadNotification(
+  store: any,
+  info: {
+    sourceLabel: string;
+    customerName: string;
+    phone?: string;
+    email?: string;
+    serviceType?: string;
+    bedrooms?: string;
+    bathrooms?: string;
+    preferredDate?: string;
+    address?: string;
+    quoteNumber?: string;
+    notes?: string;
+    isTest?: boolean;
+  }
+) {
+  ensureFbStoreInitialized(store);
+  const settings = store.fbBotSettings || DEFAULT_FB_BOT_SETTINGS;
+  if (!info.isTest && settings.notifyOwnerOnNewLead === false) {
+    return { sentSms: false, sentChat: false, reason: "Notifications disabled" };
+  }
+
+  const smsBody = [
+    info.isTest
+      ? "🔔 [TEST ALERT] NEW TIDYUPS LEAD & DRAFT QUOTE!"
+      : "🔔 NEW TIDYUPS LEAD & DRAFT QUOTE READY!",
+    `Source: ${info.sourceLabel}`,
+    `Client: ${info.customerName}${info.phone ? ` (${info.phone})` : ""}`,
+    `Service: ${info.serviceType || "Residential Cleaning"} (${info.bedrooms || "? Bed"}, ${info.bathrooms || "? Bath"})`,
+    info.preferredDate ? `Date: ${info.preferredDate}` : "",
+    info.address ? `Address: ${info.address}` : "",
+    info.quoteNumber
+      ? `Draft Quote: ${info.quoteNumber} (Saved in Jobber & Google Sheets — Ready for your review!)`
+      : "Saved to Google Sheets (FB Leads) — Gathering final details for Draft Quote",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  let sentSms = false;
+  let smsStatusNote = "SMS skipped";
+  const rawDestPhone = String(settings.ownerNotificationPhone || "").trim();
+  const digitsOnly = rawDestPhone.replace(/\D/g, "");
+  const destE164 =
+    digitsOnly.length === 10
+      ? `+1${digitsOnly}`
+      : digitsOnly.length === 11 && digitsOnly.startsWith("1")
+      ? `+${digitsOnly}`
+      : rawDestPhone.startsWith("+")
+      ? rawDestPhone
+      : "";
+
+  if (settings.notifyViaSms !== false && destE164) {
+    const quoApiKey = getEffectiveQuoApiKey();
+    if (quoApiKey) {
+      try {
+        // Send via Quo / OpenPhone API from main TidyUps line (+15874169181 / PN47TA8kue)
+        const smsRes = await fetch("https://api.openphone.com/v1/messages", {
+          method: "POST",
+          headers: {
+            Authorization: quoApiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            content: smsBody,
+            from: "+15874169181",
+            to: [destE164],
+          }),
+        });
+        if (smsRes.ok) {
+          sentSms = true;
+          smsStatusNote = `SMS sent to ${destE164} via Quo`;
+        } else {
+          // Try with phoneNumberId fallback PN47TA8kue
+          const retryRes = await fetch("https://api.openphone.com/v1/messages", {
+            method: "POST",
+            headers: {
+              Authorization: quoApiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              content: smsBody,
+              from: "PN47TA8kue",
+              to: [destE164],
+            }),
+          });
+          if (retryRes.ok) {
+            sentSms = true;
+            smsStatusNote = `SMS sent to ${destE164} via Quo (PN47TA8kue)`;
+          } else {
+            const errTxt = await retryRes.text().catch(() => "");
+            smsStatusNote = `Quo SMS note: ${errTxt.slice(0, 90) || retryRes.status}`;
+          }
+        }
+      } catch (err: any) {
+        smsStatusNote = `SMS error: ${err?.message || "Network note"}`;
+      }
+    } else {
+      smsStatusNote = `Quo API key not found (Queued for ${destE164})`;
+    }
+  }
+
+  let sentChat = false;
+  if (settings.notifyViaInAppChat !== false) {
+    try {
+      persistChatMessage({
+        id: `msg-lead-alert-${Date.now()}`,
+        senderId: "system-lead-bot",
+        senderName: "🔔 Lead & Draft Quote Alert",
+        senderRole: "DISPATCHER",
+        recipientId: "BROADCAST_ALL",
+        recipientName: "Richard (Owner)",
+        text: smsBody,
+        timestamp: new Date().toISOString(),
+        read: false,
+      });
+      sentChat = true;
+    } catch {}
+  }
+
+  const logEntry = {
+    id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    sourceLabel: info.sourceLabel,
+    customerName: info.customerName,
+    phone: info.phone || "",
+    serviceType: info.serviceType || "Residential Cleaning",
+    quoteNumber: info.quoteNumber || "Sheet Lead",
+    ownerPhone: destE164 || rawDestPhone,
+    sentSms,
+    sentChat,
+    smsStatusNote,
+    messagePreview: smsBody,
+  };
+
+  if (!Array.isArray(store.ownerLeadNotifications)) {
+    store.ownerLeadNotifications = [];
+  }
+  store.ownerLeadNotifications.unshift(logEntry);
+  store.ownerLeadNotifications = store.ownerLeadNotifications.slice(0, 50);
+
+  return { sentSms, sentChat, smsStatusNote, logEntry };
 }
 
 async function runFacebookMessengerAiTurn(
@@ -9143,6 +9330,7 @@ async function runFacebookMessengerAiTurn(
     specificNotes: currentExt.specificNotes || "",
   };
 
+  // Internal draft calculation ONLY for owner's Jobber Draft Quote (never shared with customer in chat)
   const recalcPrice = (ext: any) => {
     const hrs = Number(ext.estimatedHours) || 3.5;
     const cleaners = Number(ext.estimatedCleaners) || 2;
@@ -9158,10 +9346,10 @@ async function runFacebookMessengerAiTurn(
 
   const missingFields: string[] = [];
   if (!mergedExtracted.serviceType) missingFields.push("what type of cleaning (Standard, Deep Clean, or Move-Out)");
-  if (!mergedExtracted.bedrooms || !mergedExtracted.bathrooms) missingFields.push("how many bedrooms and bathrooms");
-  if (!mergedExtracted.preferredDate) missingFields.push("preferred date of service");
-  if (!mergedExtracted.address) missingFields.push("property street address");
-  if (!mergedExtracted.phone) missingFields.push("best phone number to send the quote");
+  if (!mergedExtracted.bedrooms || !mergedExtracted.bathrooms) missingFields.push("how many bedrooms and bathrooms (and any special areas like oven, fridge, or baseboards)");
+  if (!mergedExtracted.preferredDate) missingFields.push("your preferred date and morning/afternoon time window");
+  if (!mergedExtracted.address) missingFields.push("the property street address");
+  if (!mergedExtracted.phone) missingFields.push("your best phone number and email so we can send your official quote");
 
   if (ai) {
     try {
@@ -9172,27 +9360,44 @@ async function runFacebookMessengerAiTurn(
         day: "2-digit",
       }).format(new Date());
 
+      // Redact internal draft price fields before passing to the AI prompt so it cannot accidentally leak numbers
+      const extractedForAiPrompt = {
+        customerName: mergedExtracted.customerName,
+        phone: mergedExtracted.phone,
+        email: mergedExtracted.email,
+        serviceType: mergedExtracted.serviceType,
+        bedrooms: mergedExtracted.bedrooms,
+        bathrooms: mergedExtracted.bathrooms,
+        preferredDate: mergedExtracted.preferredDate,
+        timeWindow: mergedExtracted.timeWindow,
+        address: mergedExtracted.address,
+        specificNotes: mergedExtracted.specificNotes,
+      };
+
       const prompt = `You are "${botSettings.botName}" replying to a customer on Facebook Messenger for page "${thread.pageName}".
 Today's Date in Edmonton: ${todayEdmontonStr}.
+
+CRITICAL NON-NEGOTIABLE RULE:
+NEVER discuss, quote, estimate, or mention any dollar prices, hourly rates, or totals to the client! Do NOT output "$" or any price numbers. If the customer asks for a price or estimate, warmly let them know that every home is custom-quoted by our owner based on the exact layout and condition, and once you grab their details here, we will review and send them a proper official quote right away.
 
 Owner's Custom Instructions:
 ${botSettings.systemPrompt}
 
-TidyUps Pricing & Service Rules:
+Intake Guidelines & Service Info:
 ${botSettings.pricingRulesSummary}
 
 Current Extracted Lead Info:
-${JSON.stringify(mergedExtracted)}
+${JSON.stringify(extractedForAiPrompt)}
 
 Still Missing From Customer:
-${missingFields.length > 0 ? missingFields.join(", ") : "All key fields collected! Ready to confirm quote."}
+${missingFields.length > 0 ? missingFields.join(", ") : "All key fields collected! Thank them and let them know we have prepared their draft file for our owner to review and send their official quote."}
 
 Full Messenger Conversation So Far:
 ${transcriptText}
 
 Respond in JSON with:
-1. "replyText": Your friendly, concise Facebook Messenger response (2-3 sentences max) that answers the customer's latest message/question using the pricing rules above AND asks for the next 1 or 2 missing details (or confirms their quote total if all details are collected).
-2. Extracted fields updated from the conversation ("customerName", "phone", "email", "serviceType", "bedrooms", "bathrooms", "preferredDate" in YYYY-MM-DD if mentioned, "timeWindow", "address", "estimatedHours", "estimatedCleaners"). Leave any unmentioned field as empty string.`;
+1. "replyText": Your friendly, concise Facebook Messenger response (2-3 sentences max) that NEVER mentions any prices or dollar amounts, warmly answers general service questions, and asks for the next 1 or 2 missing details (or confirms that all details have been sent to our quoting desk so our owner can review and send their official quote).
+2. Extracted fields updated from the conversation ("customerName", "phone", "email", "serviceType", "bedrooms", "bathrooms", "preferredDate" in YYYY-MM-DD if mentioned, "timeWindow", "address", "specificNotes", "estimatedHours", "estimatedCleaners"). Leave any unmentioned field as empty string.`;
 
       const response = await withTimeout(
         ai.models.generateContent({
@@ -9213,6 +9418,7 @@ Respond in JSON with:
                 preferredDate: { type: Type.STRING },
                 timeWindow: { type: Type.STRING },
                 address: { type: Type.STRING },
+                specificNotes: { type: Type.STRING },
                 estimatedHours: { type: Type.NUMBER },
                 estimatedCleaners: { type: Type.INTEGER },
               },
@@ -9233,6 +9439,7 @@ Respond in JSON with:
       if (parsed.preferredDate) mergedExtracted.preferredDate = parsed.preferredDate;
       if (parsed.timeWindow) mergedExtracted.timeWindow = parsed.timeWindow;
       if (parsed.address) mergedExtracted.address = parsed.address;
+      if (parsed.specificNotes) mergedExtracted.specificNotes = parsed.specificNotes;
       if (typeof parsed.estimatedHours === "number" && parsed.estimatedHours > 0) {
         mergedExtracted.estimatedHours = parsed.estimatedHours;
       }
@@ -9241,7 +9448,7 @@ Respond in JSON with:
       }
       recalcPrice(mergedExtracted);
 
-      if (parsed.replyText) {
+      if (parsed.replyText && !/\$\s*\d/.test(parsed.replyText)) {
         return {
           replyText: parsed.replyText,
           updatedExtracted: mergedExtracted,
@@ -9252,20 +9459,12 @@ Respond in JSON with:
     }
   }
 
-  // Fallback intelligent conversational reply
+  // Fallback intelligent conversational reply (Strictly NO prices or dollar amounts)
   const nextToAsk = missingFields.slice(0, 2).join(" and ");
   const fallbackReply =
     missingFields.length > 0
-      ? `Thanks for reaching out! Based on your details (${
-          mergedExtracted.bedrooms || "your home"
-        }${mergedExtracted.bathrooms ? `, ${mergedExtracted.bathrooms}` : ""} ${
-          mergedExtracted.serviceType || "cleaning"
-        }), our estimated total is ~$${mergedExtracted.estimatedTotal.toFixed(2)} CAD (${
-          mergedExtracted.estimatedHours
-        } hrs with ${mergedExtracted.estimatedCleaners} cleaners @ $${mergedExtracted.estimatedHourlyRate.toFixed(
-          2
-        )}/hr + fuel & tax). Could you share ${nextToAsk} so I can lock in your quote?`
-      : `Awesome, thank you ${mergedExtracted.customerName}! I have all your details for ${mergedExtracted.serviceType} (${mergedExtracted.bedrooms}, ${mergedExtracted.bathrooms}) on ${mergedExtracted.preferredDate} at ${mergedExtracted.address} (Estimated Total: $${mergedExtracted.estimatedTotal.toFixed(2)} CAD). I've just generated your official quote and sent it over to our dispatch schedule!`;
+      ? `Thanks so much for reaching out to TidyUps! Because every home is custom-quoted based on its layout and condition, I'm gathering a few quick details so we can put together a proper quote for you. Could you share ${nextToAsk}, plus any special requests (like inside oven, fridge, or baseboards)?`
+      : `Awesome, thank you ${mergedExtracted.customerName}! I have all your details for ${mergedExtracted.serviceType} (${mergedExtracted.bedrooms}, ${mergedExtracted.bathrooms}) on ${mergedExtracted.preferredDate} at ${mergedExtracted.address}. I've just saved your information and prepared a draft quote for our owner to look over and send directly to you!`;
 
   return {
     replyText: fallbackReply,
@@ -9306,10 +9505,11 @@ async function syncFbThreadToSheetAndOptionallyJobber(
     verdict: "Good lead",
     quotedAmount: Number(ext.estimatedTotal) || 280,
     quoteNumber: thread.syncedQuoteNumber || undefined,
-    notes: `[${thread.pageName}] Messenger Transcript: ${transcriptSummary}`,
+    notes: `[${thread.pageName}] [DRAFT FOR OWNER REVIEW] ${ext.specificNotes ? `Notes: ${ext.specificNotes} | ` : ""}Messenger Transcript: ${transcriptSummary}`,
   };
 
   const existingLeadIdx = store.adLeads.findIndex((l: any) => l.id === leadId);
+  const isFirstLeadSync = existingLeadIdx < 0;
   if (existingLeadIdx >= 0) {
     store.adLeads[existingLeadIdx] = { ...store.adLeads[existingLeadIdx], ...leadItem };
   } else {
@@ -9332,7 +9532,9 @@ async function syncFbThreadToSheetAndOptionallyJobber(
     const depositRequired = Number(ext.depositRequired) || 75;
     const cleanLineItemDesc = `${ext.bedrooms || "3 Bedrooms"}, ${ext.bathrooms || "2 Bathrooms"} • ${cleaners} Cleaner${
       cleaners > 1 ? "s" : ""
-    } @ $${hourlyRate.toFixed(2)}/hr — ${ext.address || "Edmonton, AB"}`;
+    } @ $${hourlyRate.toFixed(2)}/hr — ${ext.address || "Edmonton, AB"}${
+      ext.specificNotes ? ` (${ext.specificNotes})` : ""
+    }`;
 
     const lineItems = [
       {
@@ -9351,9 +9553,11 @@ async function syncFbThreadToSheetAndOptionallyJobber(
       },
     ];
 
-    const quoteNotesWithTranscript = `FB Page: ${thread.pageName} | Scope: ${ext.serviceType || "Cleaning"} (${
-      ext.bedrooms || "3 Bed"
-    }, ${ext.bathrooms || "2 Bath"}) on ${ext.preferredDate || "TBD"} | Messenger Transcript: ${transcriptSummary}`;
+    const quoteNotesWithTranscript = `[DRAFT FOR OWNER REVIEW] FB Page: ${thread.pageName} | Scope: ${
+      ext.serviceType || "Cleaning"
+    } (${ext.bedrooms || "3 Bed"}, ${ext.bathrooms || "2 Bath"}) on ${ext.preferredDate || "TBD"} | ${
+      ext.specificNotes ? `Special Notes: ${ext.specificNotes} | ` : ""
+    }Messenger Transcript: ${transcriptSummary}`;
 
     const pushRes = await pushQuoteToJobber(
       {
@@ -9421,6 +9625,40 @@ async function syncFbThreadToSheetAndOptionallyJobber(
     ];
 
     upsertJobberClientAndLeadFromQuote(store, createdOrUpdatedQuote, pushRes.jobberClientId, "Facebook");
+
+    if (!thread.ownerNotifiedForQuote) {
+      thread.ownerNotifiedForQuote = true;
+      await sendOwnerNewLeadNotification(store, {
+        sourceLabel: `Facebook Messenger (${thread.pageName})`,
+        customerName: createdOrUpdatedQuote.clientName,
+        phone: ext.phone || "",
+        email: ext.email || "",
+        serviceType: ext.serviceType || "Residential Cleaning",
+        bedrooms: ext.bedrooms || "",
+        bathrooms: ext.bathrooms || "",
+        preferredDate: ext.preferredDate || "",
+        address: ext.address || "",
+        quoteNumber,
+      });
+    }
+  } else if (
+    !thread.ownerNotifiedForLead &&
+    (isFirstLeadSync || Boolean(ext.phone) || Boolean(ext.serviceType)) &&
+    (Boolean(ext.phone) || Boolean(ext.address) || (Boolean(ext.serviceType) && Boolean(ext.bedrooms)))
+  ) {
+    // Also notify owner as soon as a new Facebook lead submits meaningful info to Google Sheets
+    thread.ownerNotifiedForLead = true;
+    await sendOwnerNewLeadNotification(store, {
+      sourceLabel: `Facebook Lead -> Google Sheets (${thread.pageName})`,
+      customerName: ext.customerName || thread.customerName || "Facebook Messenger Lead",
+      phone: ext.phone || "",
+      email: ext.email || "",
+      serviceType: ext.serviceType || "Inquiry",
+      bedrooms: ext.bedrooms || "",
+      bathrooms: ext.bathrooms || "",
+      preferredDate: ext.preferredDate || "",
+      address: ext.address || "",
+    });
   }
 
   return { leadItem, quote: createdOrUpdatedQuote };
@@ -9441,6 +9679,36 @@ app.get("/api/facebook/state", (req, res) => {
     pages: store.fbPages,
     botSettings: store.fbBotSettings,
     threads: store.fbMessengerThreads,
+    notifications: store.ownerLeadNotifications || [],
+  });
+});
+
+// POST /api/facebook/test-notification
+app.post("/api/facebook/test-notification", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+  if (req.body?.ownerNotificationPhone) {
+    store.fbBotSettings.ownerNotificationPhone = String(req.body.ownerNotificationPhone).trim();
+  }
+  const notifRes = await sendOwnerNewLeadNotification(store, {
+    sourceLabel: "Facebook AI Bot (Page 1: TidyUps Cleaning Service Inc)",
+    customerName: "Sample Client (Test Lead Alert)",
+    phone: "(780) 555-0144",
+    serviceType: "Move-Out / Deep Cleaning",
+    bedrooms: "3 Bedrooms",
+    bathrooms: "2.5 Bathrooms",
+    preferredDate: new Date().toISOString().slice(0, 10),
+    address: "10420 Jasper Ave, Edmonton, AB",
+    quoteNumber: "QT-DRAFT",
+    isTest: true,
+  });
+  store.lastSavedAt = new Date().toISOString();
+  saveStore(store, projectId);
+  res.json({
+    success: true,
+    ...notifRes,
+    notifications: store.ownerLeadNotifications || [],
   });
 });
 
@@ -9486,6 +9754,7 @@ app.post("/api/facebook/config", async (req, res) => {
     success: true,
     pages: store.fbPages,
     botSettings: store.fbBotSettings,
+    notifications: store.ownerLeadNotifications || [],
   });
 });
 

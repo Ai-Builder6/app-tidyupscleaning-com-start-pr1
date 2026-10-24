@@ -48,6 +48,25 @@ export interface FbBotSettings {
   pricingRulesSummary: string;
   autoSyncToGoogleSheet: boolean;
   autoCreateJobberQuote: boolean;
+  notifyOwnerOnNewLead?: boolean;
+  ownerNotificationPhone?: string;
+  notifyViaSms?: boolean;
+  notifyViaInAppChat?: boolean;
+}
+
+export interface OwnerLeadNotificationItem {
+  id: string;
+  timestamp: string;
+  sourceLabel: string;
+  customerName: string;
+  phone: string;
+  serviceType: string;
+  quoteNumber: string;
+  ownerPhone: string;
+  sentSms: boolean;
+  sentChat: boolean;
+  smsStatusNote: string;
+  messagePreview: string;
 }
 
 export interface FbExtractedLeadData {
@@ -117,14 +136,20 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
     botName: 'TidyUps AI Messenger Assistant',
     verifyToken: 'tidyups_fb_verify_2026',
     greetingTemplate:
-      "Hi {{name}}! 👋 Thanks for messaging {{page}}! I'd love to get you an exact cleaning price and check our schedule. What type of cleaning are you looking for (Standard, Deep Clean, or Move-Out), and how many bedrooms & bathrooms is the home?",
+      "Hi {{name}}! 👋 Thanks for messaging {{page}}! We'd love to put together a custom cleaning quote for your home. To get started, what type of cleaning are you looking for (Standard, Deep Clean, or Move-Out), and how many bedrooms & bathrooms does the property have?",
     systemPrompt:
-      'You are a warm, friendly, concise booking assistant for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). First answer any questions the customer asks about pricing or what is included. Then naturally guide the conversation to collect: (1) Service Type (Standard, Deep Clean, or Move-Out), (2) How many Bedrooms & Bathrooms, (3) Preferred Date & Time (Morning or Afternoon), and (4) Property Address & Phone Number so we can lock in their quote and send confirmation. Keep messages short (2-3 sentences max) like a real Facebook Messenger human dispatcher.',
+      'You are a warm, friendly, concise intake assistant for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). STRICT RULE: NEVER discuss, estimate, or quote prices, hourly rates, or dollar amounts with clients. If a client asks how much it costs or asks for a price, warmly explain that every home is custom-quoted based on its layout and condition, and that you will gather their details right now so our owner can review the draft and send them an official personalized quote right away. Focus on gathering as much helpful information as possible: (1) Service Type (Standard, Deep Clean, or Move-Out/Move-In) & any special add-ons/requests (inside oven, inside fridge, baseboards, interior windows, basement, pets), (2) How many Bedrooms, Bathrooms & approximate sq ft/levels, (3) Preferred Date & Time Window (Morning or Afternoon), and (4) Property Street Address, Phone Number & Email so we can send their official quote. Keep messages short (2-3 sentences max) like a real human dispatcher.',
     pricingRulesSummary:
-      '• 1 Cleaner: $52.50/hr | 2 Cleaners: $105.00/hr\n• Standard 3 Bed / 2 Bath: ~3 to 4 hrs ($191–$249)\n• Deep Clean / Move-Out 3 Bed / 2.5 Bath: ~3.5 to 4.5 hrs with 2 Cleaners ($367.50–$472.50 + $12.50 fuel surcharge + 12.5% tax)\n• Add-ons: Inside Oven, Inside Fridge, Baseboards, Interior Windows, Inside Cabinets ($45 each or included in hourly Move-Out package)\n• Deposit: $60–$100 to lock in the booking spot.',
+      "• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts, hourly rates, or price estimates with the customer in Messenger.\n• What IS Included to Mention: We bring all professional eco-friendly supplies, vacuums, and equipment. 100% satisfaction guarantee on Move-Out, Deep, and Standard cleans.\n• Information to Gather for Owner's Draft Quote:\n  1. Cleaning Type (Standard, Deep Clean, Move-Out/Move-In)\n  2. Bedrooms, Bathrooms, levels & approximate square footage\n  3. Any special areas (Inside Oven, Inside Fridge, Baseboards, Interior Windows, Cabinets, Pets)\n  4. Preferred Date & Morning/Afternoon window\n  5. Property Street Address + Client Phone Number & Email (so we can send their official quote).",
     autoSyncToGoogleSheet: true,
     autoCreateJobberQuote: true,
+    notifyOwnerOnNewLead: true,
+    ownerNotificationPhone: '+1 (587) 416-9181',
+    notifyViaSms: true,
+    notifyViaInAppChat: true,
   });
+  const [notifications, setNotifications] = useState<OwnerLeadNotificationItem[]>([]);
+  const [isTestingAlert, setIsTestingAlert] = useState<boolean>(false);
   const [threads, setThreads] = useState<FbMessengerThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string>('');
   const [pageFilter, setPageFilter] = useState<'ALL' | 'page_1' | 'page_2' | 'page_3'>('ALL');
@@ -152,6 +177,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
       const data = await res.json();
       if (data.pages) setPages(data.pages);
       if (data.botSettings) setBotSettings(data.botSettings);
+      if (Array.isArray(data.notifications)) setNotifications(data.notifications);
       if (Array.isArray(data.threads)) {
         setThreads(data.threads);
         setSelectedThreadId((prev) => {
@@ -196,9 +222,10 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
       if (data.success) {
         if (data.pages) setPages(data.pages);
         if (data.botSettings) setBotSettings(data.botSettings);
+        if (Array.isArray(data.notifications)) setNotifications(data.notifications);
         setStatusBanner({
           tone: 'success',
-          text: '✓ Saved AI Messenger Bot instructions, pricing rules & 3-Page configuration! Next messages will immediately use your updated rules.',
+          text: '✓ Saved AI Messenger Bot (No-Price Info-Gathering Mode), Draft Quote & SMS Alert Settings!',
         });
       }
     } catch (e: any) {
@@ -208,6 +235,35 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
       });
     } finally {
       setIsSavingConfig(false);
+    }
+  };
+
+  const handleSendTestNotification = async () => {
+    if (isTestingAlert) return;
+    setIsTestingAlert(true);
+    try {
+      const res = await fetch(`/api/facebook/test-notification?project=${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ownerNotificationPhone: botSettings.ownerNotificationPhone,
+        }),
+      });
+      const data = await res.json();
+      if (Array.isArray(data.notifications)) {
+        setNotifications(data.notifications);
+      }
+      setStatusBanner({
+        tone: 'success',
+        text: `🔔 Sent Test Lead Alert to ${botSettings.ownerNotificationPhone || 'your phone'} (${data.smsStatusNote || 'SMS + In-App Alert dispatched'})!`,
+      });
+    } catch (err: any) {
+      setStatusBanner({
+        tone: 'warning',
+        text: `Test notification error: ${err?.message || 'Failed'}`,
+      });
+    } finally {
+      setIsTestingAlert(false);
     }
   };
 
@@ -474,11 +530,12 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
               <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-mono font-bold text-emerald-300">
                 All 3 Facebook Pages Live • App ID: 997522660032668
               </span>
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[10px] font-extrabold text-amber-300">
+                🚫 No Prices Shared in Chat • Draft Quote + SMS Alert Mode
+              </span>
             </div>
             <p className="text-xs text-slate-400">
-              Monitors all 3 Facebook pages in real time, collects{' '}
-              <strong className="text-slate-200">Service, Bedrooms/Bathrooms, Preferred Date, Address &amp; Phone</strong>, and syncs to{' '}
-              <strong className="text-emerald-300">FB Leads Sheet + Jobber Quotes</strong>.
+              AI gathers <strong className="text-slate-200">Service, Bedrooms/Baths, Special Requests, Date, Address &amp; Phone</strong> (without discussing prices), saves a <strong className="text-emerald-300">DRAFT Quote in Jobber + FB Leads Sheet</strong> for you to review &amp; send, and texts your phone!
             </p>
           </div>
         </div>
@@ -505,7 +562,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>Tweak AI Script &amp; Pricing</span>
+            <span>AI Intake &amp; SMS Alerts</span>
           </button>
 
           <button
@@ -1235,31 +1292,44 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                       className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-white font-semibold"
                     />
                   </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1 mb-1">
+                      <Sparkles className="w-3 h-3 text-amber-400" />
+                      <span>5. Special Requests / Add-Ons (Oven, Fridge, Baseboards, Pets)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={activeThread.extracted.specificNotes || ''}
+                      onChange={(e) => handleUpdateExtractedField('specificNotes', e.target.value)}
+                      placeholder="Any special areas, add-ons, or property notes gathered by AI..."
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-white font-semibold"
+                    />
+                  </div>
                 </div>
 
-                {/* Auto-Calculated Price Box */}
-                <div className="p-3 rounded-xl bg-slate-950 border border-white/10 flex items-center justify-between">
+                {/* Owner Internal Draft Quote Box (Not Shared With Customer in Messenger) */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-amber-500/30 flex items-center justify-between gap-2">
                   <div className="text-xs">
-                    <div className="font-bold text-slate-300 flex items-center gap-1">
-                      <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                    <div className="font-bold text-amber-300 flex items-center gap-1">
+                      <DollarSign className="w-3.5 h-3.5 text-amber-400" />
                       <span>
-                        Estimated Quote: {activeThread.extracted.estimatedHours || 3} hrs (
-                        {activeThread.extracted.estimatedCleaners || 2} Cleaners @ $
-                        {(activeThread.extracted.estimatedHourlyRate || 105).toFixed(2)}/hr)
+                        Owner Draft Quote Preview (Hidden From Client in Chat)
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-400 mt-0.5">
-                      Includes $12.50 Fuel + 12.5% Tax • Deposit: ${activeThread.extracted.depositRequired || 60}
+                      {activeThread.extracted.estimatedHours || 3.5} hrs ({activeThread.extracted.estimatedCleaners || 2} Cleaners @ ${(activeThread.extracted.estimatedHourlyRate || 105).toFixed(2)}/hr) • Created as <strong className="text-emerald-300">DRAFT</strong> in Jobber so you can look it over &amp; send!
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
+                    <div className="text-[10px] font-bold uppercase text-amber-300">Draft Est.</div>
                     <div className="text-base font-black text-emerald-400">
                       ${(activeThread.extracted.estimatedTotal || 280).toFixed(2)} CAD
                     </div>
                   </div>
                 </div>
 
-                {/* 1-Click Push to Google Sheet (FB Leads) & Jobber Quote */}
+                {/* 1-Click Push to Google Sheet (FB Leads) & Jobber Draft Quote */}
                 <button
                   type="button"
                   onClick={handleManualSyncThreadToSheetAndJobber}
@@ -1269,10 +1339,10 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                   <Zap className="w-4 h-4" />
                   <span>
                     {isSyncingThread
-                      ? 'Syncing to Google Sheet (FB Leads) & Jobber...'
+                      ? 'Syncing Lead to Google Sheet & Creating Jobber Draft...'
                       : activeThread.syncedQuoteNumber
-                      ? `Update Google Sheet & Jobber Quote (${activeThread.syncedQuoteNumber})`
-                      : 'Push to Google Sheet ("FB Leads") & Create Jobber Quote Now'}
+                      ? `Update Google Sheet & Jobber Draft Quote (${activeThread.syncedQuoteNumber})`
+                      : 'Send to Google Sheet ("FB Leads") & Create Jobber DRAFT Quote'}
                   </span>
                 </button>
 
@@ -1284,7 +1354,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                     className="w-full py-2 px-3 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 text-xs font-bold flex items-center justify-center gap-1.5"
                   >
                     <FileCheck className="w-3.5 h-3.5" />
-                    <span>Open Created Quote {activeThread.syncedQuoteNumber} in Jobber</span>
+                    <span>Review Draft Quote {activeThread.syncedQuoteNumber} in Jobber &amp; Send to Client</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
@@ -1296,40 +1366,141 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
             <div className="p-5 text-xs text-slate-400 space-y-3">
               <div className="p-4 rounded-2xl bg-slate-900/90 border border-emerald-500/30 space-y-2">
                 <h3 className="text-xs font-black uppercase tracking-wider text-emerald-300">
-                  Live Lead Intake Checklist (4 Core Fields)
+                  Live Lead Intake Checklist (No Prices Discussed by AI)
                 </h3>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  As soon as a customer messages any of your 3 Facebook Pages (or when you import/paste an existing FB inbox message), the AI automatically extracts:
+                  As soon as a customer messages any of your 3 Facebook Pages, the AI warmly answers general service questions without quoting prices and gathers:
                 </p>
                 <ul className="space-y-1 text-[11px] text-slate-200 font-semibold list-disc list-inside">
-                  <li>1. Service Needed (Standard, Deep Clean, Move-Out)</li>
-                  <li>2. Bedrooms &amp; Bathrooms</li>
+                  <li>1. Service Needed (Standard, Deep Clean, Move-Out) + Special Add-ons</li>
+                  <li>2. Bedrooms, Bathrooms &amp; Home Layout</li>
                   <li>3. Preferred Date &amp; Time Window</li>
-                  <li>4. Property Street Address &amp; Phone Number</li>
+                  <li>4. Property Street Address, Phone Number &amp; Email</li>
                 </ul>
                 <p className="text-[11px] text-emerald-300 pt-1">
-                  ✓ Automatically syncs to your Google Sheet (&ldquo;FB Leads&rdquo;) and creates a clean Jobber Quote with the conversation saved in <code className="font-mono">quoteNotes</code>!
+                  ✓ Sends the info to your Google Sheet (&ldquo;FB Leads&rdquo;), creates a <strong>DRAFT Quote</strong> in Jobber for you to look over and send, and texts your phone!
                 </p>
               </div>
             </div>
           )}
 
-          {/* TAB 2: TWEAK AI BOT INSTRUCTIONS, GREETING & PRICING RULES */}
+          {/* TAB 2: TWEAK AI BOT INSTRUCTIONS & SMS LEAD NOTIFICATIONS */}
           {rightPanelTab === 'TWEAK_AI' && (
             <div className="p-4 space-y-4">
+              {/* Instant Owner SMS & In-App Lead Alert Card */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-950/80 via-slate-900 to-indigo-950/80 border border-emerald-500/40 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black uppercase">
+                      📲 Instant Lead &amp; Draft Quote Alerts
+                    </span>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-white mt-1">
+                      Notify Me When a New Lead Hits Jobber or Google Sheets
+                    </h3>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Whenever the Facebook AI bot (or online booking form) submits a new lead to <strong>Google Sheets (&ldquo;FB Leads&rdquo;)</strong> or creates a <strong>Draft Quote in Jobber</strong>, we immediately text your cell phone via Quo/OpenPhone and ping your Owner App!
+                </p>
+
+                <div>
+                  <label className="text-[11px] font-bold text-emerald-300 block mb-1">
+                    Your Mobile Phone Number for SMS Lead Alerts:
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={botSettings.ownerNotificationPhone || ''}
+                      onChange={(e) =>
+                        setBotSettings({ ...botSettings, ownerNotificationPhone: e.target.value })
+                      }
+                      placeholder="+1 (780) XXX-XXXX"
+                      className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-xs font-mono text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSendTestNotification}
+                      disabled={isTestingAlert}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black cursor-pointer shrink-0 disabled:opacity-50"
+                    >
+                      {isTestingAlert ? 'Sending SMS...' : '📲 Send Test SMS Alert'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className="flex items-center justify-between p-2 rounded-xl bg-slate-950/90 border border-white/10 cursor-pointer">
+                    <span className="text-[11px] font-bold text-slate-200">
+                      SMS Text Alert (via Quo)
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={botSettings.notifyViaSms !== false}
+                      onChange={(e) =>
+                        setBotSettings({ ...botSettings, notifyViaSms: e.target.checked })
+                      }
+                      className="accent-emerald-500 w-4 h-4"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between p-2 rounded-xl bg-slate-950/90 border border-white/10 cursor-pointer">
+                    <span className="text-[11px] font-bold text-slate-200">
+                      In-App / Team Chat Alert
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={botSettings.notifyViaInAppChat !== false}
+                      onChange={(e) =>
+                        setBotSettings({ ...botSettings, notifyViaInAppChat: e.target.checked })
+                      }
+                      className="accent-emerald-500 w-4 h-4"
+                    />
+                  </label>
+                </div>
+
+                {notifications.length > 0 && (
+                  <div className="pt-2 border-t border-white/10 space-y-1.5">
+                    <div className="text-[10px] font-black uppercase text-slate-400">
+                      Recent Lead Alerts Sent ({notifications.length})
+                    </div>
+                    <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                      {notifications.slice(0, 5).map((n) => (
+                        <div
+                          key={n.id}
+                          className="p-2 rounded-lg bg-slate-950/90 border border-white/10 text-[10px] flex items-center justify-between gap-2"
+                        >
+                          <div className="truncate">
+                            <span className="font-bold text-white">{n.customerName}</span>{' '}
+                            <span className="text-slate-400">({n.serviceType})</span> •{' '}
+                            <span className="text-emerald-300 font-mono">{n.quoteNumber}</span>
+                          </div>
+                          <span className="text-[9px] text-slate-400 shrink-0">
+                            {n.sentSms ? '✅ SMS Sent' : '🔔 App Alert'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-pink-500/30 space-y-3">
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-wider text-pink-300">
-                    Tweak How Your AI Talks to Facebook Clients
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Edit these instructions anytime — the AI immediately uses your changes on the very next message.
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-pink-300">
+                      Tweak How Your AI Talks to Facebook Clients
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black">
+                      🚫 No Price Discussion Mode
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Your AI is configured to <strong>never discuss prices with clients</strong> — it gathers as much detail as possible so you can review the draft quote and send it yourself.
                   </p>
                 </div>
 
                 <div>
                   <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                    AI Bot Behavior, Tone &amp; Question Order:
+                    AI Bot Behavior, No-Price Rule &amp; Question Order:
                   </label>
                   <textarea
                     rows={5}
@@ -1341,7 +1512,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
 
                 <div>
                   <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                    TidyUps Pricing &amp; Service Rules (Used by AI to Quote):
+                    Intake Checklist &amp; What Info to Gather (No Prices Shared With Clients):
                   </label>
                   <textarea
                     rows={5}
@@ -1380,7 +1551,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
 
                   <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-white/10 cursor-pointer">
                     <span className="text-xs font-bold text-slate-200">
-                      Auto-Create Jobber Quote when Service + Rooms + Date + Phone Collected
+                      Auto-Create DRAFT Quote in Jobber (For You to Review &amp; Send)
                     </span>
                     <input
                       type="checkbox"
@@ -1399,7 +1570,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                   disabled={isSavingConfig}
                   className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-black text-xs shadow-lg cursor-pointer"
                 >
-                  {isSavingConfig ? 'Saving AI Instructions...' : 'Save AI Bot Instructions & Pricing Rules'}
+                  {isSavingConfig ? 'Saving AI & Alert Settings...' : 'Save AI Intake Rules & SMS Notification Settings'}
                 </button>
               </div>
             </div>
