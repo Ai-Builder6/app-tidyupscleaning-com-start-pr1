@@ -1915,11 +1915,9 @@ async function executePushQuoteToJobberInternal(
             quote.serviceAddress || "Edmonton, AB"
           }. Dispatch Summary: https://app.tidyupscleaning.com/?view=QUICK_QUOTE`;
         }
-        // Cap note/message to a clean summary + link (never a full-page raw call transcript)
-        const truncated = rawNote.length > 500 ? `${rawNote.slice(0, 497)}...` : rawNote;
-        return truncated.includes("https://")
-          ? truncated
-          : `${truncated} | Call & Quote Link: https://app.tidyupscleaning.com/?view=QUICK_QUOTE`;
+        return rawNote.includes("https://")
+          ? rawNote
+          : `${rawNote} | Call & Quote Link: https://app.tidyupscleaning.com/?view=QUICK_QUOTE`;
       })();
 
       const sanitizeLineItemDescription = (rawDesc: string | undefined, fallbackTitle: string): string => {

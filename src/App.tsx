@@ -379,13 +379,33 @@ export function App() {
     return false;
   });
 
-  // Automatically open the Login & Password modal on website load when not signed in (unless on /booking or /book)
+  // Detect if visitor is on a public legal page (/privacy-policy, /privacy, /terms, /t&c, /support)
+  const isPublicLegalPath = (() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+      const h = window.location.hash.toLowerCase();
+      return (
+        p === '/privacy-policy' ||
+        p === '/privacy' ||
+        p === '/terms' ||
+        p === '/t&c' ||
+        p === '/support' ||
+        h === '#privacy-policy' ||
+        h === '#privacy' ||
+        h === '#terms' ||
+        h === '#support'
+      );
+    }
+    return false;
+  })();
+
+  // Automatically open the Login & Password modal on website load when not signed in (unless on /booking, /book, or public legal pages like /privacy-policy)
   useEffect(() => {
-    if (!isStaffAuthenticated && !isStandaloneBookingDomain) {
+    if (!isStaffAuthenticated && !isStandaloneBookingDomain && !isPublicLegalPath) {
       setRoleModalInitialTab('LOGIN');
       setIsRoleModalOpen(true);
     }
-  }, [isStaffAuthenticated, isStandaloneBookingDomain]);
+  }, [isStaffAuthenticated, isStandaloneBookingDomain, isPublicLegalPath]);
 
   // Real-Time Cell Phone Live GPS Location Tracking State
   const [liveLocationsMap, setLiveLocationsMap] = useState<Record<string, LiveStaffLocationPing>>({});
@@ -398,6 +418,21 @@ export function App() {
   // Dedicated Top Bar Navigation Tabs: 'MASTER_HUB' | 'QUICK_QUOTE' | 'MAP' | 'SCHEDULED_JOBS' | 'MANAGEMENT' | 'INTAKES' | 'CUSTOMER_PORTAL' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'SPAM_SHIELD'
   const [activeTopView, setActiveTopView] = useState<'MASTER_HUB' | 'MAP' | 'CUSTOMER_PORTAL' | 'SCHEDULED_JOBS' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'MANAGEMENT' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'QUICK_QUOTE' | 'INTAKES' | 'SPAM_SHIELD'>(() => {
     if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+      const h = window.location.hash.toLowerCase();
+      if (
+        p === '/privacy-policy' ||
+        p === '/privacy' ||
+        p === '/terms' ||
+        p === '/t&c' ||
+        p === '/support' ||
+        h === '#privacy-policy' ||
+        h === '#privacy' ||
+        h === '#terms' ||
+        h === '#support'
+      ) {
+        return 'LEGAL';
+      }
       try {
         const isAuth = localStorage.getItem('tidyups_verified_password_session') === 'true';
         if (!isAuth) return 'CUSTOMER_PORTAL';
@@ -438,7 +473,19 @@ export function App() {
     serviceType?: string;
     assignedTechId?: string;
   } | null>(null);
-  const [activeLegalTab, setActiveLegalTab] = useState<LegalPageType>('SUPPORT');
+  const [activeLegalTab, setActiveLegalTab] = useState<LegalPageType>(() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+      const h = window.location.hash.toLowerCase();
+      if (p === '/privacy-policy' || p === '/privacy' || h === '#privacy-policy' || h === '#privacy') {
+        return 'PRIVACY';
+      }
+      if (p === '/terms' || p === '/t&c' || h === '#terms') {
+        return 'TERMS';
+      }
+    }
+    return 'SUPPORT';
+  });
   const [scheduledJobsList, setScheduledJobsList] = useState<ScheduledJobItem[]>(() => {
     const raw = mergeWithBaseScheduledVisits(storedData?.scheduledVisits);
     return raw
@@ -1734,13 +1781,20 @@ export function App() {
         setScheduledJobsSubTab('UNSCHEDULED');
       } else if (path === '/staff' || hash === '#staff') {
         setIsStaffModalOpen(true);
-      } else if (path === '/support' || path === '/t&c' || path === '/terms' || path === '/privacy-policy' || path === '/privacy') {
-        if (path === '/t&c' || path === '/terms') setActiveLegalTab('TERMS');
-        else if (path === '/privacy-policy' || path === '/privacy') setActiveLegalTab('PRIVACY');
+      } else if (
+        path.replace(/\/+$/, '') === '/support' ||
+        path.replace(/\/+$/, '') === '/t&c' ||
+        path.replace(/\/+$/, '') === '/terms' ||
+        path.replace(/\/+$/, '') === '/privacy-policy' ||
+        path.replace(/\/+$/, '') === '/privacy' ||
+        hash === '#privacy-policy' ||
+        hash === '#privacy'
+      ) {
+        const cleanPath = path.replace(/\/+$/, '');
+        if (cleanPath === '/t&c' || cleanPath === '/terms' || hash === '#terms') setActiveLegalTab('TERMS');
+        else if (cleanPath === '/privacy-policy' || cleanPath === '/privacy' || hash === '#privacy-policy' || hash === '#privacy') setActiveLegalTab('PRIVACY');
         else setActiveLegalTab('SUPPORT');
-        if (!isStandaloneBookingDomain) {
-          setActiveTopView('LEGAL');
-        }
+        setActiveTopView('LEGAL');
       }
     }
 

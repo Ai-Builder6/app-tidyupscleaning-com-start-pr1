@@ -956,12 +956,10 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
         });
       }
 
-      // Keep quoteNotes strictly for concise special instructions / add-ons — never dump the entire raw phone call transcript into quoteNotes
-      if (isFinalMerge && matchedTags.length > 0 && !liveValuesRef.current.notes) {
-        const conciseAddonSummary = `Requested focus: ${matchedTags.join(', ')}`;
-        liveValuesRef.current.notes = conciseAddonSummary;
-        setQuoteNotes(conciseAddonSummary);
-        triggerFieldHighlight('notes', 'Summary Added');
+      if (isFinalMerge && t.length > 5 && t !== liveValuesRef.current.notes) {
+        liveValuesRef.current.notes = t;
+        setQuoteNotes(t);
+        triggerFieldHighlight('notes', 'Notes Filled');
       }
 
       if (newlyHighlighted.length > 0) {
@@ -1138,20 +1136,17 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
           }
 
           if (data.specificInstructions) {
-            // Ensure specificInstructions is a concise summary (never the raw verbatim phone transcript)
-            const rawInstr = String(data.specificInstructions).trim();
-            const isVerbatimTranscript =
-              textToParse &&
-              rawInstr.length > 180 &&
-              rawInstr.toLowerCase().includes(textToParse.slice(0, 60).toLowerCase());
-            const cleanConciseNotes = isVerbatimTranscript
-              ? rawInstr.split('•').filter((part) => part.trim().length < 120).join(' • ').slice(0, 200)
-              : rawInstr.slice(0, 240);
-            if (cleanConciseNotes) {
-              liveValuesRef.current.notes = cleanConciseNotes;
-              setQuoteNotes(cleanConciseNotes);
-              triggerFieldHighlight('notes', 'Notes Summarized');
-            }
+            const combinedNotes =
+              textToParse && !String(data.specificInstructions).includes(textToParse)
+                ? `${data.specificInstructions} | Transcript: ${textToParse}`
+                : data.specificInstructions;
+            liveValuesRef.current.notes = combinedNotes;
+            setQuoteNotes(combinedNotes);
+            triggerFieldHighlight('notes', 'Notes Reconciled');
+          } else if (textToParse) {
+            liveValuesRef.current.notes = textToParse;
+            setQuoteNotes(textToParse);
+            triggerFieldHighlight('notes', 'Notes Filled');
           }
 
           // Auto-select any detected add-on tags
@@ -1903,15 +1898,14 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
         selectedAddons.length > 0 ? ` | Add-ons: ${selectedAddons.join(', ')}` : ''
       }`;
 
-      const conciseSpecialNotes = quoteNotes.trim().slice(0, 240);
-      const hasVoiceCallTranscript = Boolean((latestTranscriptRef.current || voiceTranscript || '').trim());
+      const fullTranscriptOrNotes = (quoteNotes.trim() || (latestTranscriptRef.current || voiceTranscript || '').trim());
       const callRecordLink = `https://app.tidyupscleaning.com/?view=QUICK_QUOTE`;
       const quoteSummaryNote = [
         `Scope Summary: ${serviceType} (${bedrooms}, ${bathrooms} • ${hours} hrs @ $${hourlyRate.toFixed(2)}/hr)`,
         selectedAddons.length > 0 ? `Add-ons: ${selectedAddons.join(', ')}` : '',
-        conciseSpecialNotes ? `Notes: ${conciseSpecialNotes}` : '',
         `Quote Breakdown: $${calculations.total.toFixed(2)} CAD (Deposit Required: $${Number(depositAmount).toFixed(2)}, Balance Due: $${calculations.balanceDue.toFixed(2)})`,
-        hasVoiceCallTranscript ? `Call Summary & Record Link: ${callRecordLink}` : `Dispatch Record: ${callRecordLink}`,
+        fullTranscriptOrNotes ? `Quote Notes / Call Transcript: ${fullTranscriptOrNotes}` : '',
+        `Dispatch Record Link: ${callRecordLink}`,
       ]
         .filter(Boolean)
         .join(' | ');

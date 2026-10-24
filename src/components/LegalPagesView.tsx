@@ -31,6 +31,10 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<LegalPageType>(initialTab);
 
+  React.useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
   // Support Form State
   const [supportName, setSupportName] = useState('');
   const [supportEmail, setSupportEmail] = useState('');

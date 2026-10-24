@@ -147,7 +147,13 @@ export const CookieConsentBanner: React.FC = () => {
               <p className="text-xs text-slate-300 leading-relaxed">
                 We use cookies to power online cleaning bookings, measure Google Ads campaign conversions (
                 <span className="font-mono text-pink-300">AW-18533917803</span>), and improve service across Edmonton &amp; area.
-                Click <strong>Accept All</strong> to allow booking conversion measurement, or customize your preferences.
+                Click <strong>Accept All</strong> to allow booking conversion measurement, or customize your preferences.{' '}
+                <a
+                  href="/privacy-policy"
+                  className="text-pink-400 hover:text-pink-300 underline font-semibold"
+                >
+                  Privacy Policy
+                </a>
               </p>
             </div>
           </div>
