@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { getCustomerIntelligence } from '../services/customerIntelligenceService';
 import { CustomerIntelligenceBadge } from './CustomerIntelligenceBadge';
+import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 
 interface QuickQuoteModalProps {
   isOpen: boolean;
@@ -632,12 +633,13 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
-              <input
-                type="text"
+              <AddressAutocompleteInput
+                theme="dark"
                 placeholder="Service Address (Edmonton, AB)"
                 value={serviceAddress}
-                onChange={(e) => setServiceAddress(e.target.value)}
-                className="w-full px-3 py-2 bg-[#1b1723] border border-[#2e273a] rounded-xl text-white focus:outline-none focus:border-pink-500"
+                onChange={(val) => setServiceAddress(val)}
+                onSelect={(pred) => setServiceAddress(pred.description || pred.mainText)}
+                className="w-full px-3 py-2 bg-[#1b1723] border border-[#2e273a] rounded-xl text-white text-xs font-bold focus:outline-none focus:border-pink-500"
               />
               <select
                 value={serviceType}

@@ -656,6 +656,31 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
             quote_number: data?.quoteNumber || '',
           });
           triggerGoogleAdsConversion(estValue, 'CAD');
+          sessionStorage.setItem(
+            'tidyups_last_completed_booking',
+            JSON.stringify({
+              customerName: fullNameCombined,
+              firstName: firstName.trim(),
+              lastName: lastName.trim(),
+              customerPhone: phone.trim(),
+              customerEmail: email.trim(),
+              serviceType,
+              hoursLabel: crewRuleDetails.badgeText,
+              address: address.trim(),
+              city,
+              bedrooms,
+              bathrooms,
+              preferredDateLabel: preferredDate,
+              preferredTime,
+              totalAmount: estValue,
+              bookingId: data?.jobberJobId || '',
+              quoteNumber: data?.quoteNumber || '',
+              submittedAt: new Date().toISOString(),
+            })
+          );
+          if (mode === 'STANDALONE_PAGE') {
+            window.history.pushState({}, '', '/thank-you');
+          }
         } catch {
           // ignore dataLayer notice
         }
@@ -1327,13 +1352,16 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
               <TidyUpsBunnyLogo size="lg" />
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-2">
               <span className="inline-block px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-xs font-black uppercase">
-                ✓ Booking Request &amp; Jobber Quote Created
+                ✓ Form Completed &amp; Jobber Quote Created
               </span>
-              <h3 className="text-2xl font-black text-white">
-                Thank You, {firstName} {lastName}!
+              <h3 className="text-2xl sm:text-3xl font-black text-white">
+                Thank you{firstName ? `, ${firstName},` : ''} for completing the form!
               </h3>
+              <p className="text-base sm:text-lg font-extrabold text-pink-400 max-w-md mx-auto">
+                A team member will be in contact with you shortly.
+              </p>
               <p className="text-xs sm:text-sm text-zinc-300 max-w-md mx-auto">
                 Your <strong>{serviceType}</strong> request has been received and logged in Jobber. We will review your home details and send your confirmation to <strong>{phone}</strong>
                 {email ? ` and ${email}` : ''}.
@@ -1436,6 +1464,26 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                   <>
                     <Copy className="w-3.5 h-3.5" />
                     <span>Copy /booking Link</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleCopyBookingUrl('https://app.tidyupscleaning.com/thank-you', 'thankyou')
+                }
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer"
+                title="Copy Google Ads Conversion Page Link (https://app.tidyupscleaning.com/thank-you)"
+              >
+                {copiedUrl === 'thankyou' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Copied /thank-you!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy /thank-you Ads Link</span>
                   </>
                 )}
               </button>

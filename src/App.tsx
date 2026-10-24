@@ -51,6 +51,7 @@ import { AdLeadItem } from './types/lead';
 import { INITIAL_AD_LEADS } from './data/adLeadsData';
 import { LegalPagesView, LegalPageType } from './components/LegalPagesView';
 import { CustomerPortalView } from './components/CustomerPortalView';
+import { ThankYouConversionPage } from './components/ThankYouConversionPage';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { CleanerPortalView } from './components/CleanerPortalView';
 import { ClientsDatabaseView } from './components/ClientsDatabaseView';
@@ -334,16 +335,37 @@ export function App() {
   const [chatRecipient, setChatRecipient] = useState<AppUser | null>(null);
   const [cleanerShowMap, setCleanerShowMap] = useState<boolean>(false);
 
-  // Detect if visitor is on the dedicated customer-only /booking or /book path
+  // Detect if visitor is on the dedicated /thank-you Google Ads conversion page
+  const [isThankYouConversionRoute, setIsThankYouConversionRoute] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+      const s = window.location.search.toLowerCase();
+      return (
+        p === '/thank-you' ||
+        p === '/thankyou' ||
+        p === '/booking/thank-you' ||
+        p === '/book/thank-you' ||
+        s.includes('page=thank-you')
+      );
+    }
+    return false;
+  });
+
+  // Detect if visitor is on the dedicated customer-only /booking, /book, or /thank-you path
   const [isStandaloneBookingDomain] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const path = window.location.pathname.toLowerCase();
+      const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
       const search = window.location.search.toLowerCase();
       if (
+        path === '/thank-you' ||
+        path === '/thankyou' ||
+        path === '/booking/thank-you' ||
+        path === '/book/thank-you' ||
         path === '/booking' ||
         path.startsWith('/booking/') ||
         path === '/book' ||
         path.startsWith('/book/') ||
+        search.includes('page=thank-you') ||
         search.includes('mode=customer') ||
         search.includes('booking=1')
       ) {
@@ -359,13 +381,18 @@ export function App() {
   // Staff & Owner Authentication state
   const [isStaffAuthenticated, setIsStaffAuthenticated] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const path = window.location.pathname.toLowerCase();
+      const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
       const search = window.location.search.toLowerCase();
       if (
+        path === '/thank-you' ||
+        path === '/thankyou' ||
+        path === '/booking/thank-you' ||
+        path === '/book/thank-you' ||
         path === '/booking' ||
         path.startsWith('/booking/') ||
         path === '/book' ||
         path.startsWith('/book/') ||
+        search.includes('page=thank-you') ||
         search.includes('mode=customer') ||
         search.includes('booking=1')
       ) {
@@ -3038,8 +3065,28 @@ export function App() {
           </header>
         )}
 
-        {/* Standalone Customer Booking Domain (book.tidyupscleaning.com) or Unauthenticated Visitors or Customer Portal Tab */}
-        {isStandaloneBookingDomain || isCustomerLockPreview || (!isStaffAuthenticated && activeTopView !== 'LEGAL' && activeTopView !== 'SPAM_SHIELD') || activeTopView === 'CUSTOMER_PORTAL' ? (
+        {/* Standalone /thank-you Google Ads Conversion Page OR Customer Booking Domain (book.tidyupscleaning.com) */}
+        {isThankYouConversionRoute ? (
+          <ThankYouConversionPage
+            isOwnerViewing={isStaffAuthenticated}
+            onBackToBookingForm={() => {
+              setIsThankYouConversionRoute(false);
+              try {
+                window.history.pushState({}, '', '/book');
+              } catch {}
+            }}
+            onReturnToStaffConsole={() => {
+              setIsThankYouConversionRoute(false);
+              try {
+                window.history.pushState({}, '', '/');
+              } catch {}
+            }}
+            onOpenStaffLogin={() => {
+              setRoleModalInitialTab('LOGIN');
+              setIsRoleModalOpen(true);
+            }}
+          />
+        ) : isStandaloneBookingDomain || isCustomerLockPreview || (!isStaffAuthenticated && activeTopView !== 'LEGAL' && activeTopView !== 'SPAM_SHIELD') || activeTopView === 'CUSTOMER_PORTAL' ? (
           <CustomerPortalView
             projectId={activeBrandId}
             isStandaloneCustomerSite={isStandaloneBookingDomain}

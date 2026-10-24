@@ -195,21 +195,53 @@ function buildInstantLocalPredictions(rawQuery: string): Prediction[] {
     }
   };
 
-  // Do not pop up preset addresses when the field is empty or has fewer than 3 characters
-  if (!q || q.length < 3) {
+  // Do not pop up preset addresses when the field is empty or has fewer than 2 characters
+  if (!q || q.length < 2) {
     return [];
   }
 
+  // 0. If the user typed ONLY a house number (2–5 digits, e.g., "8306" or "10420" or "830"),
+  // immediately generate smart Edmonton Grid & Corridor street predictions for that house number!
+  const houseOnlyMatch = q.match(/^(\d{2,5}[A-Za-z]?)$/);
+  if (houseOnlyMatch) {
+    const houseNum = houseOnlyMatch[1];
+    const numericVal = parseInt(houseNum, 10) || 8300;
+    const gridBlock = numericVal >= 1000 ? Math.max(1, Math.min(215, Math.floor(numericVal / 100))) : 82;
+
+    const smartGridRoads = [
+      { road: `${gridBlock} Ave NW`, area: 'Edmonton Grid Avenue' },
+      { road: `${gridBlock} St NW`, area: 'Edmonton Grid Street' },
+      { road: '104 St NW', area: 'Old Strathcona / Central Edmonton' },
+      { road: '82 Ave NW', area: 'Whyte Ave / Strathcona Corridor' },
+      { road: '112 St NW', area: 'University / Garneau' },
+      { road: 'Jasper Ave NW', area: 'Downtown / Oliver' },
+    ];
+
+    for (const gr of smartGridRoads) {
+      const mainText = `${houseNum} ${gr.road}`;
+      const coords = estimateEdmontonGridCoords(mainText);
+      pushUnique({
+        description: `${mainText}, Edmonton, AB`,
+        place_id: `synth-house-${mainText}`,
+        main_text: mainText,
+        secondary_text: `Edmonton, AB • ${gr.area}`,
+        lat: coords?.lat,
+        lng: coords?.lng,
+        tag: 'Edmonton Grid'
+      });
+    }
+  }
+
   // 1. If the user typed a house number AND started typing a street/avenue number or street name
-  // (e.g., "10824 82", "4512 118 Ave", "1240 Windermere")
-  const leadingNumMatch = q.match(/^(\d{1,5})\s+(.+)$/);
+  // (e.g., "8306 104", "10824 82", "4512 118 Ave", "1240 Windermere")
+  const leadingNumMatch = q.match(/^(\d{1,5}[A-Za-z]?)\s+(.+)$/);
   if (leadingNumMatch) {
     const houseNum = leadingNumMatch[1];
     const rest = (leadingNumMatch[2] || '').trim();
     const restLower = rest.toLowerCase();
 
     // Case 1A: User typed house number + numbered street/ave (e.g. "10824 82", "10824 82 ave")
-    const numRoadMatch = rest.match(/^(\d{1,3})\s*(st|street|ave|avenue)?\s*(nw|sw|ne|se)?$/i);
+    const numRoadMatch = rest.match(/^(\d{1,3}[A-Za-z]?)\s*(st|street|ave|avenue|rd|road|dr|drive|blvd|way|pl|place|cres|ct|close)?\s*(nw|sw|ne|se)?$/i);
     if (numRoadMatch) {
       const roadNum = numRoadMatch[1];
       const roadTypeRaw = (numRoadMatch[2] || '').toLowerCase();
@@ -241,7 +273,7 @@ function buildInstantLocalPredictions(rawQuery: string): Prediction[] {
     }
 
     // Case 1B: User typed house number + named street prefix (e.g. "10420 jasper", "1215 wind")
-    if (rest.length >= 2) {
+    if (rest.length >= 1) {
       for (const ns of NAMED_STREETS) {
         if (ns.street.toLowerCase().includes(restLower) || ns.area.toLowerCase().includes(restLower)) {
           const mainText = `${houseNum} ${ns.street}${ns.quadrant ? ` ${ns.quadrant}` : ''}`;
@@ -259,10 +291,10 @@ function buildInstantLocalPredictions(rawQuery: string): Prediction[] {
     }
   }
 
-  // 2. Match against curated presets ONLY if the query matches an address or postal code
-  if (q.length >= 4) {
+  // 2. Match against curated presets & named streets
+  if (q.length >= 2) {
     for (const item of EDMONTON_CORRIDOR_PRESETS) {
-      const haystack = `${item.address} ${item.postal}`.toLowerCase();
+      const haystack = `${item.address} ${item.area} ${item.postal}`.toLowerCase();
       if (haystack.includes(qLower)) {
         pushUnique({
           description: `${item.address}, ${item.city}`,
@@ -314,7 +346,7 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
 
   const fetchPredictions = async (input: string) => {
     const trimmed = (input || '').trim();
-    if (trimmed.length < 3) {
+    if (trimmed.length < 2) {
       setPredictions([]);
       setIsOpen(false);
       setIsLoading(false);
@@ -364,7 +396,11 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
                 })
                 .filter(Boolean);
               if (gmpPreds.length > 0) {
-                const merged = [...gmpPreds, ...localSmart].slice(0, 6);
+                const seenDesc = new Set(gmpPreds.map((g) => g.main_text.toLowerCase()));
+                const merged = [
+                  ...gmpPreds,
+                  ...localSmart.filter((l) => !seenDesc.has(l.main_text.toLowerCase()))
+                ].slice(0, 6);
                 setPredictions(merged);
                 setIsOpen(true);
                 setIsLoading(false);
@@ -429,13 +465,25 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
       if (response.ok) {
         const data = await response.json();
         if (Array.isArray(data.predictions) && data.predictions.length > 0) {
-          const serverPreds: Prediction[] = data.predictions.slice(0, 5).map((p: any) => {
-            const coords = estimateEdmontonGridCoords(p.description || '');
+          const serverPreds: Prediction[] = data.predictions.slice(0, 6).map((p: any, idx: number) => {
+            const desc = p.description || '';
+            const main =
+              p.main_text ||
+              p.mainText ||
+              p.structured_formatting?.main_text ||
+              desc.split(',')[0] ||
+              desc;
+            const secondary =
+              p.secondary_text ||
+              p.secondaryText ||
+              p.structured_formatting?.secondary_text ||
+              'Edmonton, AB';
+            const coords = estimateEdmontonGridCoords(desc);
             return {
-              description: p.description,
-              place_id: p.place_id,
-              main_text: p.structured_formatting?.main_text || p.description.split(',')[0],
-              secondary_text: p.structured_formatting?.secondary_text || 'Edmonton, AB',
+              description: desc,
+              place_id: p.place_id || p.placeId || `srv-pred-${idx}`,
+              main_text: main,
+              secondary_text: secondary,
               lat: coords?.lat,
               lng: coords?.lng,
               tag: 'Verified'
@@ -467,7 +515,7 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
       clearTimeout(debounceTimer.current);
     }
 
-    if (!newVal || newVal.trim().length < 3) {
+    if (!newVal || newVal.trim().length < 2) {
       setPredictions([]);
       setIsOpen(false);
       return;
@@ -481,7 +529,7 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
 
     debounceTimer.current = setTimeout(() => {
       fetchPredictions(newVal);
-    }, 180);
+    }, 150);
   };
 
   const handleSelect = (prediction: Prediction) => {
@@ -519,8 +567,10 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlightedIndex((prev) => (prev - 1 + predictions.length) % predictions.length);
-    } else if (e.key === 'Enter' && predictions[highlightedIndex]) {
-      e.preventDefault();
+    } else if ((e.key === 'Enter' || e.key === 'Tab') && predictions[highlightedIndex]) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+      }
       handleSelect(predictions[highlightedIndex]);
     } else if (e.key === 'Escape') {
       setIsOpen(false);
@@ -536,21 +586,28 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
           id={id}
           name={name}
           type="text"
-          autoComplete="street-address"
+          autoComplete="off"
           value={value}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => {
-            if (value && value.trim().length >= 3 && !justAutoFilled) {
+            if (value && value.trim().length >= 2 && !justAutoFilled) {
               const list = buildInstantLocalPredictions(value);
               if (list.length > 0) {
                 setPredictions(list);
                 setHighlightedIndex(0);
                 setIsOpen(true);
               }
+              fetchPredictions(value);
             }
           }}
-          onBlur={onBlur}
+          onBlur={() => {
+            // If user leaves the field with only a bare house number (e.g. "8306") and predictions exist, auto-fill the top prediction
+            if (value && /^\d{2,5}[A-Za-z]?$/.test(value.trim()) && predictions.length > 0 && !justAutoFilled) {
+              handleSelect(predictions[highlightedIndex] || predictions[0]);
+            }
+            if (onBlur) onBlur();
+          }}
           placeholder={placeholder}
           required={required}
           disabled={disabled}

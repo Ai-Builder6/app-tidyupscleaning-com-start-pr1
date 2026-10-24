@@ -15,6 +15,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { ClientRecord, ClientVerdict } from '../types/client';
+import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 
 interface ClientModalProps {
   isOpen: boolean;
@@ -260,18 +261,16 @@ export const ClientModal: React.FC<ClientModalProps> = ({
 
             <div className="space-y-1">
               <label className="text-xs font-black uppercase text-slate-500 tracking-wider">
-                Service Address
+                Service Address (Auto-Complete)
               </label>
-              <div className="relative">
-                <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="text"
-                  placeholder="e.g. Twin Brooks Court, Edmonton..."
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-pink-500"
-                />
-              </div>
+              <AddressAutocompleteInput
+                theme="light"
+                placeholder="e.g. 8306 104 St NW, Edmonton, AB..."
+                value={address}
+                onChange={(val) => setAddress(val)}
+                onSelect={(pred) => setAddress(pred.description || pred.mainText)}
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-pink-500"
+              />
             </div>
           </div>
 

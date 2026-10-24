@@ -27,6 +27,7 @@ import { JobberQuote, extractJobberNumericId } from '../services/jobberSyncModul
 import { saveQuoteToFirestore, saveClientToFirestore } from '../services/firestoreSyncService';
 import { syncLeadsToLiveGoogleSheetInDrive } from '../services/googleDriveBackupService';
 import { matchCatalogItem, CANONICAL_SERVICE_CATALOG } from '../data/serviceCatalogData';
+import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 
 interface QuoteDetailModalProps {
   isOpen: boolean;
@@ -701,13 +702,18 @@ export const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               <div className="sm:col-span-2">
                 <label className="block text-[10px] font-extrabold uppercase text-slate-500 mb-1">
-                  Service Property Address
+                  Service Property Address (Auto-Complete)
                 </label>
-                <input
-                  type="text"
+                <AddressAutocompleteInput
+                  theme="light"
                   value={editServiceAddress}
-                  onChange={(e) => setEditServiceAddress(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-purple-600"
+                  onChange={(val) => setEditServiceAddress(val)}
+                  onSelect={(pred) => {
+                    const full = pred.description || pred.mainText;
+                    setEditServiceAddress(full);
+                  }}
+                  placeholder="Start typing house # & street (e.g. 8306 104 St NW, Edmonton, AB)..."
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-purple-600"
                 />
               </div>
               <div>

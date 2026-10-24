@@ -1053,8 +1053,39 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       const data = await res.json();
       if (res.ok && data.success) {
         triggerGoogleAdsConversion(priceCalculation.total || 1.0, 'CAD');
-        setConfirmedBookingId(data.jobberJobId || `JOB-${Math.floor(10000 + Math.random() * 90000)}`);
-        setConfirmedQuoteNumber(data.quoteNumber || 'QT-4390');
+        const resolvedBookingId = data.jobberJobId || `JOB-${Math.floor(10000 + Math.random() * 90000)}`;
+        const resolvedQuoteNum = data.quoteNumber || 'QT-4390';
+        setConfirmedBookingId(resolvedBookingId);
+        setConfirmedQuoteNumber(resolvedQuoteNum);
+        try {
+          sessionStorage.setItem(
+            'tidyups_last_completed_booking',
+            JSON.stringify({
+              customerName: fullNameCombined,
+              firstName: firstName.trim(),
+              lastName: lastName.trim(),
+              customerPhone: customerPhone.trim(),
+              customerEmail: customerEmail.trim(),
+              serviceType: activeServiceData.name,
+              packageName: priceCalculation.matchedItemName,
+              hoursLabel: priceCalculation.hoursLabel,
+              address: address.trim(),
+              city,
+              bedrooms,
+              bathrooms,
+              preferredDateLabel: formattedPreferredDateLabel,
+              preferredTime,
+              totalAmount: priceCalculation.total,
+              bookingId: resolvedBookingId,
+              quoteNumber: resolvedQuoteNum,
+              submittedAt: new Date().toISOString(),
+            })
+          );
+          // Update browser URL to /thank-you so Google Ads URL-based conversion rules fire immediately
+          window.history.pushState({}, '', '/thank-you');
+        } catch {
+          // ignore storage/history errors
+        }
         setFormSubmitted(true);
         if (onBookingSubmitted && data.ticket) {
           onBookingSubmitted(data.ticket, {
@@ -1157,6 +1188,16 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               >
                 {copiedLinkKey === 'booking3' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 <span>{copiedLinkKey === 'booking3' ? 'Copied /booking!' : 'Copy /booking Link'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCopyBookingLink('thankyou', 'https://app.tidyupscleaning.com/thank-you')}
+                className="px-3 py-1.5 rounded-xl bg-emerald-950 hover:bg-emerald-900 border border-emerald-400 text-emerald-300 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                title="Copy Google Ads Conversion Page URL (https://app.tidyupscleaning.com/thank-you)"
+              >
+                {copiedLinkKey === 'thankyou' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedLinkKey === 'thankyou' ? 'Copied /thank-you!' : 'Copy /thank-you Ads Link'}</span>
               </button>
 
               <button
@@ -1505,13 +1546,16 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                   <div className="flex justify-center">
                     <TidyUpsBunnyLogo size="lg" />
                   </div>
-                  <div className="space-y-1.5">
-                    <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-xs font-black uppercase">
-                      ✓ Booking Confirmed &amp; Sent to TidyUps Dispatch
+                  <div className="space-y-2">
+                    <span className="inline-block px-3.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-400 text-emerald-300 text-xs font-black uppercase">
+                      ✓ Form Completed &amp; Sent to TidyUps Dispatch
                     </span>
                     <h3 className="text-2xl sm:text-3xl font-black text-white">
-                      Thank You, {firstName} {lastName}!
+                      Thank you{firstName ? `, ${firstName},` : ''} for completing the form!
                     </h3>
+                    <p className="text-base sm:text-lg font-extrabold text-pink-400 max-w-md mx-auto">
+                      A team member will be in contact with you shortly.
+                    </p>
                     <p className="text-xs sm:text-sm text-zinc-300 max-w-md mx-auto">
                       Your <strong>{activeServiceData.name}</strong> booking and instant quote have been saved in Jobber. We will confirm your arrival window at{' '}
                       <strong className="text-pink-400">{customerPhone}</strong>.

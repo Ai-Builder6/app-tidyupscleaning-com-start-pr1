@@ -31,6 +31,7 @@ import {
   MicOff,
   X,
 } from 'lucide-react';
+import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 
 export interface FbPageConfig {
   id: string;
@@ -1485,14 +1486,17 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                   <div className="sm:col-span-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1 mb-1">
                       <MapPin className="w-3 h-3 text-emerald-400" />
-                      <span>4B. Property Street Address</span>
+                      <span>4B. Property Street Address (Auto-Complete)</span>
                     </label>
-                    <input
-                      type="text"
+                    <AddressAutocompleteInput
+                      theme="dark"
                       value={activeThread.extracted.address}
-                      onChange={(e) => handleUpdateExtractedField('address', e.target.value)}
-                      placeholder="Street Address, Edmonton, AB"
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-white font-semibold"
+                      onChange={(val) => handleUpdateExtractedField('address', val)}
+                      onSelect={(pred) =>
+                        handleUpdateExtractedField('address', pred.description || pred.mainText)
+                      }
+                      placeholder="Start typing house # & street, Edmonton, AB..."
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-white font-semibold text-xs"
                     />
                   </div>
 

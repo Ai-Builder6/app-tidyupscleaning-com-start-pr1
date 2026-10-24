@@ -55,16 +55,21 @@
       };
     </script>
 
-    <!-- Event snippet for Hostinger Lead - app.dispatchgeni.com/booking (b9e1b84c) conversion page -->
+    <!-- Event snippet for Google Ads Lead Conversion (/thank-you, /booking/thank-you, /book/thank-you) -->
     <script>
       (function() {
-        var path = (window.location.pathname || '').toLowerCase();
+        var path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
         var search = (window.location.search || '').toLowerCase();
         if (
+          path === '/thank-you' ||
+          path === '/thankyou' ||
+          path === '/booking/thank-you' ||
+          path === '/book/thank-you' ||
           path === '/booking' ||
           path.indexOf('/booking/') === 0 ||
           path === '/book' ||
           path.indexOf('/book/') === 0 ||
+          search.indexOf('page=thank-you') !== -1 ||
           search.indexOf('booking=1') !== -1
         ) {
           gtag('event', 'conversion', {
@@ -142,10 +147,16 @@
           var path = (window.location.pathname || '').toLowerCase();
           var search = (window.location.search || '').toLowerCase();
           if (
+            path === '/thank-you' ||
+            path === '/thankyou' ||
+            path.indexOf('/thank-you/') === 0 ||
             path === '/book' ||
             path.indexOf('/book/') === 0 ||
+            path === '/booking' ||
+            path.indexOf('/booking/') === 0 ||
             path === '/customer-booking' ||
             path.indexOf('/customer-booking/') === 0 ||
+            search.indexOf('page=thank-you') !== -1 ||
             search.indexOf('mode=customer') !== -1 ||
             search.indexOf('booking=1') !== -1 ||
             host.indexOf('book.') === 0 ||

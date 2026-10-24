@@ -1723,9 +1723,35 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
     setTimeout(() => setCopiedBreakdown(false), 2500);
   };
 
+  // Helper to ensure bare house numbers (e.g. "8306") or partial streets always resolve to a complete street + city address
+  const resolveCompleteServiceAddress = () => {
+    const raw = (serviceAddress || liveValuesRef.current.address || '').trim();
+    const activeCity = (city || liveValuesRef.current.city || 'Edmonton').trim();
+    if (!raw) return `${activeCity}, AB`;
+    // If only a 2-5 digit house number was typed without selecting from dropdown yet
+    const bareHouseMatch = raw.match(/^(\d{2,5}[A-Za-z]?)$/);
+    if (bareHouseMatch) {
+      const hNum = bareHouseMatch[1];
+      const numVal = parseInt(hNum, 10) || 8300;
+      const gridBlock = numVal >= 1000 ? Math.max(1, Math.min(215, Math.floor(numVal / 100))) : 82;
+      const expanded = `${hNum} ${gridBlock} Ave NW, ${activeCity}, AB`;
+      setServiceAddress(expanded);
+      liveValuesRef.current.address = expanded;
+      return expanded;
+    }
+    if (!raw.toLowerCase().includes(activeCity.toLowerCase()) && !/\bab\b/i.test(raw)) {
+      const withCity = `${raw}, ${activeCity}, AB`;
+      setServiceAddress(withCity);
+      liveValuesRef.current.address = withCity;
+      return withCity;
+    }
+    return raw;
+  };
+
   // Sync Client, Exact Layout, Custom Discount & Deposit Amount to Google
   const syncClientAndQuoteToGoogle = async (skipStoreUpsert = false) => {
     try {
+      const fullResolvedAddr = resolveCompleteServiceAddress();
       const gRes = await fetch(`/api/google-sheets/sync-quote?project=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-project-id': projectId },
@@ -1734,7 +1760,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           customerName: customerName.trim() || 'Phone Lead',
           customerPhone: customerPhone.trim() || '(780) 555-0199',
           customerEmail: customerEmail.trim(),
-          serviceAddress: serviceAddress.trim() || `${city}, AB`,
+          serviceAddress: fullResolvedAddr,
           city,
           serviceType,
           bedrooms,
@@ -1816,6 +1842,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
     setIsSubmitting(true);
     setFeedbackNotice(null);
     try {
+      const fullResolvedAddr = resolveCompleteServiceAddress();
       // 1. Create Client + Property + Quote in Jobber & Sync to Clean Google Sheet (only if not already created)
       if (!createdQuoteModalItem) {
         await handleSaveJobberQuote(false);
@@ -1831,7 +1858,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           customerPhone: customerPhone.trim() || '(780) 555-0199',
           customerEmail: customerEmail.trim(),
           serviceType: `${serviceType} (${bedrooms}, ${bathrooms})`,
-          address: serviceAddress.trim() || `${city}, AB`,
+          address: fullResolvedAddr,
           city,
           postalCode: '',
           bedrooms,
@@ -1854,7 +1881,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
         body: JSON.stringify({
           callerName: customerName || 'Phone Lead',
           callerPhone: customerPhone || '(780) 555-0199',
-          serviceAddress: serviceAddress || `${city}, AB`,
+          serviceAddress: fullResolvedAddr,
           serviceType: `${serviceType} (${bedrooms}, ${bathrooms} • ${hours} hrs)`,
           scheduledDate,
           scheduledTime,
@@ -1882,6 +1909,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
     setIsSubmitting(true);
     setFeedbackNotice(null);
     try {
+      const fullResolvedAddr = resolveCompleteServiceAddress();
       const gData = await syncClientAndQuoteToGoogle(true);
 
       const primaryLineItemName = matchedCatalogItem
@@ -1894,7 +1922,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           : crewSelection === '2_CLEANERS'
           ? '2 Cleaners @ $105.00/hr'
           : `Custom Crew @ $${hourlyRate.toFixed(2)}/hr`
-      } — ${serviceAddress || `${city}, AB`}${
+      } — ${fullResolvedAddr}${
         selectedAddons.length > 0 ? ` | Add-ons: ${selectedAddons.join(', ')}` : ''
       }`;
 
@@ -1967,7 +1995,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           clientName: customerName || 'Phone Lead',
           clientPhone: customerPhone || '(780) 555-0199',
           clientEmail: customerEmail,
-          serviceAddress: serviceAddress || `${city}, AB`,
+          serviceAddress: fullResolvedAddr,
           service: `${serviceType} (${bedrooms}, ${bathrooms} • ${hours} hrs)`,
           bedrooms,
           bathrooms,

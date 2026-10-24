@@ -492,52 +492,109 @@ app.get("/api/places/autocomplete", async (req, res) => {
       return res.json({ predictions: [] });
     }
 
+    const formatPrediction = (desc: string, id: string, main: string, secondary: string) => ({
+      description: desc,
+      placeId: id,
+      place_id: id,
+      mainText: main,
+      main_text: main,
+      secondaryText: secondary,
+      secondary_text: secondary,
+      structured_formatting: {
+        main_text: main,
+        secondary_text: secondary,
+      },
+    });
+
     const mapsKey = getActiveMapsApiKey();
     if (mapsKey && !geocodeQuotaExhausted) {
-      // Use Google Places API (New) which supports HTTP Referrer-restricted keys
-      const response = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Goog-Api-Key": mapsKey,
-          "Referer": getRequestReferer(req),
-        },
-        body: JSON.stringify({
-          input,
-          includedRegionCodes: ["ca"],
-          locationBias: {
-            circle: {
-              center: { latitude: 53.5461, longitude: -113.4938 },
-              radius: 48000.0,
-            },
+      // 1. Try Google Places API (New) with required X-Goog-FieldMask header
+      try {
+        const response = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": mapsKey,
+            "X-Goog-FieldMask":
+              "suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat",
+            "Referer": getRequestReferer(req),
           },
-        }),
-      });
+          body: JSON.stringify({
+            input,
+            includedRegionCodes: ["ca"],
+            locationBias: {
+              circle: {
+                center: { latitude: 53.5461, longitude: -113.4938 },
+                radius: 48000.0,
+              },
+            },
+          }),
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data.suggestions) && data.suggestions.length > 0) {
-          return res.json({
-            predictions: data.suggestions
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+            const preds = data.suggestions
               .map((s: any) => s.placePrediction)
               .filter(Boolean)
-              .map((p: any) => {
+              .map((p: any, idx: number) => {
                 const fullText = p.text?.text || "";
                 const parts = fullText.split(",");
-                return {
-                  description: fullText,
-                  placeId: p.placeId || p.place || "",
-                  mainText: p.structuredFormat?.mainText?.text || parts[0]?.trim() || fullText,
-                  secondaryText: p.structuredFormat?.secondaryText?.text || parts.slice(1).join(",").trim() || "Alberta, Canada",
-                };
-              }),
-          });
+                const main = p.structuredFormat?.mainText?.text || parts[0]?.trim() || fullText;
+                const secondary =
+                  p.structuredFormat?.secondaryText?.text ||
+                  parts.slice(1).join(",").trim() ||
+                  "Edmonton, AB, Canada";
+                return formatPrediction(fullText, p.placeId || p.place || `gmp-v1-${idx}`, main, secondary);
+              });
+            if (preds.length > 0) {
+              return res.json({ predictions: preds });
+            }
+          }
         }
+      } catch {
+        // Fall through to legacy Places API / local Edmonton grid synthesis
+      }
+
+      // 2. Fallback to legacy Google Places Autocomplete endpoint
+      try {
+        const legacyUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+          input
+        )}&components=country:ca&location=53.5461,-113.4938&radius=48000&types=address&key=${encodeURIComponent(
+          mapsKey
+        )}`;
+        const legRes = await fetch(legacyUrl, {
+          headers: { Referer: getRequestReferer(req) },
+        });
+        if (legRes.ok) {
+          const legData = await legRes.json();
+          if (Array.isArray(legData.predictions) && legData.predictions.length > 0) {
+            return res.json({
+              predictions: legData.predictions.slice(0, 6).map((p: any, idx: number) => {
+                const fullText = p.description || "";
+                const parts = fullText.split(",");
+                const main = p.structured_formatting?.main_text || parts[0]?.trim() || fullText;
+                const secondary =
+                  p.structured_formatting?.secondary_text ||
+                  parts.slice(1).join(",").trim() ||
+                  "Edmonton, AB, Canada";
+                return formatPrediction(fullText, p.place_id || `gmp-leg-${idx}`, main, secondary);
+              }),
+            });
+          }
+        }
+      } catch {
+        // Fall through to local Edmonton grid synthesis
       }
     }
 
-    // Local Edmonton & Capital Region fuzzy autocomplete fallback (works offline or without quota)
+    // 3. Local Edmonton & Capital Region smart grid & corridor autocomplete
     const EDMONTON_CORRIDORS = [
+      { address: "8306 104 St NW, Edmonton, AB T6E 4E8", main: "8306 104 St NW", sub: "Old Strathcona / Whyte Ave, Edmonton, AB" },
+      { address: "8306 83 Ave NW, Edmonton, AB T6C 1A8", main: "8306 83 Ave NW", sub: "Idylwylde / Bonnie Doon, Edmonton, AB" },
+      { address: "8306 112 St NW, Edmonton, AB T6G 1K5", main: "8306 112 St NW", sub: "Garneau / University, Edmonton, AB" },
+      { address: "8306 99 St NW, Edmonton, AB T6E 3T4", main: "8306 99 St NW", sub: "Ritchie / Strathcona, Edmonton, AB" },
+      { address: "8306 158 St NW, Edmonton, AB T5R 2C4", main: "8306 158 St NW", sub: "Elmwood / Meadowlark, Edmonton, AB" },
       { address: "10405 Jasper Ave NW, Edmonton, AB T5J 3S2", main: "10405 Jasper Ave NW", sub: "Edmonton, AB" },
       { address: "10220 104 Ave NW, Edmonton, AB T5J 0H6", main: "10220 104 Ave NW", sub: "Downtown Edmonton, AB" },
       { address: "8440 112 St NW, Edmonton, AB T6G 2B7", main: "8440 112 St NW", sub: "Old Strathcona / University, Edmonton, AB" },
@@ -568,24 +625,43 @@ app.get("/api/places/autocomplete", async (req, res) => {
       (c) => c.address.toLowerCase().includes(q) || c.main.toLowerCase().includes(q) || c.sub.toLowerCase().includes(q)
     ).slice(0, 6);
 
-    // If typing custom street address, add smart formatted suggestion
-    const predictions = matched.map((m, idx) => ({
-      description: m.address,
-      placeId: `custom-yeg-${idx}`,
-      mainText: m.main,
-      secondaryText: m.sub,
-    }));
+    const predictions = matched.map((m, idx) =>
+      formatPrediction(m.address, `custom-yeg-${idx}`, m.main, m.sub)
+    );
 
-    if (predictions.length === 0 && input.length >= 3) {
-      predictions.push({
-        description: `${input}, Edmonton, AB`,
-        placeId: "custom-input-edmonton",
-        mainText: input,
-        secondaryText: "Edmonton, AB, Canada",
+    // If the user typed a 2-5 digit house number alone (e.g. "8306" or "10420"), synthesize Edmonton grid street options
+    const houseOnlyMatch = input.match(/^(\d{2,5})[A-Za-z]?$/);
+    if (houseOnlyMatch) {
+      const hNum = houseOnlyMatch[1];
+      const prefixBlock = parseInt(hNum, 10) >= 1000 ? Math.floor(parseInt(hNum, 10) / 100) : 82;
+      const gridCandidates = [
+        { main: `${input} ${prefixBlock} Ave NW`, sub: "Edmonton, AB" },
+        { main: `${input} ${prefixBlock} St NW`, sub: "Edmonton, AB" },
+        { main: `${input} 104 St NW`, sub: "Old Strathcona / Downtown, Edmonton, AB" },
+        { main: `${input} 82 Ave NW`, sub: "Whyte Ave Corridor, Edmonton, AB" },
+        { main: `${input} 112 St NW`, sub: "University / Garneau, Edmonton, AB" },
+        { main: `${input} Jasper Ave NW`, sub: "Downtown / Oliver, Edmonton, AB" },
+      ];
+      gridCandidates.forEach((cand, idx) => {
+        const desc = `${cand.main}, Edmonton, AB`;
+        if (!predictions.some((p) => p.mainText.toLowerCase() === cand.main.toLowerCase())) {
+          predictions.push(formatPrediction(desc, `grid-house-${hNum}-${idx}`, cand.main, cand.sub));
+        }
       });
     }
 
-    res.json({ predictions });
+    if (predictions.length === 0 && input.length >= 2) {
+      predictions.push(
+        formatPrediction(
+          `${input}, Edmonton, AB`,
+          "custom-input-edmonton",
+          input,
+          "Edmonton, AB, Canada"
+        )
+      );
+    }
+
+    res.json({ predictions: predictions.slice(0, 6) });
   } catch (err: any) {
     res.json({ predictions: [] });
   }
