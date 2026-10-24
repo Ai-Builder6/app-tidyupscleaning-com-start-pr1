@@ -12211,11 +12211,35 @@ app.get("/api/twilio/live-calls", async (req, res) => {
     .slice(0, 20)
     .map((q: any) => quoLogToScreenerRecord(q, store));
 
+  // Purge any leftover simulated test calls from store and memory so only real phone calls ever appear
+  for (let i = activeList.length - 1; i >= 0; i--) {
+    const c = activeList[i];
+    if (c?.isSimulated || String(c?.id || "").startsWith("sim-call-") || String(c?.callSid || "").startsWith("CA_SIM_")) {
+      activeList.splice(i, 1);
+    }
+  }
+  if (store && Array.isArray(store.recentInboundCalls)) {
+    const beforeLen = store.recentInboundCalls.length;
+    store.recentInboundCalls = store.recentInboundCalls.filter(
+      (c: any) => !c?.isSimulated && !String(c?.id || "").startsWith("sim-call-") && !String(c?.callSid || "").startsWith("CA_SIM_")
+    );
+    if (store.recentInboundCalls.length !== beforeLen) {
+      saveStore(store, projectId);
+    }
+  }
+
   const combinedMap = new Map<string, any>();
   for (const item of [...activeList, ...enrichedRecent, ...quoInbound]) {
+    if (
+      item?.isSimulated ||
+      String(item?.id || "").startsWith("sim-call-") ||
+      String(item?.callSid || "").startsWith("CA_SIM_")
+    ) {
+      continue;
+    }
     const digits = normalizePhoneDigits(item.callerNumber || "");
     const timeBucket = Math.floor(new Date(item.timestamp || Date.now()).getTime() / 90000);
-    const dedupeKey = item.isSimulated ? item.id : `${digits}-${timeBucket}`;
+    const dedupeKey = `${digits}-${timeBucket}`;
     const existing = combinedMap.get(dedupeKey);
     if (!existing) {
       combinedMap.set(dedupeKey, item);
@@ -12228,16 +12252,16 @@ app.get("/api/twilio/live-calls", async (req, res) => {
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
-  // Show the most recent non-dismissed call from the last 30 minutes in the floating HUD so Richard never misses it
+  // Only show genuinely active real calls from the last 90 seconds in liveHudCalls
   const liveHudCalls = combinedRecent.filter((c) => {
     if (c.dismissedInHud || dismissedHudCallIds.has(c.id) || dismissedHudCallIds.has(c.callSid)) return false;
     const ageMs = nowMs - new Date(c.timestamp).getTime();
-    return ageMs <= 30 * 60 * 1000;
+    return ageMs <= 90 * 1000;
   });
 
   res.json({
     success: true,
-    liveHudCalls: liveHudCalls.slice(0, 2),
+    liveHudCalls: liveHudCalls.slice(0, 1),
     recentCalls: combinedRecent.slice(0, 35),
   });
 });
