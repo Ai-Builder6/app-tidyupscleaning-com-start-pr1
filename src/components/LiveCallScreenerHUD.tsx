@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   PhoneIncoming,
   PhoneCall,
-  PhoneOff,
   Mic,
   ShieldCheck,
   ShieldAlert,
@@ -58,40 +57,29 @@ interface LiveCallScreenerHUDProps {
 
 const PROTECTED_ALBERTA_CODES = new Set(['780', '587', '825', '403', '368']);
 
-// Realistic North American dual-tone phone ring (440Hz + 480Hz) using Web Audio API
-function playPhoneRingBurst() {
+// Subtle two-note notification chime (distinct from OpenPhone's ringtone so you never confuse the screen popup with the phone line)
+function playScreenerAlertChime() {
   try {
     const AudioCtx =
       window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
-    const osc1 = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
+    const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
-    osc1.type = 'sine';
-    osc2.type = 'sine';
-    osc1.frequency.setValueAtTime(440, ctx.currentTime);
-    osc2.frequency.setValueAtTime(480, ctx.currentTime);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.14); // A5
 
-    // Classic double-ring cadence
     gain.gain.setValueAtTime(0.001, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.04);
-    gain.gain.setValueAtTime(0.08, ctx.currentTime + 0.35);
-    gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    gain.gain.linearRampToValueAtTime(0.06, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
 
-    gain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.55);
-    gain.gain.setValueAtTime(0.08, ctx.currentTime + 0.9);
-    gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.95);
-
-    osc1.connect(gain);
-    osc2.connect(gain);
+    osc.connect(gain);
     gain.connect(ctx.destination);
 
-    osc1.start(ctx.currentTime);
-    osc2.start(ctx.currentTime);
-    osc1.stop(ctx.currentTime + 1.0);
-    osc2.stop(ctx.currentTime + 1.0);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.36);
   } catch {
     // ignore if browser blocks autoplay before user interaction
   }
@@ -114,14 +102,9 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
   const [isRingerMuted, setIsRingerMuted] = useState<boolean>(false);
   const [isActivelyRingingId, setIsActivelyRingingId] = useState<string | null>(null);
   const seenCallIdsRef = useRef<Set<string>>(new Set());
-  const ringIntervalRef = useRef<any>(null);
   const originalDocTitleRef = useRef<string>(document.title);
 
   const stopRingingSound = useCallback(() => {
-    if (ringIntervalRef.current) {
-      clearInterval(ringIntervalRef.current);
-      ringIntervalRef.current = null;
-    }
     setIsActivelyRingingId(null);
     document.title = originalDocTitleRef.current;
   }, []);
@@ -131,22 +114,12 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
       if (call.status === 'BLOCKED') return;
       setIsActivelyRingingId(call.id);
 
-      // 1. Play audible phone ringtone bursts (up to 4 rings or until user clicks Answer / Stop Timer / Start Quote)
+      // 1. Play a single subtle screener chime (so it alerts you without sounding like a second competing phone ringing)
       if (!isRingerMuted) {
-        playPhoneRingBurst();
-        if (ringIntervalRef.current) clearInterval(ringIntervalRef.current);
-        let ringCount = 1;
-        ringIntervalRef.current = setInterval(() => {
-          ringCount += 1;
-          if (ringCount > 4) {
-            stopRingingSound();
-            return;
-          }
-          playPhoneRingBurst();
-        }, 2400);
+        playScreenerAlertChime();
       }
 
-      // 2. Flash browser tab title so user sees it even if looking at another tab
+      // 2. Update browser tab title so user sees it even if looking at another tab
       document.title = `📞 CALL: ${call.callerNumber} ➔ ${call.originalDialedNumber}`;
 
       // 3. Fire desktop/browser Notification so it pops up over ANY other web page or window
@@ -154,7 +127,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
         if (Notification.permission === 'granted') {
           try {
             const notif = new Notification(`📞 Incoming Call: ${call.callerNumber}`, {
-              body: `Dialed: ${call.originalDialedNumber} (${call.campaignLabel})\nClick to return to TidyUps Console & Start Quote.`,
+              body: `Dialed: ${call.originalDialedNumber} (${call.campaignLabel})\nAnswer the call in Quo (OpenPhone), then click here to Start Quote + Live Audio.`,
               requireInteraction: true,
             });
             notif.onclick = () => {
@@ -167,7 +140,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
         }
       }
     },
-    [isRingerMuted, stopRingingSound]
+    [isRingerMuted]
   );
 
   const fetchLiveCalls = useCallback(async () => {
@@ -178,18 +151,22 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
       if (Array.isArray(data.liveHudCalls)) {
         setLiveHudCalls(data.liveHudCalls);
         const newest = data.liveHudCalls[0];
-        if (newest && !seenCallIdsRef.current.has(newest.id)) {
-          seenCallIdsRef.current.add(newest.id);
-          const ageSec = (Date.now() - new Date(newest.timestamp).getTime()) / 1000;
-          // If this call arrived within the last 45 seconds (or is a test ring), trigger audible ring + popup notification
-          if (ageSec <= 45 || newest.isSimulated) {
-            triggerIncomingAlert(newest);
-          } else {
-            // For older completed calls loaded on page refresh, freeze their timer automatically so it doesn't count up forever
-            const dur = Number(newest.duration || 15);
-            const mins = String(Math.floor(dur / 60)).padStart(2, '0');
-            const secs = String(dur % 60).padStart(2, '0');
-            setStoppedTimerByCallId((prev) => ({ ...prev, [newest.id]: `${mins}:${secs}` }));
+        if (newest) {
+          // If the call transitioned from RINGING to ANSWERED_IN_APP or has a transcript/duration, stop the ringing badge automatically
+          if (newest.liveState === 'ANSWERED_IN_APP' || newest.transcriptText || newest.duration) {
+            stopRingingSound();
+          }
+          if (!seenCallIdsRef.current.has(newest.id)) {
+            seenCallIdsRef.current.add(newest.id);
+            const ageSec = (Date.now() - new Date(newest.timestamp).getTime()) / 1000;
+            if (ageSec <= 45 || newest.isSimulated) {
+              triggerIncomingAlert(newest);
+            } else {
+              const dur = Number(newest.duration || 15);
+              const mins = String(Math.floor(dur / 60)).padStart(2, '0');
+              const secs = String(dur % 60).padStart(2, '0');
+              setStoppedTimerByCallId((prev) => ({ ...prev, [newest.id]: `${mins}:${secs}` }));
+            }
           }
         }
       }
@@ -199,7 +176,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
     } catch {
       // ignore transient network errors
     }
-  }, [projectId, triggerIncomingAlert]);
+  }, [projectId, triggerIncomingAlert, stopRingingSound]);
 
   useEffect(() => {
     fetchLiveCalls();
@@ -249,8 +226,12 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
     if (stoppedTimerByCallId[call.id]) {
       return stoppedTimerByCallId[call.id];
     }
+    if (call.duration && call.duration > 0) {
+      const mins = String(Math.floor(call.duration / 60)).padStart(2, '0');
+      const secs = String(call.duration % 60).padStart(2, '0');
+      return `${mins}:${secs}`;
+    }
     const diffSec = Math.max(0, Math.floor((nowTick - new Date(call.timestamp).getTime()) / 1000));
-    // If call already has a completed transcript and is over 60s old, show fixed duration instead of counting forever
     if (call.transcriptText && diffSec > 60) {
       return '00:15';
     }
@@ -267,7 +248,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
       ...prev,
       [call.id]: currentVal,
     }));
-    setActionNotice('Timer & ringer stopped — call stays connected and caller info remains pinned on screen.');
+    setActionNotice('Timer stopped — caller info stays pinned on your screen while you finish your call in Quo.');
     setTimeout(() => setActionNotice(null), 4000);
   };
 
@@ -355,7 +336,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
             stopRingingSound();
           }}
           className="px-2 py-1.5 hover:bg-white/5 transition-colors border-r border-white/10 text-slate-300 cursor-pointer"
-          title={isRingerMuted ? 'Unmute Audible Ringtone' : 'Audible Ringtone Active (Click to Mute)'}
+          title={isRingerMuted ? 'Unmute Screener Chime' : 'Screener Chime Active (Click to Mute)'}
         >
           {isRingerMuted ? <VolumeX className="w-3.5 h-3.5 text-rose-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
         </button>
@@ -364,10 +345,10 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
           onClick={() => handleSimulateCall('clean_7223')}
           disabled={isSimulating}
           className="px-2.5 py-1.5 font-semibold text-emerald-300 hover:bg-emerald-500/15 transition-colors border-r border-white/10 flex items-center gap-1 cursor-pointer"
-          title="Simulate a customer dialing (587) 900-7223 with Audible Ring & Browser Popup Alert"
+          title="Simulate a customer dialing (587) 900-7223"
         >
           <PhoneIncoming className="w-3 h-3" />
-          <span>Test Ring</span>
+          <span>Test Popup</span>
         </button>
 
         <button
@@ -427,11 +408,18 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
                     INFO CAPTURED (ON CALL)
                   </span>
                 </>
+              ) : activeCall.liveState === 'RINGING' ? (
+                <>
+                  <PhoneIncoming className="w-3.5 h-3.5 text-amber-400 animate-bounce shrink-0" />
+                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-300 truncate">
+                    RINGING IN QUO APP
+                  </span>
+                </>
               ) : (
                 <>
                   <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse shrink-0" />
                   <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 truncate">
-                    LIVE CALL IN CONSOLE
+                    CONNECTED IN QUO
                   </span>
                 </>
               )}
@@ -476,7 +464,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
                     ? 'bg-slate-800 border-white/10 text-slate-300'
                     : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400/40 text-amber-200'
                 }`}
-                title="Click to Stop Timer & Stop Ringing WITHOUT hanging up the call (keeps info on screen)"
+                title="Click to Stop Timer WITHOUT hanging up the call (keeps info on screen)"
               >
                 <PauseCircle className="w-3 h-3 text-amber-300" />
                 <span>{formatElapsed(activeCall)}</span>
@@ -561,7 +549,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
 
               <div className="p-2.5">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                  {activeCall.status === 'BLOCKED' ? 'SHIELD ACTION' : 'RECEIVING LINE'}
+                  {activeCall.status === 'BLOCKED' ? 'SHIELD ACTION' : 'PICK UP IN QUO LINE'}
                 </div>
                 <div className="font-mono text-xs font-bold text-slate-100 tabular-nums mt-0.5 truncate">
                   {activeCall.status === 'BLOCKED'
@@ -574,7 +562,18 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
               </div>
             </div>
 
-            {/* Row 4: 1-Click Start Quote + Live Audio Listen, and Answer / Stop Timer (Stay on Call) / Decline */}
+            {/* Clear guidance note so you never confuse Quo phone pickup with the Quote Screener */}
+            {activeCall.liveState === 'RINGING' && (
+              <div className="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 flex items-center gap-2">
+                <PhoneCall className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Step 1:</strong> Click <strong>Answer in Quo (OpenPhone)</strong> to connect the phone line.{' '}
+                  <strong>Step 2:</strong> Click green button below to start live quote audio!
+                </span>
+              </div>
+            )}
+
+            {/* Row 4: 1-Click Start Quote + Live Audio Listen, and Stop Timer / Close Banner */}
             <div className="space-y-2 pt-1">
               {activeCall.status !== 'BLOCKED' && (
                 <button
@@ -586,34 +585,23 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
                 </button>
               )}
 
-              <div className="grid grid-cols-3 gap-1.5">
-                <button
-                  onClick={() => {
-                    stopRingingSound();
-                    handleCallAction(activeCall, 'answer_in_app');
-                  }}
-                  className="py-2 px-2 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-200 font-bold text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                >
-                  <PhoneCall className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Answer</span>
-                </button>
-
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => handleStopTimerKeepCall(activeCall)}
-                  className="py-2 px-2 rounded-lg bg-amber-950/60 hover:bg-amber-900/80 border border-amber-500/40 text-amber-200 font-bold text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                  title="Stop timer & stop ringing while staying on the call with all caller info on screen"
+                  className="py-2 px-2.5 rounded-lg bg-amber-950/60 hover:bg-amber-900/80 border border-amber-500/40 text-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  title="Stop timer while staying on the call with all caller info pinned on screen"
                 >
                   <PauseCircle className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{isTimerStopped ? 'Timer Stopped' : 'Stop Timer'}</span>
+                  <span>{isTimerStopped ? 'Timer Stopped (On Call)' : 'Stop Timer (Stay on Call)'}</span>
                 </button>
 
                 <button
-                  onClick={() => handleCallAction(activeCall, 'decline')}
-                  className="py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 font-bold text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                  title="Decline or hang up call cleanly without blocking the number"
+                  onClick={() => handleCallAction(activeCall, 'dismiss')}
+                  className="py-2 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  title="Close this banner from your screen"
                 >
-                  <PhoneOff className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Decline</span>
+                  <X className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Close Banner</span>
                 </button>
               </div>
             </div>

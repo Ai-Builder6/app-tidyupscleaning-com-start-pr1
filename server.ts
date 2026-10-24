@@ -10125,9 +10125,33 @@ async function processQuoCallEvent(
 
     for (const pid of ["tidyups", "dispatchgeeni"]) {
       const activeList = getActiveScreenerCalls(pid);
-      const exHudIdx = activeList.findIndex((c: any) => c.callSid === callId || c.id === hudRecord.id || (normalizePhoneDigits(c.callerNumber) === callerDigits && Math.abs(new Date(c.timestamp).getTime() - new Date(hudRecord.timestamp).getTime()) < 120000));
+      const exHudIdx = activeList.findIndex(
+        (c: any) =>
+          c.callSid === callId ||
+          c.id === hudRecord.id ||
+          (normalizePhoneDigits(c.callerNumber) === callerDigits &&
+            Math.abs(new Date(c.timestamp).getTime() - new Date(hudRecord.timestamp).getTime()) < 120000)
+      );
       if (exHudIdx >= 0) {
-        activeList[exHudIdx] = { ...activeList[exHudIdx], ...hudRecord, dismissedInHud: activeList[exHudIdx].dismissedInHud };
+        const prev = activeList[exHudIdx];
+        // If this call first hit Twilio (preserving e.g. +1 (587) 900-7223 GMB Direct) before ringing the receiving Quo line (+1 (833) 843-9877),
+        // keep the original dialed line & campaign from the Twilio leg!
+        const preserveOrigLine =
+          prev.originalDialedNumber && prev.originalDialedNumber !== dialedFromLine
+            ? prev.originalDialedNumber
+            : hudRecord.originalDialedNumber;
+        const preserveCampaign =
+          prev.originalDialedNumber && prev.originalDialedNumber !== dialedFromLine
+            ? prev.campaignLabel
+            : hudRecord.campaignLabel;
+        activeList[exHudIdx] = {
+          ...prev,
+          ...hudRecord,
+          originalDialedNumber: preserveOrigLine,
+          campaignLabel: preserveCampaign,
+          receivingLineLabel: lineName || prev.receivingLineLabel,
+          dismissedInHud: prev.dismissedInHud,
+        };
       } else {
         activeList.unshift(hudRecord);
       }
@@ -10135,9 +10159,30 @@ async function processQuoCallEvent(
     }
 
     if (!Array.isArray(store.recentInboundCalls)) store.recentInboundCalls = [];
-    const exRecIdx = store.recentInboundCalls.findIndex((c: any) => c.callSid === callId || c.id === hudRecord.id || (normalizePhoneDigits(c.callerNumber) === callerDigits && Math.abs(new Date(c.timestamp).getTime() - new Date(hudRecord.timestamp).getTime()) < 120000));
+    const exRecIdx = store.recentInboundCalls.findIndex(
+      (c: any) =>
+        c.callSid === callId ||
+        c.id === hudRecord.id ||
+        (normalizePhoneDigits(c.callerNumber) === callerDigits &&
+          Math.abs(new Date(c.timestamp).getTime() - new Date(hudRecord.timestamp).getTime()) < 120000)
+    );
     if (exRecIdx >= 0) {
-      store.recentInboundCalls[exRecIdx] = { ...store.recentInboundCalls[exRecIdx], ...hudRecord };
+      const prev = store.recentInboundCalls[exRecIdx];
+      const preserveOrigLine =
+        prev.originalDialedNumber && prev.originalDialedNumber !== dialedFromLine
+          ? prev.originalDialedNumber
+          : hudRecord.originalDialedNumber;
+      const preserveCampaign =
+        prev.originalDialedNumber && prev.originalDialedNumber !== dialedFromLine
+          ? prev.campaignLabel
+          : hudRecord.campaignLabel;
+      store.recentInboundCalls[exRecIdx] = {
+        ...prev,
+        ...hudRecord,
+        originalDialedNumber: preserveOrigLine,
+        campaignLabel: preserveCampaign,
+        receivingLineLabel: lineName || prev.receivingLineLabel,
+      };
     } else {
       store.recentInboundCalls.unshift(hudRecord);
     }
@@ -12000,10 +12045,39 @@ const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) =
 
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial timeout="25" answerOnBridge="true"${callerIdAttr}>${cleanDestination}</Dial>
+  <Dial timeout="25" answerOnBridge="true"${callerIdAttr}>
+    <Number statusCallback="/api/twilio/voice/call-status" statusCallbackEvent="initiated ringing answered completed">${cleanDestination}</Number>
+  </Dial>
 </Response>`;
   return res.send(twiml);
 };
+
+// Real-time Twilio Child Leg Status Callback: notifies our HUD the exact millisecond Quo answers or completes the call
+app.post("/api/twilio/voice/call-status", (req, res) => {
+  const callStatus = String(req.body?.CallStatus || req.query?.CallStatus || "").toLowerCase();
+  const parentSid = String(req.body?.ParentCallSid || req.body?.CallSid || "").trim();
+  const rawFrom = String(req.body?.From || "").trim();
+  const callerDigits = normalizePhoneDigits(rawFrom);
+
+  for (const pid of ["tidyups", "dispatchgeeni"]) {
+    const activeList = getActiveScreenerCalls(pid);
+    for (const c of activeList) {
+      if (
+        (parentSid && (c.callSid === parentSid || c.id === parentSid)) ||
+        (callerDigits && normalizePhoneDigits(c.callerNumber) === callerDigits)
+      ) {
+        if (callStatus === "in-progress" || callStatus === "answered") {
+          c.liveState = "ANSWERED_IN_APP";
+          c.reason = `Connected in Quo (${c.originalDialedNumber})`;
+        } else if (callStatus === "completed" || callStatus === "busy" || callStatus === "no-answer" || callStatus === "canceled") {
+          c.liveState = "ANSWERED_IN_APP";
+          c.duration = Number(req.body?.CallDuration || c.duration || 15);
+        }
+      }
+    }
+  }
+  res.status(200).send("OK");
+});
 
 // Track dismissed callSids/ids so dismissed HUD banners stay dismissed across polls
 const dismissedHudCallIds = new Set<string>();
