@@ -80,7 +80,8 @@ import {
 import { onFirebaseAuthStateChanged, getAccessTokenSync } from './lib/firebase';
 import { TeamChatDrawer } from './components/TeamChatDrawer';
 import { RoleSelectorModal } from './components/RoleSelectorModal';
-import { PWAInstallButton } from './components/PWAInstallButton';
+import { PWAInstallButton, DeviceLayoutOverride } from './components/PWAInstallButton';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { BookMyCleaningLogo } from './components/BookMyCleaningLogo';
 import { AddressSearchRadarView } from './components/AddressSearchRadarView';
 import { QuickMapScheduleRadarView } from './components/QuickMapScheduleRadarView';
@@ -1991,8 +1992,28 @@ export function App() {
   const [mobileSheetState, setMobileSheetState] = useState<'collapsed' | 'half' | 'full'>('collapsed');
   const [isLandscapeDrawerOpen, setIsLandscapeDrawerOpen] = useState<boolean>(false);
 
-  // Viewport mode detection for mobile portrait, mobile landscape, tablet, and desktop
-  const [viewportMode, setViewportMode] = useState<{
+  // Device layout override ('AUTO' | 'IPHONE' | 'IPAD' | 'DESKTOP') so user can preview or lock iPhone/iPad layout anytime
+  const [deviceOverride, setDeviceOverride] = useState<DeviceLayoutOverride>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('tidyups_device_layout_override') as DeviceLayoutOverride | null;
+        if (saved === 'AUTO' || saved === 'IPHONE' || saved === 'IPAD' || saved === 'DESKTOP') {
+          return saved;
+        }
+      } catch {}
+    }
+    return 'AUTO';
+  });
+
+  const handleChangeDeviceOverride = useCallback((mode: DeviceLayoutOverride) => {
+    setDeviceOverride(mode);
+    try {
+      localStorage.setItem('tidyups_device_layout_override', mode);
+    } catch {}
+  }, []);
+
+  // Viewport mode detection for mobile portrait (iPhone), mobile landscape, tablet (iPad), and desktop
+  const [rawViewportMode, setViewportMode] = useState<{
     isMobilePortrait: boolean;
     isMobileLandscape: boolean;
     isTablet: boolean;
@@ -2006,7 +2027,7 @@ export function App() {
     const isLandscape = w > h;
     const isMobileLand = isLandscape && (h <= 540 || (w < 960 && h < 600));
     const isMobilePort = !isLandscape && w < 768;
-    const isTab = !isMobileLand && !isMobilePort && w < 1024;
+    const isTab = !isMobileLand && !isMobilePort && w < 1200;
     return {
       isMobilePortrait: isMobilePort,
       isMobileLandscape: isMobileLand,
@@ -2022,7 +2043,7 @@ export function App() {
       const isLandscape = w > h;
       const isMobileLand = isLandscape && (h <= 540 || (w < 960 && h < 600));
       const isMobilePort = !isLandscape && w < 768;
-      const isTab = !isMobileLand && !isMobilePort && w < 1024;
+      const isTab = !isMobileLand && !isMobilePort && w < 1200;
       setViewportMode({
         isMobilePortrait: isMobilePort,
         isMobileLandscape: isMobileLand,
@@ -2038,6 +2059,15 @@ export function App() {
       window.removeEventListener('orientationchange', handleResize);
     };
   }, []);
+
+  const viewportMode =
+    deviceOverride === 'IPHONE'
+      ? { isMobilePortrait: true, isMobileLandscape: false, isTablet: false, isDesktop: false }
+      : deviceOverride === 'IPAD'
+      ? { isMobilePortrait: false, isMobileLandscape: false, isTablet: true, isDesktop: false }
+      : deviceOverride === 'DESKTOP'
+      ? { isMobilePortrait: false, isMobileLandscape: false, isTablet: false, isDesktop: true }
+      : rawViewportMode;
 
   // Mobile bottom sheet touch swipe gestures
   const touchStartYRef = useRef<number | null>(null);
@@ -2463,10 +2493,20 @@ export function App() {
       <div id="cleaning-dispatch-app" className="w-screen h-screen bg-slate-50 text-slate-900 font-sans select-none overflow-x-auto overflow-y-auto">
         <div
           className={`${
-            isStandaloneBookingDomain || isCustomerLockPreview || activeTopView === 'CUSTOMER_PORTAL'
+            deviceOverride === 'IPHONE'
+              ? 'w-full max-w-[430px] mx-auto shadow-2xl border-x border-slate-300 bg-slate-50'
+              : deviceOverride === 'IPAD'
+              ? 'w-full max-w-[1024px] mx-auto shadow-2xl border-x border-slate-300 bg-slate-50'
+              : deviceOverride === 'DESKTOP'
+              ? 'min-w-[1380px]'
+              : isStandaloneBookingDomain || isCustomerLockPreview || activeTopView === 'CUSTOMER_PORTAL'
               ? 'w-full'
-              : 'min-w-[1380px]'
-          } min-h-full h-full flex flex-col`}
+              : 'w-full xl:min-w-[1380px]'
+          } min-h-full h-full flex flex-col ${
+            !isZenMode && isStaffAuthenticated && !isStandaloneBookingDomain && !isCustomerLockPreview && deviceOverride !== 'DESKTOP'
+              ? 'pb-[58px] xl:pb-0'
+              : ''
+          }`}
         >
         {/* Quota banner suppressed so map operates cleanly without warnings */}
 
@@ -2515,7 +2555,7 @@ export function App() {
                 title="1-Click Instant Owner Login for cleaningserviceyeg@gmail.com (No Password Required)"
               >
                 <span>👑</span>
-                <span>Owner Login (cleaningserviceyeg@gmail.com — No Password)</span>
+                <span>Owner Login (No Password)</span>
               </button>
 
               {/* Staff & Dispatch Login (Password Required + Live Phone GPS) */}
@@ -2529,8 +2569,13 @@ export function App() {
                 title="Open Login & Password Screen for Dispatchers and Cleaners"
               >
                 <Lock className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                <span>Staff / Cleaner Login (Enter Password)</span>
+                <span>Staff / Cleaner Login</span>
               </button>
+
+              <PWAInstallButton
+                deviceOverride={deviceOverride}
+                onChangeDeviceOverride={handleChangeDeviceOverride}
+              />
             </div>
           </header>
         )}
@@ -2884,8 +2929,11 @@ export function App() {
                 </span>
               </button>
 
-              {/* PWA Mobile & Web App Installation Button */}
-              <PWAInstallButton />
+              {/* PWA Mobile & Web App Installation + iPhone/iPad Layout Switcher */}
+              <PWAInstallButton
+                deviceOverride={deviceOverride}
+                onChangeDeviceOverride={handleChangeDeviceOverride}
+              />
 
               {/* Staff Sign Out & Lock Console Button */}
               <button
@@ -3472,7 +3520,7 @@ export function App() {
                       isLandscapeDrawerOpen ? 'translate-x-0 pointer-events-auto' : 'translate-x-full pointer-events-none'
                     }`
                   : viewportMode.isMobilePortrait
-                  ? `fixed inset-x-0 bottom-0 z-40 bg-white rounded-t-2xl shadow-2xl flex flex-col transition-transform duration-300 ease-in-out pointer-events-auto h-[86vh] ${
+                  ? `fixed inset-x-0 bottom-[58px] xl:bottom-0 z-40 bg-white rounded-t-2xl shadow-2xl flex flex-col transition-transform duration-300 ease-in-out pointer-events-auto h-[80vh] ${
                       mobileSheetState === 'collapsed'
                         ? 'translate-y-[calc(100%-56px)]'
                         : mobileSheetState === 'half'
@@ -3480,7 +3528,7 @@ export function App() {
                         : 'translate-y-0'
                     }`
                   : viewportMode.isTablet
-                  ? `absolute top-0 right-0 bottom-0 z-40 w-[420px] h-full shadow-2xl bg-white border-l border-slate-200 flex flex-col transition-transform duration-300 ease-in-out ${
+                  ? `absolute top-0 right-0 bottom-0 z-40 w-[380px] sm:w-[420px] h-full shadow-2xl bg-white border-l border-slate-200 flex flex-col transition-transform duration-300 ease-in-out ${
                       isBoardCollapsed ? 'translate-x-full pointer-events-none' : 'translate-x-0 pointer-events-auto'
                     }`
                   : `relative h-full bg-white flex flex-col transition-all duration-300 ease-in-out ${
@@ -3883,6 +3931,31 @@ export function App() {
             </div>
           </footer>
         )}
+
+        {/* Native iOS Bottom Navigation Bar for iPhone & iPad */}
+        {!isZenMode &&
+          isStaffAuthenticated &&
+          !isStandaloneBookingDomain &&
+          !isCustomerLockPreview &&
+          deviceOverride !== 'DESKTOP' && (
+            <MobileBottomNav
+              activeTopView={activeTopView}
+              onSelectView={(targetView) => {
+                if (targetView === 'MASTER_HUB') setMasterHubFocusBlock('ALL');
+                if (targetView === 'SCHEDULED_JOBS') setScheduledJobsSubTab('CALENDAR');
+                if (targetView === 'MAP' && currentUser.role === 'CLEANER') setCleanerShowMap(true);
+                setActiveTopView(targetView);
+              }}
+              isCleanerRestrictedMode={isCleanerRestrictedMode}
+              cleanerShowMap={cleanerShowMap}
+              onSetCleanerShowMap={setCleanerShowMap}
+              leadsAndQuotesCount={leadsList.length + quotesList.length}
+              scheduledCount={scheduledJobsList.length}
+              unassignedCount={unassignedCount}
+              onOpenSpamShield={() => handleOpenSpamShield()}
+              forceShow={deviceOverride === 'IPHONE' || deviceOverride === 'IPAD'}
+            />
+          )}
         </div>
 
         {/* AI Dispatch Assistant Modal */}

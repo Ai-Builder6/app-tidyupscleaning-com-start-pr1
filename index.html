@@ -154,38 +154,6 @@
             window.__FORCE_CUSTOMER_BOOKING_ONLY__ = true;
             document.title = '833 TidyUps Cleaning Service — Online Customer Booking';
           }
-
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(registrations) {
-              if (registrations && registrations.length > 0) {
-                var unregisterPromises = [];
-                for (var i = 0; i < registrations.length; i++) {
-                  unregisterPromises.push(registrations[i].unregister());
-                }
-                Promise.all(unregisterPromises).then(function() {
-                  if ('caches' in window && window.caches) {
-                    return caches.keys().then(function(keys) {
-                      return Promise.all(keys.map(function(k) { return caches.delete(k); }));
-                    });
-                  }
-                }).then(function() {
-                  if (!sessionStorage.getItem('tidyups_sw_purged_v2')) {
-                    sessionStorage.setItem('tidyups_sw_purged_v2', '1');
-                    window.location.reload();
-                  }
-                }).catch(function() {});
-              }
-            }).catch(function() {});
-          }
-          if ('caches' in window && window.caches) {
-            caches.keys().then(function(keys) {
-              for (var j = 0; j < keys.length; j++) {
-                if (keys[j].indexOf('workbox') !== -1 || keys[j].indexOf('precache') !== -1) {
-                  caches.delete(keys[j]);
-                }
-              }
-            }).catch(function() {});
-          }
         } catch (_) {}
 
         // Auto-recover if a hashed JS chunk fails to load after a new deployment
@@ -282,14 +250,15 @@
         } catch (_) {}
       })();
     </script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
     <meta name="theme-color" content="#ec4899" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Tidyups Dispatch" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TidyUps" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <title>Tidyups Cleaning Dispatch App</title>
     <meta name="description" content="Interactive regional territory dispatch board for 15 mobile cleaning tech's and 3 core cleaning services (Standard, Deep, Move-Out) with voice dictation booking intake, Edmonton route optimization, and Jobber backend sync." />
     <link rel="canonical" href="https://app.tidyupscleaning.com" />

@@ -9,20 +9,26 @@ export function usePWAInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [isIPad, setIsIPad] = useState(false);
+  const [isIPhone, setIsIPhone] = useState(false);
 
   useEffect(() => {
-    // Detect standalone mode (already running as installed app on phone/desktop)
     const isStandalone =
       typeof window !== 'undefined' &&
       (window.matchMedia('(display-mode: standalone)').matches ||
         (window.navigator as unknown as { standalone?: boolean }).standalone === true);
     setIsInstalled(isStandalone);
 
-    // Detect iOS devices (iPhone, iPad)
     if (typeof window !== 'undefined') {
       const userAgent = window.navigator.userAgent.toLowerCase();
-      const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
-      setIsIOS(isIOSDevice);
+      const iphoneMatch = /iphone|ipod/.test(userAgent);
+      // iPadOS 13+ reports Macintosh in userAgent with maxTouchPoints > 1
+      const ipadMatch =
+        /ipad/.test(userAgent) ||
+        (/macintosh/.test(userAgent) && navigator.maxTouchPoints > 1);
+      setIsIPhone(iphoneMatch);
+      setIsIPad(ipadMatch);
+      setIsIOS(iphoneMatch || ipadMatch);
     }
 
     const handleBeforeInstallPrompt = (e: Event) => {
@@ -60,6 +66,8 @@ export function usePWAInstall() {
     isInstallable: !!deferredPrompt,
     isInstalled,
     isIOS,
+    isIPad,
+    isIPhone,
     install,
   };
 }

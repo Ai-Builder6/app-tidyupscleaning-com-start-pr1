@@ -1,0 +1,32 @@
+{
+  "id": "/",
+  "name": "Tidyups Cleaning Dispatch App",
+  "short_name": "TidyUps",
+  "description": "Interactive regional territory dispatch board for 15 mobile cleaning techs, live voice intake, Edmonton route optimization, and Jobber sync on iPhone, iPad, and Desktop.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#ec4899",
+  "background_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
