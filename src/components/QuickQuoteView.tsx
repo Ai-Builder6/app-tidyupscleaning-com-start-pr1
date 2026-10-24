@@ -1365,6 +1365,21 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     }
   };
 
+  // Auto-start Live Quote Audio Listener when "Start Quote" is clicked from the Live Call Screener HUD
+  const lastAutoStartedTokenRef = useRef<any>(null);
+  useEffect(() => {
+    const token = (initialLead as any)?.autoStartVoiceListener;
+    if (token && lastAutoStartedTokenRef.current !== token) {
+      lastAutoStartedTokenRef.current = token;
+      setTimeout(() => {
+        topDictationSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (!shouldKeepRecordingRef.current) {
+          handleToggleVoiceDictation();
+        }
+      }, 150);
+    }
+  }, [initialLead]);
+
   // Auto-estimate recommended hours from Bedrooms, Bathrooms & Service Type
   const handleAutoEstimateHoursFromRooms = () => {
     const bedNum = parseInt(bedrooms, 10) || 3;

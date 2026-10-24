@@ -3,7 +3,7 @@ import {
   PhoneIncoming,
   PhoneCall,
   PhoneOff,
-  Calculator,
+  Mic,
   ShieldCheck,
   ShieldAlert,
   Ban,
@@ -50,6 +50,8 @@ interface LiveCallScreenerHUDProps {
   onStartQuoteWithCaller: (prefillLead: AdLeadItem) => void;
   onOpenSpamShieldModal: () => void;
 }
+
+const PROTECTED_ALBERTA_CODES = new Set(['780', '587', '825', '403', '368']);
 
 export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
   projectId,
@@ -117,7 +119,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
 
   const handleCallAction = async (
     call: LiveScreenedCallItem,
-    action: 'answer_in_app' | 'terminate_and_block_caller' | 'terminate_and_block_areacode' | 'dismiss'
+    action: 'answer_in_app' | 'decline' | 'terminate_and_block_caller' | 'terminate_and_block_areacode' | 'dismiss'
   ) => {
     try {
       const res = await fetch(`/api/twilio/live-calls/${encodeURIComponent(call.callSid || call.id)}/action?project=${projectId}`, {
@@ -140,8 +142,8 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
     }
   };
 
-  const handleOpenQuoteFromCall = (call: LiveScreenedCallItem) => {
-    const prefillLead: AdLeadItem = {
+  const handleOpenQuoteAndAutoListen = (call: LiveScreenedCallItem) => {
+    const prefillLead: AdLeadItem & { autoStartVoiceListener?: number } = {
       id: `call-lead-${call.id}`,
       customerName:
         call.callerName && !call.callerName.includes('Inbound Caller') && !call.callerName.includes('Verified Customer')
@@ -160,6 +162,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
       notes: `Inbound call dialed ${call.originalDialedNumber} (${call.campaignLabel})${
         call.transcriptText ? `\n\nCall Transcript:\n${call.transcriptText}` : ''
       }`,
+      autoStartVoiceListener: Date.now(),
     };
     onStartQuoteWithCaller(prefillLead);
   };
@@ -175,6 +178,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
   };
 
   const activeCall = liveHudCalls[0] || null;
+  const isAlbertaAreaCode = activeCall ? PROTECTED_ALBERTA_CODES.has(activeCall.areaCode || '') : false;
 
   return (
     <div className="fixed top-14 right-4 z-50 flex flex-col items-end gap-2 pointer-events-none max-w-md w-full">
@@ -235,49 +239,80 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
               : 'bg-[#0B0F17] border-emerald-500/60'
           }`}
         >
-          {/* Row 1: Header Status + Elapsed Timer */}
+          {/* Row 1: Header Status + Compact Red Block # + Compact Blue Area Code Block + Timer */}
           <div
-            className={`px-4 py-2.5 border-b flex items-center justify-between ${
+            className={`px-3 py-2 border-b flex items-center justify-between gap-1.5 ${
               activeCall.status === 'BLOCKED'
                 ? 'bg-rose-950/40 border-rose-500/30'
                 : 'bg-emerald-950/40 border-emerald-500/30'
             }`}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
               {activeCall.status === 'BLOCKED' ? (
                 <>
-                  <ShieldAlert className="w-4 h-4 text-rose-400 animate-bounce" />
-                  <span className="text-[11px] font-black uppercase tracking-wider text-rose-300">
-                    INTERCEPTED ROBOCALL • AUTO-SEVERED
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span className="text-[10px] font-black uppercase tracking-wider text-rose-300 truncate">
+                    ROBOCALL SEVERED
                   </span>
                 </>
               ) : activeCall.liveState === 'ANSWERED_IN_APP' ? (
                 <>
-                  <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
-                  <span className="text-[11px] font-black uppercase tracking-wider text-emerald-300">
-                    LIVE CALL CAPTURED IN CONSOLE
+                  <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse shrink-0" />
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 truncate">
+                    LIVE CALL IN CONSOLE
                   </span>
                 </>
               ) : (
                 <>
-                  <PhoneIncoming className="w-4 h-4 text-emerald-400 animate-bounce" />
-                  <span className="text-[11px] font-black uppercase tracking-wider text-emerald-300">
-                    INCOMING VERIFIED CALL
+                  <PhoneIncoming className="w-3.5 h-3.5 text-emerald-400 animate-bounce shrink-0" />
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 truncate">
+                    INCOMING CALL
                   </span>
                 </>
               )}
             </div>
 
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-xs font-bold text-slate-200 tabular-nums">
+            {/* Compact Top-Right Block Controls + Running Timer */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Small Red Button: Block this specific caller number */}
+              <button
+                onClick={() => handleCallAction(activeCall, 'terminate_and_block_caller')}
+                className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+                title={`Drop & Permanently Block ${activeCall.callerNumber}`}
+              >
+                <Ban className="w-2.5 h-2.5" />
+                <span>Block #</span>
+              </button>
+
+              {/* Separate Small Blue Button: Block 3-digit Area Code (Protected for AB 780/587/825) */}
+              {activeCall.areaCode && (
+                <button
+                  onClick={() => handleCallAction(activeCall, 'terminate_and_block_areacode')}
+                  className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] flex items-center gap-1 transition-colors cursor-pointer ${
+                    isAlbertaAreaCode
+                      ? 'bg-sky-950/60 border border-sky-500/30 text-sky-300/70'
+                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-sm'
+                  }`}
+                  title={
+                    isAlbertaAreaCode
+                      ? `${activeCall.areaCode} is a local Alberta area code (Protected from accidental full-city block)`
+                      : `Block entire ${activeCall.areaCode}* area code`
+                  }
+                >
+                  <span>{isAlbertaAreaCode ? `AB ${activeCall.areaCode}` : `Area ${activeCall.areaCode}*`}</span>
+                </button>
+              )}
+
+              <span className="font-mono text-[11px] font-bold text-slate-200 tabular-nums pl-1">
                 {formatElapsed(activeCall.timestamp)}
               </span>
+
               <button
                 onClick={() => handleCallAction(activeCall, 'dismiss')}
                 className="text-slate-400 hover:text-white p-0.5 rounded"
-                title="Dismiss HUD Banner"
+                title="Close Banner"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -351,7 +386,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
 
               <div className="p-2.5">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                  {activeCall.status === 'BLOCKED' ? 'SHIELD ACTION' : 'RINGING RECEIVING LINE'}
+                  {activeCall.status === 'BLOCKED' ? 'SHIELD ACTION' : 'RECEIVING LINE'}
                 </div>
                 <div className="font-mono text-xs font-bold text-slate-100 tabular-nums mt-0.5 truncate">
                   {activeCall.status === 'BLOCKED'
@@ -364,51 +399,36 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
               </div>
             </div>
 
-            {/* Row 4: Instant In-App Action Console */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
+            {/* Row 4: 1-Click Start Quote + Live Audio Listen, and Clean Answer / Decline Below */}
+            <div className="space-y-2 pt-1">
               {activeCall.status !== 'BLOCKED' && (
-                <>
-                  <button
-                    onClick={() => handleOpenQuoteFromCall(activeCall)}
-                    className="col-span-2 py-2.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition-colors"
-                  >
-                    <Calculator className="w-4 h-4" />
-                    <span>Start Quote with Caller ({activeCall.originalDialedNumber})</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleCallAction(activeCall, 'answer_in_app')}
-                    className={`py-2 px-2.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 border transition-colors ${
-                      activeCall.liveState === 'ANSWERED_IN_APP'
-                        ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
-                        : 'bg-white/5 hover:bg-white/10 border-white/15 text-white'
-                    }`}
-                  >
-                    <PhoneCall className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>
-                      {activeCall.liveState === 'ANSWERED_IN_APP' ? 'Active in Console' : 'Answer in App'}
-                    </span>
-                  </button>
-                </>
-              )}
-
-              <button
-                onClick={() => handleCallAction(activeCall, 'terminate_and_block_caller')}
-                className="py-2 px-2.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
-              >
-                <PhoneOff className="w-3.5 h-3.5 text-rose-400" />
-                <span>Drop & Block #</span>
-              </button>
-
-              {activeCall.areaCode && (
                 <button
-                  onClick={() => handleCallAction(activeCall, 'terminate_and_block_areacode')}
-                  className="col-span-2 py-1.5 px-2.5 rounded-lg bg-rose-950/30 hover:bg-rose-900/50 border border-rose-500/30 text-rose-300 font-mono font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors"
+                  onClick={() => handleOpenQuoteAndAutoListen(activeCall)}
+                  className="w-full py-2.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition-colors cursor-pointer"
                 >
-                  <Ban className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Drop & Block Entire {activeCall.areaCode} Area Code (1{activeCall.areaCode}*)</span>
+                  <Mic className="w-4 h-4 animate-pulse" />
+                  <span>Start Quote + Live Audio Listen ({activeCall.originalDialedNumber})</span>
                 </button>
               )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => handleCallAction(activeCall, 'answer_in_app')}
+                  className="py-2 px-3 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <PhoneCall className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Answer</span>
+                </button>
+
+                <button
+                  onClick={() => handleCallAction(activeCall, 'decline')}
+                  className="py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  title="Decline or hang up call cleanly without blocking the number"
+                >
+                  <PhoneOff className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Decline</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -501,21 +521,19 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
                     <button
                       onClick={() => {
                         setIsDrawerOpen(false);
-                        handleOpenQuoteFromCall(item);
+                        handleOpenQuoteAndAutoListen(item);
                       }}
-                      className="px-2 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold flex items-center gap-1"
+                      className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1"
                     >
-                      <Calculator className="w-3 h-3" />
-                      <span>Quote Caller</span>
+                      <Mic className="w-3 h-3" />
+                      <span>Quote + Listen</span>
                     </button>
-                    {item.areaCode && item.status !== 'BLOCKED' && (
-                      <button
-                        onClick={() => handleCallAction(item, 'terminate_and_block_areacode')}
-                        className="px-2 py-1 rounded bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 font-mono text-[10px] font-bold"
-                      >
-                        Block {item.areaCode}*
-                      </button>
-                    )}
+                    <button
+                      onClick={() => handleCallAction(item, 'terminate_and_block_caller')}
+                      className="px-2 py-1 rounded bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 font-mono text-[10px] font-bold"
+                    >
+                      Block #
+                    </button>
                   </div>
                 </div>
               ))

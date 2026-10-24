@@ -12259,14 +12259,34 @@ app.post("/api/twilio/live-calls/:callSid/action", async (req, res) => {
   const activeList = getActiveScreenerCalls(projectId);
   const targetCall = activeList.find((c) => c.callSid === callSid || c.id === callSid);
 
-  if (action === "dismiss") {
+  if (action === "dismiss" || action === "decline") {
     dismissedHudCallIds.add(callSid);
     if (targetCall) {
       targetCall.dismissedInHud = true;
       if (targetCall.id) dismissedHudCallIds.add(targetCall.id);
       if (targetCall.callSid) dismissedHudCallIds.add(targetCall.callSid);
     }
-    return res.json({ success: true, action: "dismiss" });
+    // If declining an active Twilio call leg, hang up cleanly without blocking the number
+    const accountSid = process.env.TWILIO_ACCOUNT_SID || "";
+    const authToken = process.env.TWILIO_AUTH_TOKEN || "";
+    if (action === "decline" && callSid && callSid.startsWith("CA") && !callSid.startsWith("CAsim") && accountSid && authToken) {
+      try {
+        const authHeader = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+        await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`, {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${authHeader}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({ Status: "completed" }).toString(),
+        });
+      } catch {}
+    }
+    return res.json({
+      success: true,
+      action,
+      message: action === "decline" ? "Call declined / ended cleanly (number not blocked)." : undefined,
+    });
   }
 
   if (action === "answer_in_app") {
@@ -12285,7 +12305,7 @@ app.post("/api/twilio/live-calls/:callSid/action", async (req, res) => {
     return res.json({
       success: true,
       action: "answer_in_app",
-      message: "Call marked Active in TidyUps Console. Click 'Start Quote with Caller' to open intake with caller details pre-filled.",
+      message: "Call Active in Console. Click 'Start Quote + Live Audio' to open intake & start listening automatically.",
     });
   }
 
@@ -12316,6 +12336,14 @@ app.post("/api/twilio/live-calls/:callSid/action", async (req, res) => {
 
   const numToBlock = String(callerNumber || targetCall?.callerNumber || "").trim();
   const codeToBlock = String(areaCode || targetCall?.areaCode || "").replace(/\D/g, "").slice(0, 3);
+  const PROTECTED_ALBERTA_AREA_CODES = new Set(["780", "587", "825", "403", "368"]);
+
+  if (action === "terminate_and_block_areacode" && PROTECTED_ALBERTA_AREA_CODES.has(codeToBlock)) {
+    return res.json({
+      success: false,
+      message: `Protected: ${codeToBlock} is an Alberta area code (Edmonton/Calgary). Use the red 'Block #' button to block just this caller instead of all of ${codeToBlock}!`,
+    });
+  }
 
   if (store) {
     if (!store.spamShieldConfig) store.spamShieldConfig = { ...DEFAULT_SPAM_SHIELD_CONFIG };
@@ -12333,6 +12361,8 @@ app.post("/api/twilio/live-calls/:callSid/action", async (req, res) => {
         cfg.blockedNumbers.unshift(numToBlock);
       }
     }
+    dismissedHudCallIds.add(callSid);
+    if (targetCall?.id) dismissedHudCallIds.add(targetCall.id);
 
     if (targetCall) {
       targetCall.status = "BLOCKED";
