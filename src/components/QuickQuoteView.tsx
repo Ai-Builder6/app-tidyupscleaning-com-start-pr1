@@ -1365,12 +1365,74 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     }
   };
 
-  // Auto-start Live Quote Audio Listener when "Start Quote" is clicked from the Live Call Screener HUD
+  // Live Call Capture Timer + Speaker/Earbuds Mode (bookmycleaning.net workflow)
+  const [callCaptureElapsedSec, setCallCaptureElapsedSec] = useState<number>(0);
+  const [isCallTimerStopped, setIsCallTimerStopped] = useState<boolean>(false);
+  const [micMode, setMicMode] = useState<'speaker' | 'earbuds'>(() => {
+    try {
+      return localStorage.getItem('bmc.callCapture.micMode') === 'earbuds' ? 'earbuds' : 'speaker';
+    } catch {
+      return 'speaker';
+    }
+  });
+
+  useEffect(() => {
+    if (!isRecording || isCallTimerStopped) return;
+    const t = setInterval(() => {
+      setCallCaptureElapsedSec((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [isRecording, isCallTimerStopped]);
+
+  const formatCallCaptureTimer = (sec: number) => {
+    const mins = String(Math.floor(sec / 60)).padStart(2, '0');
+    const secs = String(sec % 60).padStart(2, '0');
+    return `${mins}:${secs}`;
+  };
+
+  // Stop timer & stop microphone WITHOUT declining call or clearing captured form fields
+  const handleStopTimerKeepInfo = () => {
+    setIsCallTimerStopped(true);
+    if (isRecording) {
+      handleToggleVoiceDictation();
+    }
+    setVoiceStatusMsg('✓ Timer & Mic stopped — all captured caller details stay filled in on screen while you finish your call.');
+  };
+
+  const handleQuickBlockFromQuoteHeader = async (mode: 'caller' | 'areacode') => {
+    const rawPhone = customerPhone || (initialLead as any)?.phone || '';
+    const digits = rawPhone.replace(/\D/g, '');
+    const normalized10 = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+    const areaCode = (initialLead as any)?.areaCode || normalized10.slice(0, 3);
+    const callSid = (initialLead as any)?.callSid || 'quick-quote-header';
+    try {
+      const res = await fetch(`/api/twilio/live-calls/${encodeURIComponent(callSid)}/action?project=${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: mode === 'caller' ? 'terminate_and_block_caller' : 'terminate_and_block_areacode',
+          callerNumber: rawPhone,
+          areaCode,
+        }),
+      });
+      const data = await res.json();
+      if (data.message) {
+        setFeedbackTone(data.protectedAreaCode ? 'warning' : 'success');
+        setFeedbackNotice(data.message);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  // Auto-start Live Quote Audio Listener when an incoming call pops open Quick Quote (or "Start Quote" is clicked)
   const lastAutoStartedTokenRef = useRef<any>(null);
   useEffect(() => {
     const token = (initialLead as any)?.autoStartVoiceListener;
     if (token && lastAutoStartedTokenRef.current !== token) {
       lastAutoStartedTokenRef.current = token;
+      setCallCaptureElapsedSec(0);
+      setIsCallTimerStopped(false);
       setTimeout(() => {
         topDictationSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         if (!shouldKeepRecordingRef.current) {
@@ -2061,54 +2123,170 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
       )}
 
       {/* ─────────────────────────────────────────────────────────────────────────────
-          SECTION 1: LIVE VOICE DICTATION & AI SMART AUTO-FILL BAR
+          SECTION 1: LIVE VOICE DICTATION & BOOKMYCLEANING.NET BIG BLINKING RED CAPTURE BAR
          ───────────────────────────────────────────────────────────────────────────── */}
-      <div className="bg-gradient-to-r from-[#171324] via-[#191528] to-[#141826] border border-pink-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-black uppercase tracking-wider text-pink-400">
-                Step 1 • Live Call Voice Dictation + Audio &amp; Transcript Reconciler
+      <div
+        className={`rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 transition-all ${
+          isRecording
+            ? 'bg-gradient-to-r from-[#2a0c14] via-[#1f1124] to-[#141826] border-2 border-red-500 ring-4 ring-red-500/20'
+            : 'bg-gradient-to-r from-[#171324] via-[#191528] to-[#141826] border border-pink-500/40'
+        }`}
+      >
+        {/* Top Row: Live Call Attribution + Compact Red Block # + Blue Area Code + Running Timer + Stop Timer */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/10">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className={`w-2.5 h-2.5 rounded-full ${
+                isRecording ? 'bg-red-500 animate-ping' : 'bg-emerald-400 animate-pulse'
+              }`}
+            />
+            <span className="text-xs font-black uppercase tracking-wider text-white">
+              LIVE CALL CAPTURE &amp; AUTO-FILL
+            </span>
+            {((initialLead as any)?.originalDialedNumber || customerPhone) && (
+              <span className="px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-400/50 text-amber-200 font-mono text-xs font-bold">
+                Caller: {customerPhone || '(780) 600-0607'} ➔ Dialed:{' '}
+                {(initialLead as any)?.originalDialedNumber || '+1 (587) 900-7223'} (
+                {(initialLead as any)?.campaignLabel || 'GMB Direct'})
               </span>
-              {isRecording && (
-                <span className="flex items-center gap-1.5 text-xs font-extrabold text-emerald-300 bg-emerald-500/20 border border-emerald-400/60 px-2.5 py-0.5 rounded-lg animate-pulse">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  Live Streaming Fill + Audio Recording Active
-                </span>
-              )}
-              {Object.keys(voiceCapturedFields).length > 0 && (
-                <span className="px-2.5 py-0.5 rounded-lg bg-[#00ff66]/20 border border-[#00ff66] text-[#5cff9d] text-[11px] font-black shadow-[0_0_15px_rgba(0,255,102,0.35)]">
-                  ✨ {Object.keys(voiceCapturedFields).length} Field{Object.keys(voiceCapturedFields).length === 1 ? '' : 's'} Lit Up Green Live
-                </span>
-              )}
-            </div>
-            <h2 className="text-lg font-extrabold text-white">
-              Dictate Caller Info to Live-Fill &amp; Light Up Each Block in Real Time
-            </h2>
-            <p className="text-xs text-slate-400">
-              As you speak, each block (Name, Phone, Address, Bedrooms, Bathrooms, Hours, Notes) lights up <strong className="text-[#4dff88]">bright green</strong> live — and when you stop, we compare the <strong className="text-emerald-300">Recorded Audio + Transcript</strong> so Jobber creates <strong className="text-white underline">1 complete client</strong> instead of duplicates.
-            </p>
+            )}
+            {Object.keys(voiceCapturedFields).length > 0 && (
+              <span className="px-2.5 py-0.5 rounded-lg bg-[#00ff66]/20 border border-[#00ff66] text-[#5cff9d] text-[11px] font-black shadow-[0_0_15px_rgba(0,255,102,0.35)]">
+                ✨ Just filled in: {Object.keys(voiceCapturedFields).join(', ')}
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Right Header Controls: Running Timer + Stop Timer (Stay on Call) + Little Red Block # + Little Blue Area Code */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Running Timer + 1-Click Stop Timer (Stay on Call & Keep Info) */}
             <button
               type="button"
-              onClick={handleToggleVoiceDictation}
-              className={`px-5 py-3 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-xl transition-all cursor-pointer active:scale-95 ${
+              onClick={handleStopTimerKeepInfo}
+              className={`px-2.5 py-1 rounded-lg font-mono text-xs font-black tabular-nums flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                isCallTimerStopped
+                  ? 'bg-slate-800 border-white/15 text-slate-300'
+                  : 'bg-amber-400 hover:bg-amber-300 border-amber-300 text-slate-950 shadow-md'
+              }`}
+              title="Stop Timer & Stop Mic WITHOUT declining the phone call — keeps all caller info on screen!"
+            >
+              <span>⏱ {formatCallCaptureTimer(callCaptureElapsedSec)}</span>
+              <span>• {isCallTimerStopped ? 'Timer Stopped (On Call)' : 'Stop Timer (Stay on Call)'}</span>
+            </button>
+
+            {/* Little Red Block Button up by the timer */}
+            <button
+              type="button"
+              onClick={() => handleQuickBlockFromQuoteHeader('caller')}
+              className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+              title={`Block specific caller ${customerPhone || 'number'}`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>Block #</span>
+            </button>
+
+            {/* Separate Little Blue Area Code Button (Alberta 780/587/825/403/368 Protected) */}
+            {(() => {
+              const rawDigits = (customerPhone || '').replace(/\D/g, '');
+              const norm10 = rawDigits.length === 11 && rawDigits.startsWith('1') ? rawDigits.slice(1) : rawDigits;
+              const area = (initialLead as any)?.areaCode || norm10.slice(0, 3) || '780';
+              const isProtectedAb = ['780', '587', '825', '403', '368'].includes(area);
+              return (
+                <button
+                  type="button"
+                  onClick={() => handleQuickBlockFromQuoteHeader('areacode')}
+                  className={`px-2.5 py-1 rounded-lg font-mono font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer ${
+                    isProtectedAb
+                      ? 'bg-sky-950/80 border border-sky-400/40 text-sky-300'
+                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-sm'
+                  }`}
+                  title={
+                    isProtectedAb
+                      ? `${area} is a local Alberta area code (Protected so you never block all of Edmonton)`
+                      : `Block entire ${area}* area code`
+                  }
+                >
+                  <span>{isProtectedAb ? `AB ${area} (Protected)` : `Block Area ${area}*`}</span>
+                </button>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* Main Row: Description + Speaker/Earbuds Mode + GIANT BLINKING RED BUTTON */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-2">
+            <h2 className="text-lg sm:text-xl font-extrabold text-white">
+              {isRecording
+                ? '🔴 Listening Live — Speak or Put Caller on Speaker to Auto-Fill Boxes in Green!'
+                : 'Incoming Call Auto-Listen & Instant Quote Builder'}
+            </h2>
+
+            {/* Speakerphone vs Earbuds Mode Selector (from bookmycleaning.net) */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMicMode('speaker');
+                  try {
+                    localStorage.setItem('bmc.callCapture.micMode', 'speaker');
+                  } catch {}
+                }}
+                className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                  micMode === 'speaker'
+                    ? 'bg-red-600/30 border-red-400 text-white'
+                    : 'bg-slate-900/80 border-slate-700 text-slate-400 hover:text-white'
+                }`}
+              >
+                🔊 Speakerphone Mode
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMicMode('earbuds');
+                  try {
+                    localStorage.setItem('bmc.callCapture.micMode', 'earbuds');
+                  } catch {}
+                }}
+                className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                  micMode === 'earbuds'
+                    ? 'bg-red-600/30 border-red-400 text-white'
+                    : 'bg-slate-900/80 border-slate-700 text-slate-400 hover:text-white'
+                }`}
+              >
+                🎧 Earbuds / Headset Mode
+              </button>
+              <span className="text-xs text-slate-300">
+                {micMode === 'speaker'
+                  ? 'Put the caller on speaker so your computer hears both sides and fills every box in green.'
+                  : 'Wearing earbuds? Repeat details back out loud ("So that\'s 10405 Jasper Ave, 3 bedrooms, 2 bathrooms...") and it fills itself in!'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+            {/* BIG BLINKING RED BUTTON (bookmycleaning.net style) */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsCallTimerStopped(false);
+                handleToggleVoiceDictation();
+              }}
+              className={`px-6 py-4 rounded-2xl font-black text-sm sm:text-base flex items-center gap-2.5 shadow-2xl transition-all cursor-pointer active:scale-95 ${
                 isRecording
-                  ? 'bg-rose-600 hover:bg-rose-700 text-white ring-4 ring-rose-500/30 animate-pulse'
-                  : 'bg-gradient-to-r from-pink-600 via-fuchsia-600 to-purple-600 hover:opacity-95 text-white'
+                  ? 'bg-red-600 hover:bg-red-500 text-white ring-4 ring-red-400/60 animate-pulse shadow-[0_0_35px_rgba(220,38,38,0.85)]'
+                  : 'bg-red-600 hover:bg-red-500 text-white ring-4 ring-red-500/40 animate-pulse shadow-[0_0_25px_rgba(220,38,38,0.65)]'
               }`}
             >
               {isRecording ? (
                 <>
-                  <MicOff className="w-4 h-4" />
-                  <span>Stop &amp; Reconcile Audio + Transcript</span>
+                  <MicOff className="w-5 h-5 animate-bounce" />
+                  <span>🔴 LISTENING LIVE ({formatCallCaptureTimer(callCaptureElapsedSec)}) — CLICK TO STOP</span>
                 </>
               ) : (
                 <>
-                  <Mic className="w-4 h-4" />
-                  <span>Start Live Voice Dictation</span>
+                  <Mic className="w-5 h-5 animate-bounce" />
+                  <span>🔴 START LIVE CALL AUDIO CAPTURE</span>
                 </>
               )}
             </button>
@@ -2117,10 +2295,10 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
               type="button"
               disabled={isParsingVoice || !voiceTranscript.trim()}
               onClick={() => handleExtractFromTranscript(voiceTranscript)}
-              className="px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-lg transition-all cursor-pointer"
+              className="px-4 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-lg transition-all cursor-pointer"
             >
               <Wand2 className="w-4 h-4" />
-              <span>{isParsingVoice ? 'Comparing Audio & Transcript...' : 'Compare & Fill Blanks'}</span>
+              <span>{isParsingVoice ? 'Reading Call...' : 'Read It Again'}</span>
             </button>
           </div>
         </div>
