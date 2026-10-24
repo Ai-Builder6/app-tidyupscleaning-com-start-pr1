@@ -59,6 +59,7 @@ import { IntakesView } from './components/IntakesView';
 import { ProjectBackupDriveModal } from './components/ProjectBackupDriveModal';
 import { VanHubEditModal } from './components/VanHubEditModal';
 import { MasterLeadsAndQuotesHubView, MasterHubFocusBlock } from './components/MasterLeadsAndQuotesHubView';
+import { FacebookMessengerAiView } from './components/FacebookMessengerAiView';
 import { ClientRecord } from './types/client';
 import { INITIAL_CLIENTS } from './data/clientsData';
 import { 
@@ -379,7 +380,7 @@ export function App() {
     return false;
   });
 
-  // Detect if visitor is on a public legal page (/privacy-policy, /privacy, /terms, /t&c, /support)
+  // Detect if visitor is on a public legal page (/privacy-policy, /privacy, /data-deletion, /delete-data, /terms, /t&c, /support)
   const isPublicLegalPath = (() => {
     if (typeof window !== 'undefined') {
       const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
@@ -387,11 +388,14 @@ export function App() {
       return (
         p === '/privacy-policy' ||
         p === '/privacy' ||
+        p === '/data-deletion' ||
+        p === '/delete-data' ||
         p === '/terms' ||
         p === '/t&c' ||
         p === '/support' ||
         h === '#privacy-policy' ||
         h === '#privacy' ||
+        h === '#data-deletion' ||
         h === '#terms' ||
         h === '#support'
       );
@@ -415,29 +419,35 @@ export function App() {
   const permissions = getUserPermissions(currentUser);
   const isCleanerRestrictedMode = currentUser.role === 'CLEANER' && !hasExpandedConsoleAccess(permissions);
 
-  // Dedicated Top Bar Navigation Tabs: 'MASTER_HUB' | 'QUICK_QUOTE' | 'MAP' | 'SCHEDULED_JOBS' | 'MANAGEMENT' | 'INTAKES' | 'CUSTOMER_PORTAL' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'SPAM_SHIELD'
-  const [activeTopView, setActiveTopView] = useState<'MASTER_HUB' | 'MAP' | 'CUSTOMER_PORTAL' | 'SCHEDULED_JOBS' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'MANAGEMENT' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'QUICK_QUOTE' | 'INTAKES' | 'SPAM_SHIELD'>(() => {
+  // Dedicated Top Bar Navigation Tabs: 'MASTER_HUB' | 'FB_MESSENGER_AI' | 'QUICK_QUOTE' | 'MAP' | 'SCHEDULED_JOBS' | 'MANAGEMENT' | 'INTAKES' | 'CUSTOMER_PORTAL' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'SPAM_SHIELD'
+  const [activeTopView, setActiveTopView] = useState<'MASTER_HUB' | 'FB_MESSENGER_AI' | 'MAP' | 'CUSTOMER_PORTAL' | 'SCHEDULED_JOBS' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'MANAGEMENT' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'QUICK_QUOTE' | 'INTAKES' | 'SPAM_SHIELD'>(() => {
     if (typeof window !== 'undefined') {
       const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
       const h = window.location.hash.toLowerCase();
       if (
         p === '/privacy-policy' ||
         p === '/privacy' ||
+        p === '/data-deletion' ||
+        p === '/delete-data' ||
         p === '/terms' ||
         p === '/t&c' ||
         p === '/support' ||
         h === '#privacy-policy' ||
         h === '#privacy' ||
+        h === '#data-deletion' ||
         h === '#terms' ||
         h === '#support'
       ) {
         return 'LEGAL';
       }
+      if (p === '/fb-messenger' || p === '/messenger' || h === '#fb-messenger') {
+        return 'FB_MESSENGER_AI';
+      }
       try {
         const isAuth = localStorage.getItem('tidyups_verified_password_session') === 'true';
         if (!isAuth) return 'CUSTOMER_PORTAL';
         const savedTab = localStorage.getItem('tidyups_active_tab');
-        if (savedTab && ['MASTER_HUB', 'MAP', 'CUSTOMER_PORTAL', 'SCHEDULED_JOBS', 'CLIENTS', 'ADDRESS_SEARCH', 'MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL', 'LEADS', 'QUICK_QUOTE', 'INTAKES', 'SPAM_SHIELD'].includes(savedTab)) {
+        if (savedTab && ['MASTER_HUB', 'FB_MESSENGER_AI', 'MAP', 'CUSTOMER_PORTAL', 'SCHEDULED_JOBS', 'CLIENTS', 'ADDRESS_SEARCH', 'MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL', 'LEADS', 'QUICK_QUOTE', 'INTAKES', 'SPAM_SHIELD'].includes(savedTab)) {
           return savedTab as any;
         }
         return 'MASTER_HUB';
@@ -477,7 +487,15 @@ export function App() {
     if (typeof window !== 'undefined') {
       const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
       const h = window.location.hash.toLowerCase();
-      if (p === '/privacy-policy' || p === '/privacy' || h === '#privacy-policy' || h === '#privacy') {
+      if (
+        p === '/privacy-policy' ||
+        p === '/privacy' ||
+        p === '/data-deletion' ||
+        p === '/delete-data' ||
+        h === '#privacy-policy' ||
+        h === '#privacy' ||
+        h === '#data-deletion'
+      ) {
         return 'PRIVACY';
       }
       if (p === '/terms' || p === '/t&c' || h === '#terms') {
@@ -598,6 +616,7 @@ export function App() {
   // Streamlined Top Header Main Workflow Buttons (All secondary owner buttons live inside MANAGEMENT / Owner Hub)
   const DEFAULT_HEADER_NAV_ORDER = [
     'MASTER_HUB',
+    'FB_MESSENGER_AI',
     'QUICK_QUOTE',
     'MAP',
     'SCHEDULED_JOBS',
@@ -2795,6 +2814,22 @@ export function App() {
                           </span>
                         </button>
                       );
+                    } else if (btnKey === 'FB_MESSENGER_AI') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-fb-messenger"
+                          onClick={() => setActiveTopView('FB_MESSENGER_AI')}
+                          className={`min-h-[34px] px-3.5 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'FB_MESSENGER_AI'
+                              ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white shadow-sm ring-2 ring-blue-500/30'
+                              : 'bg-blue-50 text-blue-950 hover:bg-blue-100 border border-blue-300'
+                          }`}
+                          title="Drag left/right to rearrange • 3-Page Facebook Messenger AI Bot, Live Prompt Tweaker & Auto-Sync to Google Sheet ('FB Leads') + Jobber"
+                        >
+                          <MessageSquare className={`w-3.5 h-3.5 ${activeTopView === 'FB_MESSENGER_AI' ? 'text-white' : 'text-blue-600'}`} />
+                          <span>FB Messenger AI (3 Pages)</span>
+                        </button>
+                      );
                     } else if (btnKey === 'QUICK_QUOTE' && permissions.canAccessQuickQuote) {
                       buttonElement = (
                         <button
@@ -3302,6 +3337,19 @@ export function App() {
                   }
                 : undefined
             }
+            onNavigateToFbMessengerAi={() => setActiveTopView('FB_MESSENGER_AI')}
+          />
+        ) : activeTopView === 'FB_MESSENGER_AI' ? (
+          <FacebookMessengerAiView
+            projectId={activeProjectId}
+            onLeadsUpdated={handleLeadsUpdated}
+            onQuotesUpdated={handleQuotesUpdated}
+            onClientsUpdated={(updated) => setClientsList(updated)}
+            onNavigateToMasterHub={() => {
+              setMasterHubFocusBlock('MASTER_TABLE');
+              setActiveTopView('MASTER_HUB');
+            }}
+            onNavigateToQuotes={() => setActiveTopView('QUOTES')}
           />
         ) : activeTopView === 'INTAKES' ? (
           <IntakesView

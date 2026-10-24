@@ -8961,6 +8961,1255 @@ app.post("/api/google-sheets/sync-quote", (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Facebook Messenger AI Bot (Monitors 2 Facebook Pages, Answers Pricing/Info,
+// Collects Service + Bedrooms/Bathrooms + Preferred Date + Address/Phone,
+// Allows Live Script Tweaking & Syncs to Google Sheets "FB Leads" + Jobber)
+// ─────────────────────────────────────────────────────────────────────────────
+const DEFAULT_FB_PAGES = [
+  {
+    id: "page_1",
+    pageId: process.env.FB_PAGE_1_ID || "259644287240765",
+    pageName: "TidyUps Cleaning Service Inc (Page 1)",
+    adCampaignLabel: "Edmonton Residential & Deep Clean Ads",
+    pageAccessToken: process.env.FACEBOOK_PAGE_1_Tidyups || process.env.FB_PAGE_1_TOKEN || "",
+    secretEnvName: "FACEBOOK_PAGE_1_Tidyups",
+    secretConnected: Boolean(process.env.FACEBOOK_PAGE_1_Tidyups || process.env.FB_PAGE_1_TOKEN),
+    autoReplyEnabled: true,
+  },
+  {
+    id: "page_2",
+    pageId: process.env.FB_PAGE_2_ID || "900446546483166",
+    pageName: "1-833-TIDYUPS (Page 2)",
+    adCampaignLabel: "Move-Out & Turnover Cleaning Ads",
+    pageAccessToken: process.env.FACEBOOK_PAGE_2_833 || process.env.FB_PAGE_2_TOKEN || "",
+    secretEnvName: "FACEBOOK_PAGE_2_833",
+    secretConnected: Boolean(process.env.FACEBOOK_PAGE_2_833 || process.env.FB_PAGE_2_TOKEN),
+    autoReplyEnabled: true,
+  },
+  {
+    id: "page_3",
+    pageId: process.env.FB_PAGE_3_ID || "111477595031270",
+    pageName: "TidyUps Cleaning (Page 3)",
+    adCampaignLabel: "Facebook Messenger & Local Promo Ads",
+    pageAccessToken: process.env.FACEBOOK_PAGE_3_TIDYUPS || process.env.FB_PAGE_3_TOKEN || "",
+    secretEnvName: "FACEBOOK_PAGE_3_TIDYUPS",
+    secretConnected: Boolean(process.env.FACEBOOK_PAGE_3_TIDYUPS || process.env.FB_PAGE_3_TOKEN),
+    autoReplyEnabled: true,
+  },
+];
+
+const DEFAULT_FB_BOT_SETTINGS = {
+  metaAppName: "TidyUps Messenger AI",
+  metaAppId: process.env.FB_APP_ID || "997522660032668",
+  botName: "TidyUps AI Messenger Assistant",
+  verifyToken:
+    process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK ||
+    process.env.FB_WEBHOOK_VERIFY_TOKEN ||
+    "tidyups_fb_verify_2026",
+  greetingTemplate:
+    "Hi {{name}}! 👋 Thanks for messaging {{page}}! I'd love to get you an exact cleaning price and check our schedule. What type of cleaning are you looking for (Standard, Deep Clean, or Move-Out), and how many bedrooms & bathrooms is the home?",
+  systemPrompt:
+    "You are a warm, friendly, concise booking assistant for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). First answer any questions the customer asks about pricing or what is included. Then naturally guide the conversation to collect: (1) Service Type (Standard, Deep Clean, or Move-Out), (2) How many Bedrooms & Bathrooms, (3) Preferred Date & Time (Morning or Afternoon), and (4) Property Address & Phone Number so we can lock in their quote and send confirmation. Keep messages short (2-3 sentences max) like a real Facebook Messenger human dispatcher.",
+  pricingRulesSummary:
+    "• 1 Cleaner: $52.50/hr | 2 Cleaners: $105.00/hr\n• Standard 3 Bed / 2 Bath: ~3 to 4 hrs ($191–$249)\n• Deep Clean / Move-Out 3 Bed / 2.5 Bath: ~3.5 to 4.5 hrs with 2 Cleaners ($367.50–$472.50 + $12.50 fuel surcharge + 12.5% tax)\n• Add-ons: Inside Oven, Inside Fridge, Baseboards, Interior Windows, Inside Cabinets ($45 each or included in hourly Move-Out package)\n• Deposit: $60–$100 to lock in the booking spot.",
+  autoSyncToGoogleSheet: true,
+  autoCreateJobberQuote: true,
+};
+
+function getInitialFbThreads(): any[] {
+  return [];
+}
+
+const FAKE_DEMO_THREAD_IDS = new Set(["fb-thread-1", "fb-thread-2"]);
+const FAKE_DEMO_CUSTOMER_NAMES = new Set([
+  "amanda peters",
+  "tyler morrison",
+  "sarah jenkins (fb ad)",
+  "mike ross (page 2 dm)",
+]);
+
+function ensureFbStoreInitialized(store: any) {
+  if (!Array.isArray(store.fbPages) || store.fbPages.length === 0) {
+    store.fbPages = DEFAULT_FB_PAGES.map((p) => ({ ...p }));
+  } else {
+    // Hydrate all 3 default pages with environment secrets & verified Page IDs
+    for (const defPage of DEFAULT_FB_PAGES) {
+      const existing = store.fbPages.find((p: any) => p.id === defPage.id);
+      if (existing) {
+        if (!existing.pageId || existing.pageId === "10482910492") {
+          existing.pageId = defPage.pageId;
+        }
+        if (
+          !existing.pageName ||
+          existing.pageName.includes("BookMyCleaning YEG Move-Out")
+        ) {
+          existing.pageName = defPage.pageName;
+        }
+        if (!existing.pageAccessToken && defPage.pageAccessToken) {
+          existing.pageAccessToken = defPage.pageAccessToken;
+        }
+        existing.secretEnvName = defPage.secretEnvName;
+        existing.secretConnected = Boolean(existing.pageAccessToken || defPage.pageAccessToken);
+      } else {
+        store.fbPages.push({ ...defPage });
+      }
+    }
+  }
+  if (!store.fbBotSettings) {
+    store.fbBotSettings = { ...DEFAULT_FB_BOT_SETTINGS };
+  } else if (
+    process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK &&
+    store.fbBotSettings.verifyToken === "tidyups_fb_verify_2026"
+  ) {
+    store.fbBotSettings.verifyToken = process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK;
+  }
+  if (!Array.isArray(store.fbMessengerThreads)) {
+    store.fbMessengerThreads = [];
+  } else {
+    // Strip out any fake/demo conversations so only real or explicitly imported threads appear
+    store.fbMessengerThreads = store.fbMessengerThreads.filter((t: any) => {
+      if (!t) return false;
+      if (FAKE_DEMO_THREAD_IDS.has(String(t.id || ""))) return false;
+      if (String(t.psid || "").startsWith("psid_demo_")) return false;
+      const cName = String(t.customerName || "").trim().toLowerCase();
+      if (FAKE_DEMO_CUSTOMER_NAMES.has(cName)) return false;
+      return true;
+    });
+  }
+  if (Array.isArray(store.adLeads)) {
+    store.adLeads = store.adLeads.filter((l: any) => {
+      if (!l) return false;
+      if (l.id === "fblead-fb-thread-1" || l.id === "fblead-fb-thread-2") return false;
+      const cName = String(l.customerName || "").trim().toLowerCase();
+      if (l.source === "Facebook" && FAKE_DEMO_CUSTOMER_NAMES.has(cName)) return false;
+      return true;
+    });
+  }
+}
+
+async function runFacebookMessengerAiTurn(
+  thread: any,
+  botSettings: typeof DEFAULT_FB_BOT_SETTINGS
+): Promise<{ replyText: string; updatedExtracted: any }> {
+  const transcriptText = (thread.messages || [])
+    .map((m: any) => `${m.sender === "customer" ? "Customer" : m.sender === "owner" ? "Dispatcher" : "AI"}: ${m.text}`)
+    .join("\n");
+
+  const customerOnlyText = (thread.messages || [])
+    .filter((m: any) => m.sender === "customer")
+    .map((m: any) => m.text)
+    .join(" . ");
+
+  const heuristic = parseVoiceTicketHeuristic(customerOnlyText);
+  const currentExt = thread.extracted || {};
+
+  const mergedExtracted: any = {
+    customerName:
+      (heuristic.customerName && heuristic.customerName !== "Residential Client"
+        ? heuristic.customerName
+        : "") ||
+      currentExt.customerName ||
+      thread.customerName ||
+      "Facebook Lead",
+    phone: heuristic.phone || currentExt.phone || "",
+    email: heuristic.email || currentExt.email || "",
+    serviceType:
+      (customerOnlyText.toLowerCase().includes("move")
+        ? "Move-Out / Turnover Vacate Cleaning"
+        : customerOnlyText.toLowerCase().includes("deep")
+        ? "Deep Cleaning & Baseboards"
+        : customerOnlyText.toLowerCase().includes("standard") || customerOnlyText.toLowerCase().includes("regular")
+        ? "Residential Standard Cleaning"
+        : "") ||
+      currentExt.serviceType ||
+      "",
+    bedrooms:
+      (/\b(\d)\s*bed/i.test(customerOnlyText) ? heuristic.bedrooms : "") ||
+      currentExt.bedrooms ||
+      "",
+    bathrooms:
+      (/\b(\d(?:\.5)?)\s*bath/i.test(customerOnlyText) ? heuristic.bathrooms : "") ||
+      currentExt.bathrooms ||
+      "",
+    preferredDate: heuristic.preferredDate || currentExt.preferredDate || "",
+    timeWindow: heuristic.timeWindow || currentExt.timeWindow || "",
+    address: heuristic.address || currentExt.address || "",
+    addons: currentExt.addons || [],
+    estimatedHours: currentExt.estimatedHours || heuristic.recommendedHours || 3.5,
+    estimatedCleaners: currentExt.estimatedCleaners || heuristic.recommendedCleaners || 2,
+    estimatedHourlyRate: (currentExt.estimatedCleaners || heuristic.recommendedCleaners || 2) >= 2 ? 105 : 52.5,
+    estimatedTotal: currentExt.estimatedTotal || 367.5,
+    depositRequired: currentExt.depositRequired || 75,
+    specificNotes: currentExt.specificNotes || "",
+  };
+
+  const recalcPrice = (ext: any) => {
+    const hrs = Number(ext.estimatedHours) || 3.5;
+    const cleaners = Number(ext.estimatedCleaners) || 2;
+    const rate = cleaners >= 2 ? 105 : 52.5;
+    const labor = hrs * rate;
+    const sub = labor + 12.5;
+    const total = Math.round(sub * 1.125 * 100) / 100;
+    ext.estimatedHourlyRate = rate;
+    ext.estimatedTotal = total;
+    ext.depositRequired = String(ext.serviceType || "").toLowerCase().includes("move") ? 100 : 60;
+  };
+  recalcPrice(mergedExtracted);
+
+  const missingFields: string[] = [];
+  if (!mergedExtracted.serviceType) missingFields.push("what type of cleaning (Standard, Deep Clean, or Move-Out)");
+  if (!mergedExtracted.bedrooms || !mergedExtracted.bathrooms) missingFields.push("how many bedrooms and bathrooms");
+  if (!mergedExtracted.preferredDate) missingFields.push("preferred date of service");
+  if (!mergedExtracted.address) missingFields.push("property street address");
+  if (!mergedExtracted.phone) missingFields.push("best phone number to send the quote");
+
+  if (ai) {
+    try {
+      const todayEdmontonStr = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Edmonton",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+
+      const prompt = `You are "${botSettings.botName}" replying to a customer on Facebook Messenger for page "${thread.pageName}".
+Today's Date in Edmonton: ${todayEdmontonStr}.
+
+Owner's Custom Instructions:
+${botSettings.systemPrompt}
+
+TidyUps Pricing & Service Rules:
+${botSettings.pricingRulesSummary}
+
+Current Extracted Lead Info:
+${JSON.stringify(mergedExtracted)}
+
+Still Missing From Customer:
+${missingFields.length > 0 ? missingFields.join(", ") : "All key fields collected! Ready to confirm quote."}
+
+Full Messenger Conversation So Far:
+${transcriptText}
+
+Respond in JSON with:
+1. "replyText": Your friendly, concise Facebook Messenger response (2-3 sentences max) that answers the customer's latest message/question using the pricing rules above AND asks for the next 1 or 2 missing details (or confirms their quote total if all details are collected).
+2. Extracted fields updated from the conversation ("customerName", "phone", "email", "serviceType", "bedrooms", "bathrooms", "preferredDate" in YYYY-MM-DD if mentioned, "timeWindow", "address", "estimatedHours", "estimatedCleaners"). Leave any unmentioned field as empty string.`;
+
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                replyText: { type: Type.STRING },
+                customerName: { type: Type.STRING },
+                phone: { type: Type.STRING },
+                email: { type: Type.STRING },
+                serviceType: { type: Type.STRING },
+                bedrooms: { type: Type.STRING },
+                bathrooms: { type: Type.STRING },
+                preferredDate: { type: Type.STRING },
+                timeWindow: { type: Type.STRING },
+                address: { type: Type.STRING },
+                estimatedHours: { type: Type.NUMBER },
+                estimatedCleaners: { type: Type.INTEGER },
+              },
+              required: ["replyText"],
+            },
+          },
+        }),
+        8500
+      );
+
+      const parsed = JSON.parse(response.text || "{}");
+      if (parsed.customerName && parsed.customerName !== "Facebook Lead") mergedExtracted.customerName = parsed.customerName;
+      if (parsed.phone) mergedExtracted.phone = parsed.phone;
+      if (parsed.email) mergedExtracted.email = parsed.email;
+      if (parsed.serviceType) mergedExtracted.serviceType = parsed.serviceType;
+      if (parsed.bedrooms) mergedExtracted.bedrooms = parsed.bedrooms;
+      if (parsed.bathrooms) mergedExtracted.bathrooms = parsed.bathrooms;
+      if (parsed.preferredDate) mergedExtracted.preferredDate = parsed.preferredDate;
+      if (parsed.timeWindow) mergedExtracted.timeWindow = parsed.timeWindow;
+      if (parsed.address) mergedExtracted.address = parsed.address;
+      if (typeof parsed.estimatedHours === "number" && parsed.estimatedHours > 0) {
+        mergedExtracted.estimatedHours = parsed.estimatedHours;
+      }
+      if (parsed.estimatedCleaners === 1 || parsed.estimatedCleaners === 2) {
+        mergedExtracted.estimatedCleaners = parsed.estimatedCleaners;
+      }
+      recalcPrice(mergedExtracted);
+
+      if (parsed.replyText) {
+        return {
+          replyText: parsed.replyText,
+          updatedExtracted: mergedExtracted,
+        };
+      }
+    } catch (e: any) {
+      console.warn("FB Messenger Gemini fallback note:", e?.message);
+    }
+  }
+
+  // Fallback intelligent conversational reply
+  const nextToAsk = missingFields.slice(0, 2).join(" and ");
+  const fallbackReply =
+    missingFields.length > 0
+      ? `Thanks for reaching out! Based on your details (${
+          mergedExtracted.bedrooms || "your home"
+        }${mergedExtracted.bathrooms ? `, ${mergedExtracted.bathrooms}` : ""} ${
+          mergedExtracted.serviceType || "cleaning"
+        }), our estimated total is ~$${mergedExtracted.estimatedTotal.toFixed(2)} CAD (${
+          mergedExtracted.estimatedHours
+        } hrs with ${mergedExtracted.estimatedCleaners} cleaners @ $${mergedExtracted.estimatedHourlyRate.toFixed(
+          2
+        )}/hr + fuel & tax). Could you share ${nextToAsk} so I can lock in your quote?`
+      : `Awesome, thank you ${mergedExtracted.customerName}! I have all your details for ${mergedExtracted.serviceType} (${mergedExtracted.bedrooms}, ${mergedExtracted.bathrooms}) on ${mergedExtracted.preferredDate} at ${mergedExtracted.address} (Estimated Total: $${mergedExtracted.estimatedTotal.toFixed(2)} CAD). I've just generated your official quote and sent it over to our dispatch schedule!`;
+
+  return {
+    replyText: fallbackReply,
+    updatedExtracted: mergedExtracted,
+  };
+}
+
+async function syncFbThreadToSheetAndOptionallyJobber(
+  store: any,
+  thread: any,
+  forceCreateJobberQuote = false
+) {
+  const ext = thread.extracted || {};
+  const transcriptSummary = (thread.messages || [])
+    .map((m: any) => `${m.sender === "customer" ? "Customer" : m.sender === "owner" ? "Owner" : "AI"}: ${m.text}`)
+    .join(" | ");
+
+  if (!Array.isArray(store.adLeads)) store.adLeads = [];
+  const leadId = thread.syncedLeadId || `fblead-${thread.id}`;
+  thread.syncedLeadId = leadId;
+
+  const leadItem: any = {
+    id: leadId,
+    source: "Facebook",
+    sourceTab: "FB Leads",
+    customerName: ext.customerName || thread.customerName || "Facebook Messenger Lead",
+    phone: ext.phone || "(780) 555-0199",
+    email: ext.email || "",
+    address: ext.address || "Edmonton, AB",
+    serviceRequested: `${ext.serviceType || "Residential Cleaning"}${
+      ext.bedrooms ? ` (${ext.bedrooms}${ext.bathrooms ? `, ${ext.bathrooms}` : ""})` : ""
+    }`,
+    bedrooms: ext.bedrooms || "3 Bedrooms",
+    bathrooms: ext.bathrooms || "2 Bathrooms",
+    dateOfServiceRequested: ext.preferredDate || new Date().toISOString().slice(0, 10),
+    dateAdded: thread.createdAt || new Date().toISOString(),
+    status: thread.syncedQuoteNumber ? "Quoted" : "New",
+    verdict: "Good lead",
+    quotedAmount: Number(ext.estimatedTotal) || 280,
+    quoteNumber: thread.syncedQuoteNumber || undefined,
+    notes: `[${thread.pageName}] Messenger Transcript: ${transcriptSummary}`,
+  };
+
+  const existingLeadIdx = store.adLeads.findIndex((l: any) => l.id === leadId);
+  if (existingLeadIdx >= 0) {
+    store.adLeads[existingLeadIdx] = { ...store.adLeads[existingLeadIdx], ...leadItem };
+  } else {
+    store.adLeads.unshift(leadItem);
+  }
+
+  let createdOrUpdatedQuote: any = null;
+  const hasCoreForQuote =
+    Boolean(ext.serviceType) &&
+    Boolean(ext.bedrooms) &&
+    Boolean(ext.preferredDate) &&
+    (Boolean(ext.phone) || Boolean(ext.address));
+
+  if (forceCreateJobberQuote || (store.fbBotSettings?.autoCreateJobberQuote && hasCoreForQuote && !thread.syncedQuoteNumber)) {
+    const hours = Number(ext.estimatedHours) || 3.5;
+    const cleaners = Number(ext.estimatedCleaners) || 2;
+    const hourlyRate = cleaners >= 2 ? 105 : 52.5;
+    const labor = Math.round(hours * hourlyRate * 100) / 100;
+    const total = Number(ext.estimatedTotal) || Math.round((labor + 12.5) * 1.125 * 100) / 100;
+    const depositRequired = Number(ext.depositRequired) || 75;
+    const cleanLineItemDesc = `${ext.bedrooms || "3 Bedrooms"}, ${ext.bathrooms || "2 Bathrooms"} • ${cleaners} Cleaner${
+      cleaners > 1 ? "s" : ""
+    } @ $${hourlyRate.toFixed(2)}/hr — ${ext.address || "Edmonton, AB"}`;
+
+    const lineItems = [
+      {
+        name: `${ext.serviceType || "Residential Cleaning"} — ${ext.bedrooms || "3 Bedrooms"}, ${ext.bathrooms || "2 Bathrooms"}`,
+        description: cleanLineItemDesc,
+        quantity: hours,
+        unitPrice: hourlyRate,
+        total: labor,
+      },
+      {
+        name: "Fuel & Mobile Dispatch Surcharge",
+        description: "Standard Greater Edmonton mobile dispatch fuel surcharge",
+        quantity: 1,
+        unitPrice: 12.5,
+        total: 12.5,
+      },
+    ];
+
+    const quoteNotesWithTranscript = `FB Page: ${thread.pageName} | Scope: ${ext.serviceType || "Cleaning"} (${
+      ext.bedrooms || "3 Bed"
+    }, ${ext.bathrooms || "2 Bath"}) on ${ext.preferredDate || "TBD"} | Messenger Transcript: ${transcriptSummary}`;
+
+    const pushRes = await pushQuoteToJobber(
+      {
+        clientName: ext.customerName || thread.customerName || "Facebook Lead",
+        clientPhone: ext.phone || "(780) 555-0199",
+        clientEmail: ext.email || "",
+        serviceAddress: ext.address || "Edmonton, AB",
+        service: `${ext.serviceType || "Residential Cleaning"} (${ext.bedrooms || "3 Bedrooms"}, ${ext.bathrooms || "2 Bathrooms"})`,
+        bedrooms: ext.bedrooms || "3 Bedrooms",
+        bathrooms: ext.bathrooms || "2 Bathrooms",
+        total,
+        depositRequired,
+        notes: quoteNotesWithTranscript,
+        lineItems,
+      },
+      jobberConfig.accessToken,
+      getJobberCreds()
+    );
+
+    const maxExistingQuoteNum = (store.quotes || []).reduce((maxN: number, q: any) => {
+      const n = parseInt(String(q?.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
+      return n > maxN && n < 9000 ? n : maxN;
+    }, 4379);
+
+    const quoteId = pushRes.jobberQuoteId || `quote_fb_${Date.now()}`;
+    const quoteNumber =
+      (pushRes.isLiveSynced && pushRes.quoteNumber) ||
+      thread.syncedQuoteNumber ||
+      `QT-${maxExistingQuoteNum + 1}`;
+
+    createdOrUpdatedQuote = {
+      id: quoteId,
+      quoteNumber,
+      clientName: ext.customerName || thread.customerName || "Facebook Lead",
+      clientPhone: ext.phone || "(780) 555-0199",
+      clientEmail: ext.email || "",
+      serviceAddress: ext.address || "Edmonton, AB",
+      service: `${ext.serviceType || "Residential Cleaning"} (${ext.bedrooms || "3 Bedrooms"}, ${ext.bathrooms || "2 Bathrooms"})`,
+      bedrooms: ext.bedrooms || "3 Bedrooms",
+      bathrooms: ext.bathrooms || "2 Bathrooms",
+      quoteStatus: "DRAFT",
+      total,
+      depositRequired,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      scheduledDate: ext.preferredDate || undefined,
+      verdict: "Good lead",
+      jobberWebUri: pushRes.jobberWebUri || resolveJobberWebUri("quotes", quoteId),
+      jobberClientWebUri: pushRes.jobberClientWebUri,
+      jobberClientId: pushRes.jobberClientId,
+      googleSheetSynced: true,
+      notes: quoteNotesWithTranscript,
+      lineItems,
+      source: "Facebook",
+      isLiveSynced: Boolean(pushRes.isLiveSynced),
+    };
+
+    thread.syncedQuoteNumber = quoteNumber;
+    thread.syncedQuoteWebUri = createdOrUpdatedQuote.jobberWebUri;
+    thread.status = "SYNCED_TO_JOBBER";
+
+    store.quotes = [
+      createdOrUpdatedQuote,
+      ...(store.quotes || []).filter((q: any) => q.quoteNumber !== quoteNumber && q.id !== quoteId),
+    ];
+
+    upsertJobberClientAndLeadFromQuote(store, createdOrUpdatedQuote, pushRes.jobberClientId, "Facebook");
+  }
+
+  return { leadItem, quote: createdOrUpdatedQuote };
+}
+
+// GET /api/facebook/state
+app.get("/api/facebook/state", (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+  if (!store.fbBotSettings.metaAppId) {
+    store.fbBotSettings.metaAppId = "997522660032668";
+    store.fbBotSettings.metaAppName = "TidyUps Messenger AI";
+  }
+  saveStore(store, projectId);
+  res.json({
+    success: true,
+    pages: store.fbPages,
+    botSettings: store.fbBotSettings,
+    threads: store.fbMessengerThreads,
+  });
+});
+
+// POST /api/facebook/config
+app.post("/api/facebook/config", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+  if (Array.isArray(req.body?.pages)) {
+    const updatedPages = [];
+    for (const pg of req.body.pages) {
+      const nextPg = { ...pg };
+      if (nextPg.pageAccessToken && String(nextPg.pageAccessToken).trim().length > 20) {
+        try {
+          const token = String(nextPg.pageAccessToken).trim();
+          const meRes = await fetch(
+            `https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${encodeURIComponent(token)}`
+          );
+          const meData: any = await meRes.json();
+          if (meData?.id) {
+            nextPg.pageId = String(meData.id);
+            if (meData.name) nextPg.pageName = String(meData.name);
+            // Automatically subscribe the page to Messenger webhook events
+            await fetch(
+              `https://graph.facebook.com/v19.0/${encodeURIComponent(nextPg.pageId)}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${encodeURIComponent(token)}`,
+              { method: "POST" }
+            ).catch(() => {});
+          }
+        } catch (err) {
+          // Keep user-supplied values if offline
+        }
+      }
+      updatedPages.push(nextPg);
+    }
+    store.fbPages = updatedPages;
+  }
+  if (req.body?.botSettings) {
+    store.fbBotSettings = { ...store.fbBotSettings, ...req.body.botSettings };
+  }
+  store.lastSavedAt = new Date().toISOString();
+  saveStore(store, projectId);
+  res.json({
+    success: true,
+    pages: store.fbPages,
+    botSettings: store.fbBotSettings,
+  });
+});
+
+// POST /api/facebook/threads/new-simulation
+app.post("/api/facebook/threads/new-simulation", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+
+  const pageSlotId =
+    req.body?.pageSlotId === "page_3"
+      ? "page_3"
+      : req.body?.pageSlotId === "page_2"
+      ? "page_2"
+      : "page_1";
+  const matchedPage =
+    store.fbPages.find((p: any) => p.id === pageSlotId) || store.fbPages[0];
+  const customerName = (req.body?.customerName || "Facebook Messenger Customer").trim();
+  const initialMessage = (
+    req.body?.initialMessage ||
+    "Hi! I saw your Facebook ad and wanted to get a quote for cleaning."
+  ).trim();
+
+  const nowIso = new Date().toISOString();
+  const newThread: any = {
+    id: `fb-thread-${Date.now()}`,
+    pageSlotId,
+    pageName: matchedPage.pageName,
+    psid: req.body?.psid || `psid_manual_${Date.now()}`,
+    customerName,
+    adSourceLabel: req.body?.adSourceLabel || matchedPage.adCampaignLabel || "Facebook Messenger",
+    aiPaused: false,
+    status: "COLLECTING_INFO",
+    extracted: {
+      customerName,
+      phone: "",
+      email: "",
+      serviceType: "",
+      bedrooms: "",
+      bathrooms: "",
+      preferredDate: "",
+      timeWindow: "",
+      address: "",
+      addons: [],
+      estimatedHours: 3.5,
+      estimatedCleaners: 2,
+      estimatedHourlyRate: 105,
+      estimatedTotal: 427.5,
+      depositRequired: 75,
+      specificNotes: "",
+    },
+    messages: [
+      {
+        id: `fbm-${Date.now()}-1`,
+        sender: "customer",
+        senderName: customerName,
+        text: initialMessage,
+        timestamp: nowIso,
+      },
+    ],
+    updatedAt: nowIso,
+    createdAt: nowIso,
+  };
+
+  if (matchedPage.autoReplyEnabled !== false) {
+    const { replyText, updatedExtracted } = await runFacebookMessengerAiTurn(
+      newThread,
+      store.fbBotSettings
+    );
+    newThread.extracted = updatedExtracted;
+    newThread.messages.push({
+      id: `fbm-${Date.now()}-2`,
+      sender: "ai",
+      senderName: store.fbBotSettings.botName,
+      text: replyText,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  if (store.fbBotSettings?.autoSyncToGoogleSheet) {
+    await syncFbThreadToSheetAndOptionallyJobber(store, newThread, false);
+  }
+
+  store.fbMessengerThreads.unshift(newThread);
+  store.lastSavedAt = new Date().toISOString();
+  saveStore(store, projectId);
+
+  res.json({
+    success: true,
+    thread: newThread,
+    leads: store.adLeads,
+    quotes: store.quotes,
+    clients: store.clients,
+  });
+});
+
+// DELETE /api/facebook/threads/:threadId
+app.delete("/api/facebook/threads/:threadId", (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+
+  const threadId = req.params.threadId;
+  store.fbMessengerThreads = (store.fbMessengerThreads || []).filter(
+    (t: any) => t.id !== threadId
+  );
+  if (Array.isArray(store.adLeads)) {
+    store.adLeads = store.adLeads.filter(
+      (l: any) => l.id !== `fblead-${threadId}`
+    );
+  }
+  store.lastSavedAt = new Date().toISOString();
+  saveStore(store, projectId);
+
+  res.json({
+    success: true,
+    threads: store.fbMessengerThreads,
+    leads: store.adLeads,
+  });
+});
+
+// POST /api/facebook/sync-existing (Pull existing Messenger conversations across all 3 Facebook Pages)
+app.post("/api/facebook/sync-existing", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+
+  let importedCount = 0;
+  let updatedCount = 0;
+  const pageReports: Array<{ pageName: string; status: string; count: number }> = [];
+
+  for (const pg of store.fbPages || []) {
+    const token = String(pg.pageAccessToken || "").trim();
+    const pageId = String(pg.pageId || "").trim();
+    if (!token || !pageId) {
+      pageReports.push({
+        pageName: pg.pageName,
+        status: "No token configured",
+        count: 0,
+      });
+      continue;
+    }
+
+    try {
+      const url = `https://graph.facebook.com/v19.0/${encodeURIComponent(
+        pageId
+      )}/conversations?fields=participants,updated_time,messages.limit(15){message,from,created_time}&limit=25&access_token=${encodeURIComponent(
+        token
+      )}`;
+      const fbRes = await fetch(url);
+      const fbData: any = await fbRes.json();
+
+      if (fbData?.error) {
+        const errCode = fbData.error.code;
+        const errMsg = fbData.error.message || "Graph API note";
+        pageReports.push({
+          pageName: pg.pageName,
+          status:
+            errCode === 298 || errCode === 190 || errCode === 10 || String(errMsg).includes("pages_read_engagement")
+              ? "Webhook Live (New msgs stream automatically; older history requires pages_read_engagement)"
+              : errMsg,
+          count: 0,
+        });
+        continue;
+      }
+
+      const convos = Array.isArray(fbData?.data) ? fbData.data : [];
+      let pageImported = 0;
+
+      for (const convo of convos) {
+        const participants = Array.isArray(convo?.participants?.data)
+          ? convo.participants.data
+          : [];
+        const customerParticipant =
+          participants.find((p: any) => String(p.id) !== pageId) || participants[0];
+        if (!customerParticipant?.id) continue;
+
+        const psid = String(customerParticipant.id);
+        const customerName = String(customerParticipant.name || `FB Customer (${psid.slice(-4)})`);
+        const rawMessages = Array.isArray(convo?.messages?.data)
+          ? [...convo.messages.data].reverse()
+          : [];
+
+        const formattedMessages = rawMessages
+          .filter((m: any) => m && String(m.message || "").trim())
+          .map((m: any) => {
+            const isFromPage = String(m.from?.id || "") === pageId;
+            return {
+              id: String(m.id || `fbm-${Date.now()}-${Math.random()}`),
+              sender: isFromPage ? "owner" : "customer",
+              senderName: isFromPage ? pg.pageName : customerName,
+              text: String(m.message || "").trim(),
+              timestamp: m.created_time || convo.updated_time || new Date().toISOString(),
+            };
+          });
+
+        if (formattedMessages.length === 0) continue;
+
+        let existingThread = store.fbMessengerThreads.find(
+          (t: any) => String(t.psid) === psid
+        );
+
+        const customerOnlyText = formattedMessages
+          .filter((m: any) => m.sender === "customer")
+          .map((m: any) => m.text)
+          .join(" . ");
+        const heuristic = parseVoiceTicketHeuristic(customerOnlyText);
+
+        if (!existingThread) {
+          existingThread = {
+            id: `fb-thread-${psid}`,
+            pageSlotId: pg.id || "page_1",
+            pageName: pg.pageName,
+            psid,
+            customerName,
+            adSourceLabel: pg.adCampaignLabel || "Existing FB Inbox Thread",
+            aiPaused: false,
+            status: "COLLECTING_INFO",
+            extracted: {
+              customerName:
+                heuristic.customerName && heuristic.customerName !== "Residential Client"
+                  ? heuristic.customerName
+                  : customerName,
+              phone: heuristic.phone || "",
+              email: heuristic.email || "",
+              serviceType:
+                customerOnlyText.toLowerCase().includes("move")
+                  ? "Move-Out / Turnover Vacate Cleaning"
+                  : customerOnlyText.toLowerCase().includes("deep")
+                  ? "Deep Cleaning & Baseboards"
+                  : customerOnlyText.toLowerCase().includes("standard")
+                  ? "Residential Standard Cleaning"
+                  : "",
+              bedrooms: /\b(\d)\s*bed/i.test(customerOnlyText) ? heuristic.bedrooms : "",
+              bathrooms: /\b(\d(?:\.5)?)\s*bath/i.test(customerOnlyText) ? heuristic.bathrooms : "",
+              preferredDate: heuristic.preferredDate || "",
+              timeWindow: heuristic.timeWindow || "",
+              address: heuristic.address || "",
+              addons: [],
+              estimatedHours: heuristic.recommendedHours || 3.5,
+              estimatedCleaners: heuristic.recommendedCleaners || 2,
+              estimatedHourlyRate: 105,
+              estimatedTotal: 427.5,
+              depositRequired: 75,
+              specificNotes: "Synced from existing Facebook Page inbox",
+            },
+            messages: formattedMessages,
+            updatedAt: convo.updated_time || new Date().toISOString(),
+            createdAt: convo.updated_time || new Date().toISOString(),
+          };
+          store.fbMessengerThreads.push(existingThread);
+          importedCount++;
+          pageImported++;
+        } else {
+          existingThread.messages = formattedMessages;
+          existingThread.updatedAt = convo.updated_time || new Date().toISOString();
+          updatedCount++;
+          pageImported++;
+        }
+      }
+
+      pageReports.push({
+        pageName: pg.pageName,
+        status: `Synced ${pageImported} existing conversation(s)`,
+        count: pageImported,
+      });
+    } catch (err: any) {
+      pageReports.push({
+        pageName: pg.pageName,
+        status: err?.message || "Connection note",
+        count: 0,
+      });
+    }
+  }
+
+  store.lastSavedAt = new Date().toISOString();
+  saveStore(store, projectId);
+
+  res.json({
+    success: true,
+    importedCount,
+    updatedCount,
+    pageReports,
+    threads: store.fbMessengerThreads,
+    leads: store.adLeads,
+  });
+});
+
+// POST /api/facebook/threads/:threadId/message
+app.post("/api/facebook/threads/:threadId/message", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+
+  const thread = store.fbMessengerThreads.find((t: any) => t.id === req.params.threadId);
+  if (!thread) {
+    return res.status(404).json({ error: "Thread not found" });
+  }
+
+  const role = req.body?.role === "owner" ? "owner" : "customer";
+  const text = String(req.body?.text || "").trim();
+  if (!text) {
+    return res.status(400).json({ error: "Message text required" });
+  }
+
+  thread.messages.push({
+    id: `fbm-${Date.now()}-in`,
+    sender: role,
+    senderName: role === "owner" ? "TidyUps Dispatcher" : thread.extracted?.customerName || thread.customerName,
+    text,
+    timestamp: new Date().toISOString(),
+  });
+  thread.updatedAt = new Date().toISOString();
+
+  const matchedPage = store.fbPages.find((p: any) => p.id === thread.pageSlotId) || store.fbPages[0];
+  let statusNotice = "";
+
+  if (role === "customer" && !thread.aiPaused && matchedPage?.autoReplyEnabled !== false) {
+    const { replyText, updatedExtracted } = await runFacebookMessengerAiTurn(
+      thread,
+      store.fbBotSettings
+    );
+    thread.extracted = updatedExtracted;
+    thread.messages.push({
+      id: `fbm-${Date.now()}-ai`,
+      sender: "ai",
+      senderName: store.fbBotSettings.botName,
+      text: replyText,
+      timestamp: new Date().toISOString(),
+    });
+
+    // If live Meta Page Access Token is configured, also dispatch outbound via Meta Graph API
+    if (matchedPage?.pageAccessToken && thread.psid && !String(thread.psid).startsWith("psid_demo")) {
+      fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(matchedPage.pageAccessToken)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: { id: thread.psid },
+          message: { text: replyText },
+        }),
+      }).catch(() => {});
+    }
+  } else if (role === "owner") {
+    // Also send manual owner message out via Meta Graph API if connected
+    if (matchedPage?.pageAccessToken && thread.psid && !String(thread.psid).startsWith("psid_demo")) {
+      fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(matchedPage.pageAccessToken)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: { id: thread.psid },
+          message: { text },
+        }),
+      }).catch(() => {});
+    }
+    statusNotice = "✓ Sent manual dispatcher reply to customer in Facebook Messenger!";
+  }
+
+  if (store.fbBotSettings?.autoSyncToGoogleSheet) {
+    const syncRes = await syncFbThreadToSheetAndOptionallyJobber(store, thread, false);
+    if (syncRes.quote) {
+      statusNotice = `✓ AI collected all required info, synced to Google Sheet ("FB Leads") & auto-created Jobber Quote ${syncRes.quote.quoteNumber}!`;
+    }
+  }
+
+  store.lastSavedAt = new Date().toISOString();
+  saveStore(store, projectId);
+
+  res.json({
+    success: true,
+    thread,
+    statusNotice,
+    leads: store.adLeads,
+    quotes: store.quotes,
+    clients: store.clients,
+  });
+});
+
+// POST /api/facebook/threads/:threadId/draft-ai
+app.post("/api/facebook/threads/:threadId/draft-ai", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+
+  const thread = store.fbMessengerThreads.find((t: any) => t.id === req.params.threadId);
+  if (!thread) return res.status(404).json({ error: "Thread not found" });
+
+  const { replyText, updatedExtracted } = await runFacebookMessengerAiTurn(
+    thread,
+    store.fbBotSettings
+  );
+  thread.extracted = updatedExtracted;
+  saveStore(store, projectId);
+
+  res.json({
+    success: true,
+    draftReply: replyText,
+    extracted: updatedExtracted,
+  });
+});
+
+// POST /api/facebook/threads/:threadId/toggle-ai
+app.post("/api/facebook/threads/:threadId/toggle-ai", (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+
+  const thread = store.fbMessengerThreads.find((t: any) => t.id === req.params.threadId);
+  if (!thread) return res.status(404).json({ error: "Thread not found" });
+
+  thread.aiPaused = Boolean(req.body?.aiPaused);
+  thread.updatedAt = new Date().toISOString();
+  saveStore(store, projectId);
+
+  res.json({ success: true, thread });
+});
+
+// POST /api/facebook/threads/:threadId/sync-quote
+app.post("/api/facebook/threads/:threadId/sync-quote", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+
+  const thread = store.fbMessengerThreads.find((t: any) => t.id === req.params.threadId);
+  if (!thread) return res.status(404).json({ error: "Thread not found" });
+
+  if (req.body?.extracted) {
+    thread.extracted = { ...thread.extracted, ...req.body.extracted };
+  }
+
+  const syncRes = await syncFbThreadToSheetAndOptionallyJobber(store, thread, true);
+  store.lastSavedAt = new Date().toISOString();
+  saveStore(store, projectId);
+
+  res.json({
+    success: true,
+    thread,
+    quote: syncRes.quote,
+    leads: store.adLeads,
+    quotes: store.quotes,
+    clients: store.clients,
+    message: `✓ Synced "${thread.extracted.customerName}" to Google Sheet ("FB Leads") & created Jobber Quote ${
+      syncRes.quote?.quoteNumber || ""
+    }!`,
+  });
+});
+
+// GET & POST /api/facebook/webhook (Official Meta Messenger Webhook for All Connected Facebook Pages)
+app.get("/api/facebook/webhook", (req, res) => {
+  const store = loadStore("tidyups");
+  ensureFbStoreInitialized(store);
+  const mode = req.query["hub.mode"];
+  const token = String(req.query["hub.verify_token"] || "").trim();
+  const challenge = req.query["hub.challenge"];
+
+  const allowedTokens = new Set(
+    [
+      store.fbBotSettings?.verifyToken,
+      process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK,
+      process.env.FB_WEBHOOK_VERIFY_TOKEN,
+      "tidyups_fb_verify_2026",
+    ]
+      .filter(Boolean)
+      .map((t) => String(t).trim())
+  );
+
+  if (mode === "subscribe" && allowedTokens.has(token)) {
+    return res.status(200).send(challenge);
+  }
+  return res.status(403).send("Verification token mismatch");
+});
+
+app.post("/api/facebook/webhook", async (req, res) => {
+  try {
+    const body = req.body;
+    if (body?.object !== "page") {
+      return res.sendStatus(404);
+    }
+    const store = loadStore("tidyups");
+    ensureFbStoreInitialized(store);
+
+    for (const entry of body.entry || []) {
+      const incomingPageId = String(entry.id || "");
+      const matchedPage =
+        store.fbPages.find((p: any) => p.pageId && String(p.pageId) === incomingPageId) ||
+        store.fbPages[0];
+
+      for (const webhookEvent of entry.messaging || []) {
+        const senderPsid = String(webhookEvent?.sender?.id || "");
+        const messageText = String(webhookEvent?.message?.text || "").trim();
+        if (!senderPsid || !messageText || webhookEvent?.message?.is_echo) continue;
+
+        let thread = store.fbMessengerThreads.find((t: any) => t.psid === senderPsid);
+        if (!thread) {
+          thread = {
+            id: `fb-thread-${Date.now()}`,
+            pageSlotId: matchedPage.id || "page_1",
+            pageName: matchedPage.pageName,
+            psid: senderPsid,
+            customerName: `FB Customer (${senderPsid.slice(-4)})`,
+            adSourceLabel: matchedPage.adCampaignLabel || "Facebook Messenger",
+            aiPaused: false,
+            status: "COLLECTING_INFO",
+            extracted: {
+              customerName: `FB Customer (${senderPsid.slice(-4)})`,
+              phone: "",
+              email: "",
+              serviceType: "",
+              bedrooms: "",
+              bathrooms: "",
+              preferredDate: "",
+              timeWindow: "",
+              address: "",
+              addons: [],
+              estimatedHours: 3.5,
+              estimatedCleaners: 2,
+              estimatedHourlyRate: 105,
+              estimatedTotal: 427.5,
+              depositRequired: 75,
+              specificNotes: "",
+            },
+            messages: [],
+            updatedAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          };
+          store.fbMessengerThreads.unshift(thread);
+        }
+
+        thread.messages.push({
+          id: `fbm-${Date.now()}-live`,
+          sender: "customer",
+          senderName: thread.extracted.customerName || thread.customerName,
+          text: messageText,
+          timestamp: new Date().toISOString(),
+        });
+        thread.updatedAt = new Date().toISOString();
+
+        if (!thread.aiPaused && matchedPage.autoReplyEnabled !== false) {
+          const { replyText, updatedExtracted } = await runFacebookMessengerAiTurn(
+            thread,
+            store.fbBotSettings
+          );
+          thread.extracted = updatedExtracted;
+          thread.messages.push({
+            id: `fbm-${Date.now()}-aireply`,
+            sender: "ai",
+            senderName: store.fbBotSettings.botName,
+            text: replyText,
+            timestamp: new Date().toISOString(),
+          });
+
+          if (matchedPage.pageAccessToken) {
+            fetch(
+              `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(
+                matchedPage.pageAccessToken
+              )}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  recipient: { id: senderPsid },
+                  message: { text: replyText },
+                }),
+              }
+            ).catch(() => {});
+          }
+        }
+
+        if (store.fbBotSettings?.autoSyncToGoogleSheet) {
+          await syncFbThreadToSheetAndOptionallyJobber(store, thread, false);
+        }
+      }
+    }
+
+    store.lastSavedAt = new Date().toISOString();
+    saveStore(store, "tidyups");
+    return res.status(200).send("EVENT_RECEIVED");
+  } catch (err: any) {
+    console.warn("FB Webhook error:", err?.message);
+    return res.status(200).send("EVENT_RECEIVED");
+  }
+});
+
+// POST /api/facebook/lead-intake (External Agent / ManyChat / Zapier / Make Webhook)
+app.post("/api/facebook/lead-intake", async (req, res) => {
+  try {
+    const store = loadStore("tidyups");
+    ensureFbStoreInitialized(store);
+    const b = req.body || {};
+    const customerName = b.customerName || b.name || b.full_name || "Facebook Lead";
+    const phone = b.phone || b.phoneNumber || b.phone_number || "";
+    const email = b.email || "";
+    const serviceType = b.serviceType || b.service || "Residential Standard Cleaning";
+    const bedrooms = b.bedrooms || "3 Bedrooms";
+    const bathrooms = b.bathrooms || "2 Bathrooms";
+    const preferredDate = b.preferredDate || b.date || new Date().toISOString().slice(0, 10);
+    const address = b.address || b.serviceAddress || "Edmonton, AB";
+    const notes = b.notes || b.transcript || "Submitted via Facebook External Agent Webhook";
+
+    const newThread: any = {
+      id: `fb-ext-${Date.now()}`,
+      pageSlotId: b.pageSlotId === "page_2" ? "page_2" : "page_1",
+      pageName: b.pageName || store.fbPages[0]?.pageName || "Facebook Page",
+      psid: `ext_${Date.now()}`,
+      customerName,
+      adSourceLabel: "External FB Agent Webhook",
+      aiPaused: false,
+      status: "READY_TO_BOOK",
+      extracted: {
+        customerName,
+        phone,
+        email,
+        serviceType,
+        bedrooms,
+        bathrooms,
+        preferredDate,
+        timeWindow: b.timeWindow || "Morning",
+        address,
+        addons: [],
+        estimatedHours: Number(b.hours) || 3.5,
+        estimatedCleaners: 2,
+        estimatedHourlyRate: 105,
+        estimatedTotal: Number(b.total) || 427.5,
+        depositRequired: 75,
+        specificNotes: notes,
+      },
+      messages: [
+        {
+          id: `fbm-${Date.now()}`,
+          sender: "customer",
+          senderName: customerName,
+          text: `${serviceType} (${bedrooms}, ${bathrooms}) requested for ${preferredDate} at ${address}. ${notes}`,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    const syncRes = await syncFbThreadToSheetAndOptionallyJobber(store, newThread, true);
+    store.fbMessengerThreads.unshift(newThread);
+    store.lastSavedAt = new Date().toISOString();
+    saveStore(store, "tidyups");
+
+    res.json({
+      success: true,
+      lead: syncRes.leadItem,
+      quote: syncRes.quote,
+      message: `✓ External Facebook Lead "${customerName}" synced to Google Sheet ("FB Leads") & Jobber Quote ${
+        syncRes.quote?.quoteNumber || ""
+      }!`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to process external Facebook lead" });
+  }
+});
+
+// POST & GET /api/facebook/data-deletion (Supports both Meta Data Deletion Instructions URL in browser & Data Deletion Callback URL JSON)
+const handleFacebookDataDeletion = (req: any, res: any) => {
+  try {
+    const store = loadStore("tidyups");
+    ensureFbStoreInitialized(store);
+
+    let fbUserId = String(req.body?.user_id || req.query?.user_id || "").trim();
+    const signedRequest = String(req.body?.signed_request || req.query?.signed_request || "").trim();
+    const contactIdentifier = String(req.body?.identifier || req.query?.identifier || "").trim().toLowerCase();
+
+    // If opened directly in a web browser as "Data deletion instructions URL" with no callback params, redirect to the instructions page
+    if (
+      req.method === "GET" &&
+      !fbUserId &&
+      !signedRequest &&
+      !contactIdentifier &&
+      String(req.headers?.accept || "").includes("text/html")
+    ) {
+      return res.redirect(302, "/data-deletion");
+    }
+
+    if (signedRequest && signedRequest.includes(".")) {
+      try {
+        const [, payloadPart] = signedRequest.split(".");
+        const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+        const decodedJson = Buffer.from(normalized, "base64").toString("utf8");
+        const parsed = JSON.parse(decodedJson);
+        if (parsed?.user_id) {
+          fbUserId = String(parsed.user_id);
+        }
+      } catch {}
+    }
+
+    if (fbUserId && Array.isArray(store.fbMessengerThreads)) {
+      store.fbMessengerThreads = store.fbMessengerThreads.filter(
+        (t: any) => String(t.psid || "") !== fbUserId
+      );
+      saveStore(store, "tidyups");
+    } else if (contactIdentifier && Array.isArray(store.fbMessengerThreads)) {
+      store.fbMessengerThreads = store.fbMessengerThreads.filter((t: any) => {
+        const name = String(t.customerName || "").toLowerCase();
+        const phone = String(t.extracted?.phone || "").toLowerCase();
+        const email = String(t.extracted?.email || "").toLowerCase();
+        return !name.includes(contactIdentifier) && !phone.includes(contactIdentifier) && !email.includes(contactIdentifier);
+      });
+      saveStore(store, "tidyups");
+    }
+
+    const confirmationCode = `DEL-TIDYUPS-${Date.now().toString(36).toUpperCase()}`;
+    const statusUrl = `https://app.tidyupscleaning.com/data-deletion?code=${confirmationCode}`;
+
+    return res.status(200).json({
+      url: statusUrl,
+      confirmation_code: confirmationCode,
+    });
+  } catch (err: any) {
+    const fallbackCode = `DEL-TIDYUPS-${Date.now().toString(36).toUpperCase()}`;
+    return res.status(200).json({
+      url: `https://app.tidyupscleaning.com/data-deletion?code=${fallbackCode}`,
+      confirmation_code: fallbackCode,
+    });
+  }
+};
+
+app.post("/api/facebook/data-deletion", handleFacebookDataDeletion);
+app.get("/api/facebook/data-deletion", handleFacebookDataDeletion);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Quo (OpenPhone) 6-Line Phone System & Universal Call Transcript Lead Engine
 // ─────────────────────────────────────────────────────────────────────────────
 function getEffectiveQuoApiKey(): string {

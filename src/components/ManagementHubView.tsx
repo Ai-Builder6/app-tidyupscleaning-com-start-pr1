@@ -104,6 +104,7 @@ interface ManagementHubViewProps {
   } | null;
   onOpenProjectBackup?: () => void;
   onOpenAccessManager?: () => void;
+  onNavigateToFbMessengerAi?: () => void;
 }
 
 export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
@@ -158,6 +159,7 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
   deltaSyncStats,
   onOpenProjectBackup,
   onOpenAccessManager,
+  onNavigateToFbMessengerAi,
 }) => {
   const [isUploadingProjectDrive, setIsUploadingProjectDrive] = useState(false);
   const [driveBackupNotice, setDriveBackupNotice] = useState<{
@@ -369,6 +371,16 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
                 >
                   <span className="flex items-center gap-2"><ClipboardList className="w-3.5 h-3.5 text-emerald-400" /> Paste Table &amp; Lead Parser</span>
                   <ArrowRight className="w-3.5 h-3.5 text-emerald-400" />
+                </button>
+              )}
+              {onNavigateToFbMessengerAi && (
+                <button
+                  type="button"
+                  onClick={onNavigateToFbMessengerAi}
+                  className="w-full px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white text-xs font-black flex items-center justify-between cursor-pointer shadow-sm"
+                >
+                  <span className="flex items-center gap-2"><MessageSquare className="w-3.5 h-3.5" /> 3-Page FB Messenger AI Bot</span>
+                  <span className="px-1.5 py-0.5 rounded bg-black/25 font-mono text-[10px]">Live AI</span>
                 </button>
               )}
               {onNavigateToVoiceIntake && (
@@ -660,6 +672,37 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
 
       {/* Main Grid of Management Sections */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        {/* 00. 2-Page Facebook Messenger AI Bot, Live Prompt Tweaker & Auto-Sync */}
+        {onNavigateToFbMessengerAi && (
+          <div className="bg-gradient-to-br from-[#121c36] via-[#151923] to-[#151923] border border-blue-500/50 hover:border-blue-400 rounded-3xl p-5 sm:p-6 flex flex-col justify-between space-y-4 shadow-xl transition-all group">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/25 to-indigo-500/25 text-blue-400 border border-blue-500/40 flex items-center justify-center">
+                  <MessageSquare className="w-6 h-6" />
+                </div>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-blue-950 text-blue-300 border border-blue-800">
+                  💬 2 Facebook Pages • Live AI
+                </span>
+              </div>
+              <div>
+                <h3 className="font-black text-lg text-white">Facebook Messenger AI Bot (2 Pages)</h3>
+                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  Monitors both Facebook Pages for Ad clicks &amp; DMs, answers customer questions, collects <strong className="text-blue-300">Service, Bedrooms/Bathrooms &amp; Preferred Date</strong>, lets you tweak the AI rules or jump in live, and auto-syncs to Google Sheets (<code className="text-emerald-300">FB Leads</code>) + Jobber Quote.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={onNavigateToFbMessengerAi}
+              className="w-full py-2.5 px-3 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:opacity-95 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Open 2-Page FB Messenger AI &amp; Live Tweaker</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* 0. Voice Dictations, Customer Request Intake & Quick Quote Box */}
         <div className="bg-gradient-to-br from-[#1b1528] via-[#151923] to-[#151923] border border-pink-500/40 hover:border-pink-500 rounded-3xl p-5 sm:p-6 flex flex-col justify-between space-y-4 shadow-xl transition-all group">
           <div className="space-y-3">

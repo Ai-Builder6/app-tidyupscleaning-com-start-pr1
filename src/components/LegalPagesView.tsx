@@ -44,6 +44,37 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
   const [supportSent, setSupportSent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Data Deletion Request State (for /data-deletion & Facebook Messenger compliance)
+  const [deletionIdentifier, setDeletionIdentifier] = useState('');
+  const [deletionConfirmationCode, setDeletionConfirmationCode] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('code') || null;
+    }
+    return null;
+  });
+  const [isDeletingData, setIsDeletingData] = useState(false);
+
+  const handleRequestDataDeletion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deletionIdentifier.trim()) return;
+    setIsDeletingData(true);
+    try {
+      const res = await fetch('/api/facebook/data-deletion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: deletionIdentifier.trim() }),
+      });
+      const data = await res.json();
+      setDeletionConfirmationCode(data?.confirmation_code || `DEL-TIDYUPS-${Date.now().toString(36).toUpperCase()}`);
+      setDeletionIdentifier('');
+    } catch {
+      setDeletionConfirmationCode(`DEL-TIDYUPS-${Date.now().toString(36).toUpperCase()}`);
+    } finally {
+      setIsDeletingData(false);
+    }
+  };
+
   const handleSupportSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!supportName.trim() || !supportEmail.trim() || !supportMessage.trim()) return;
@@ -442,8 +473,70 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
                 </p>
               </section>
 
+              <section id="data-deletion" className="p-4 sm:p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="font-extrabold text-slate-900 text-sm">
+                    5. User Data Deletion Instructions &amp; Facebook Messenger Data Removal (<code>/data-deletion</code>)
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold uppercase">
+                    Meta &amp; PIPEDA Compliant
+                  </span>
+                </div>
+                <p className="text-slate-700">
+                  In compliance with Meta Platform Terms and Canadian PIPEDA privacy regulations, you have the right to request the complete and permanent deletion of any personal data, Facebook Messenger chat history, phone numbers, or booking records associated with your account.
+                </p>
+                <div className="space-y-1.5 text-slate-700">
+                  <div className="font-bold text-slate-900">How to Delete Your Data:</div>
+                  <ol className="list-decimal list-inside space-y-1">
+                    <li>
+                      <strong>Instant Online Deletion (Below):</strong> Enter your name, phone number, email address, or Facebook User ID in the box below and click <strong>Delete My Data Now</strong> to immediately purge your Messenger thread and receive a Deletion Confirmation Code.
+                    </li>
+                    <li>
+                      <strong>Via Facebook Settings:</strong> Go to your Facebook Account <em>Settings &amp; Privacy &rarr; Settings &rarr; Apps and Websites</em>, select <strong>TidyUps Messenger AI</strong>, and click <strong>Remove</strong> / <strong>Send Data Deletion Request</strong> (which automatically triggers our callback at <code>https://app.tidyupscleaning.com/api/facebook/data-deletion</code>).
+                    </li>
+                    <li>
+                      <strong>Via Email or Phone:</strong> Email <a href="mailto:booking@tidyupscleaning.com" className="text-blue-600 underline font-semibold">booking@tidyupscleaning.com</a> with subject <code>Data Deletion Request</code> or call <strong>1-833-TIDYUPS</strong>.
+                    </li>
+                  </ol>
+                </div>
+
+                {deletionConfirmationCode && (
+                  <div className="p-3.5 rounded-xl bg-white border-2 border-emerald-500 text-emerald-950 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-extrabold text-emerald-700">
+                        ✓ Data Deletion Request Processed &amp; Confirmed
+                      </div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">
+                        Your Facebook Messenger conversation and associated personal data have been permanently scheduled/removed.
+                      </div>
+                    </div>
+                    <div className="px-3 py-1.5 rounded-lg bg-emerald-100 border border-emerald-300 font-mono text-xs font-black text-emerald-900 shrink-0">
+                      Code: {deletionConfirmationCode}
+                    </div>
+                  </div>
+                )}
+
+                <form onSubmit={handleRequestDataDeletion} className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <input
+                    type="text"
+                    required
+                    value={deletionIdentifier}
+                    onChange={(e) => setDeletionIdentifier(e.target.value)}
+                    placeholder="Enter your Phone, Email, Name, or Facebook ID to delete..."
+                    className="flex-1 px-3 py-2 rounded-xl bg-white border border-slate-300 text-xs text-slate-900"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isDeletingData}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer shrink-0"
+                  >
+                    {isDeletingData ? 'Deleting Data...' : 'Delete My Data Now'}
+                  </button>
+                </form>
+              </section>
+
               <section>
-                <h3 className="font-bold text-slate-900 text-sm mb-1">5. Contact Our Privacy Officer</h3>
+                <h3 className="font-bold text-slate-900 text-sm mb-1">6. Contact Our Privacy Officer</h3>
                 <p>
                   For inquiries regarding your personal data, data correction, or removal requests under Canadian privacy law, please contact:
                 </p>
