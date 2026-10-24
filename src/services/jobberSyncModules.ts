@@ -1453,17 +1453,46 @@ async function executePushQuoteToJobberInternal(
 
   const targetNormName = normalizePhoneticPersonName(quote.clientName);
   const targetPhone10 = normalizePhone10(quote.clientPhone);
+  const isRealTargetPhone =
+    targetPhone10.length >= 7 &&
+    targetPhone10 !== "7805550199" &&
+    targetPhone10 !== "7805550100";
 
-  // Check in-memory recent client cache first (prevents duplicate creation when Jobber search index lags by 5-15s)
+  const normalizeStreetForComparison = (rawAddr?: string): string => {
+    const cleaned = String(rawAddr || "")
+      .toLowerCase()
+      .replace(/,?\s*(edmonton|st\.?\s*albert|sherwood\s*park|leduc|spruce\s*grove|beaumont|fort\s*saskatchewan|ab|alberta|canada)\b.*/gi, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned || cleaned === "edmonton" || cleaned === "10405 jasper ave") return "";
+    return cleaned;
+  };
+  const targetStreetNorm = normalizeStreetForComparison(street1 || quote.serviceAddress);
+
+  // Check in-memory recent client cache first (only match if phone & address do NOT conflict!)
   for (const cached of recentJobberClientCache.values()) {
     if (Date.now() - cached.updatedAtMs > 30 * 60 * 1000) continue;
-    const sameName = targetNormName && normalizePhoneticPersonName(cached.name) === targetNormName;
-    const samePhone =
-      targetPhone10.length >= 7 &&
-      cached.phoneDigits.length >= 7 &&
-      targetPhone10 !== "7805550199" &&
-      cached.phoneDigits === targetPhone10;
-    if (sameName || samePhone) {
+    const cachedPhone10 = normalizePhone10(cached.phoneDigits);
+    const isRealCachedPhone =
+      cachedPhone10.length >= 7 &&
+      cachedPhone10 !== "7805550199" &&
+      cachedPhone10 !== "7805550100";
+
+    // NEVER merge if both have real phone numbers and they are different
+    if (isRealTargetPhone && isRealCachedPhone && cachedPhone10 !== targetPhone10) {
+      continue;
+    }
+
+    const samePhone = isRealTargetPhone && isRealCachedPhone && cachedPhone10 === targetPhone10;
+    const hasFullName = targetNormName.split(" ").filter(Boolean).length >= 2;
+    const sameFullName =
+      hasFullName &&
+      normalizePhoneticPersonName(cached.name) === targetNormName &&
+      !isRealTargetPhone &&
+      !isRealCachedPhone;
+
+    if (samePhone || sameFullName) {
       if (!jobberClientId) jobberClientId = cached.clientId;
       if (!jobberClientWebUri) jobberClientWebUri = cached.clientWebUri;
       if (!propertyId && cached.propertyId) propertyId = cached.propertyId;
@@ -1480,9 +1509,9 @@ async function executePushQuoteToJobberInternal(
   if (isLive) {
     try {
       // ─────────────────────────────────────────────────────────────────────────
-      // STEP 1: Find or Create ONE Single Person / Client in Jobber FIRST
-      // Queries BOTH searchTerm AND recentClients(last: 15) so newly created clients
-      // are always found immediately even before Jobber's search index refreshes.
+      // STEP 1: Find or Create Client in Jobber FIRST
+      // IMPORTANT: Never auto-merge two customers who have different phone numbers
+      // or different street addresses just because they share a name (e.g. "Paige").
       // ─────────────────────────────────────────────────────────────────────────
       const nameParts = (quote.clientName || "Customer").trim().split(/\s+/);
       const firstName = nameParts[0] || "Customer";
@@ -1583,36 +1612,64 @@ async function executePushQuoteToJobberInternal(
       }
       const allCandidates = Array.from(candidateMap.values());
 
-      // Find all matching records for this person (by ID, phonetic name, or phone number)
+      // Strict matching: NEVER merge two people if their phone numbers or street addresses differ!
       const matchingClients = allCandidates.filter((c: any) => {
         if (jobberClientId && c.id === jobberClientId) return true;
-        const cNormName = normalizePhoneticPersonName(c.name);
-        if (targetNormName && cNormName === targetNormName) return true;
+
         const cPhones: string[] = Array.isArray(c.defaultPhones)
           ? c.defaultPhones
           : c.defaultPhones
           ? [String(c.defaultPhones)]
           : [];
+        const validCandidatePhones = cPhones
+          .map((p) => normalizePhone10(p))
+          .filter((p10) => p10.length >= 7 && p10 !== "7805550199" && p10 !== "7805550100");
+
         const phoneMatched =
-          targetPhone10.length >= 7 &&
-          targetPhone10 !== "7805550199" &&
-          cPhones.some((p) => {
-            const p10 = normalizePhone10(p);
-            return p10.length >= 7 && (p10 === targetPhone10 || p10.slice(-7) === targetPhone10.slice(-7));
-          });
-        if (phoneMatched) return true;
-        // Also match if same first name AND created in the last 10 minutes during live dictation
-        const cFirst = (c.name || "").trim().split(/\s+/)[0]?.toLowerCase();
-        const ageMs = c.createdAt ? Date.now() - new Date(c.createdAt).getTime() : Infinity;
-        if (
-          cFirst &&
-          cFirst.length >= 3 &&
-          cFirst === firstName.toLowerCase() &&
-          ageMs >= 0 &&
-          ageMs < 10 * 60 * 1000
-        ) {
+          isRealTargetPhone &&
+          validCandidatePhones.some((p10) => p10 === targetPhone10);
+
+        const phoneConflict =
+          isRealTargetPhone &&
+          validCandidatePhones.length > 0 &&
+          !phoneMatched;
+
+        // If both records have real phone numbers and they DO NOT match, they are different customers!
+        if (phoneConflict) return false;
+
+        const candidateStrokes = [
+          c.billingAddress?.street1,
+          ...(c.clientProperties?.nodes || []).map((p: any) => p?.address?.street1),
+        ]
+          .map((s) => normalizeStreetForComparison(s))
+          .filter(Boolean);
+
+        const addressMatched =
+          Boolean(targetStreetNorm) &&
+          candidateStrokes.some((cs) => cs === targetStreetNorm);
+
+        const addressConflict =
+          Boolean(targetStreetNorm) &&
+          candidateStrokes.length > 0 &&
+          !addressMatched;
+
+        // If both records have street addresses and they DO NOT match, do not merge them!
+        if (addressConflict && !phoneMatched) return false;
+
+        // Match if exact phone number matches (and either same name or no address conflict)
+        const cNormName = normalizePhoneticPersonName(c.name);
+        if (phoneMatched && (!targetNormName || !cNormName || cNormName === targetNormName || !addressConflict)) {
           return true;
         }
+
+        // Only match by name if the name is an exact match AND there is no phone conflict or address conflict,
+        // AND either the address matches or it's a full first+last name with no phone on one side
+        const hasFullName = targetNormName.split(" ").filter(Boolean).length >= 2;
+        if (targetNormName && cNormName === targetNormName) {
+          if (addressMatched) return true;
+          if (hasFullName && validCandidatePhones.length === 0 && candidateStrokes.length === 0) return true;
+        }
+
         return false;
       });
 
@@ -1626,29 +1683,12 @@ async function executePushQuoteToJobberInternal(
 
       const existingClient = matchingClients[0];
 
-      // If a duplicate empty client was created recently for the same person, archive the duplicate automatically
-      if (matchingClients.length > 1 && existingClient?.id) {
-        for (let i = 1; i < matchingClients.length; i++) {
-          const dup = matchingClients[i];
-          const dupQuotes = (dup.quotes?.nodes || []).length;
-          const dupAgeMs = dup.createdAt ? Date.now() - new Date(dup.createdAt).getTime() : Infinity;
-          if (dup?.id && dup.id !== existingClient.id && dupQuotes === 0 && dupAgeMs < 60 * 60 * 1000) {
-            jobberGraphql<any>(
-              cleanToken,
-              `mutation ArchiveDuplicateClient($clientId: EncodedId!) { clientArchive(clientId: $clientId) { client { id } userErrors { message } } }`,
-              { clientId: dup.id },
-              credentials
-            ).catch(() => {});
-          }
-        }
-      }
-
       if (existingClient?.id) {
         jobberClientId = existingClient.id;
         jobberClientWebUri = existingClient.jobberWebUri || resolveJobberWebUri("clients", existingClient.id);
         propertyId = existingClient.clientProperties?.nodes?.[0]?.id || propertyId;
 
-        // Reconcile & merge any new/missing bits of information (full name, street address, phone, email) onto this single client!
+        // Reconcile & merge any missing bits of information onto this verified matching client
         try {
           const existingPhones: string[] = Array.isArray(existingClient.defaultPhones)
             ? existingClient.defaultPhones
@@ -1669,8 +1709,8 @@ async function executePushQuoteToJobberInternal(
             ...(lastName ? { lastName } : {}),
             billingAddress: addressInput,
           };
-          if (!hasPhoneAlready && quote.clientPhone) {
-            clientEditInput.phonesToAdd = [{ number: quote.clientPhone, primary: existingPhones.length === 0 }];
+          if (!hasPhoneAlready && quote.clientPhone && existingPhones.length === 0) {
+            clientEditInput.phonesToAdd = [{ number: quote.clientPhone, primary: true }];
           }
           if (!hasEmailAlready && quote.clientEmail) {
             clientEditInput.emailsToAdd = [{ address: quote.clientEmail, primary: existingEmails.length === 0 }];
@@ -1865,7 +1905,30 @@ async function executePushQuoteToJobberInternal(
 
       // ─────────────────────────────────────────────────────────────────────────
       // STEP 2B: Create (or Update existing) Draft Quote in Jobber (quoteCreate / quoteEdit)
+      // IMPORTANT: Line item descriptions must ONLY contain the clean service scope,
+      // never the phone call transcription. Call summaries/links belong in the quote message/note.
       // ─────────────────────────────────────────────────────────────────────────
+      const cleanQuoteNoteMessage = (() => {
+        const rawNote = String(quote.notes || "").trim();
+        if (!rawNote) {
+          return `Thank you for choosing TidyUps Cleaning Service Inc! ${quoteTitle} at ${
+            quote.serviceAddress || "Edmonton, AB"
+          }. Dispatch Summary: https://app.tidyupscleaning.com/?view=QUICK_QUOTE`;
+        }
+        // Cap note/message to a clean summary + link (never a full-page raw call transcript)
+        const truncated = rawNote.length > 500 ? `${rawNote.slice(0, 497)}...` : rawNote;
+        return truncated.includes("https://")
+          ? truncated
+          : `${truncated} | Call & Quote Link: https://app.tidyupscleaning.com/?view=QUICK_QUOTE`;
+      })();
+
+      const sanitizeLineItemDescription = (rawDesc: string | undefined, fallbackTitle: string): string => {
+        const base = String(rawDesc || fallbackTitle).trim();
+        // Strip any trailing "| Notes: ..." that might contain call transcripts
+        const withoutNotes = base.split(/\s*\|\s*Notes:/i)[0].trim();
+        return withoutNotes.length > 200 ? withoutNotes.slice(0, 200).trim() : withoutNotes || fallbackTitle;
+      };
+
       if (!quote.createRequestOnly && jobberClientId && propertyId) {
         if (liveQuoteId) {
           // Quote already exists for this client — update it via quoteEdit instead of creating a duplicate!
@@ -1888,11 +1951,7 @@ async function executePushQuoteToJobberInternal(
             `;
             const editAttrs: any = {
               title: quoteTitle,
-              message:
-                quote.notes ||
-                `Thank you for choosing TidyUps Cleaning Service Inc! ${quoteTitle} at ${
-                  quote.serviceAddress || "Edmonton, AB"
-                }.`,
+              message: cleanQuoteNoteMessage,
             };
             const editRes = await jobberGraphql<any>(
               cleanToken,
@@ -1914,8 +1973,8 @@ async function executePushQuoteToJobberInternal(
           const lineItemsInput =
             quote.lineItems && quote.lineItems.length > 0
               ? quote.lineItems.map((li) => ({
-                  name: li.name || li.description || quoteTitle,
-                  description: li.description || li.name || quoteTitle,
+                  name: li.name || quoteTitle,
+                  description: sanitizeLineItemDescription(li.description, li.name || quoteTitle),
                   quantity: Number(li.quantity) || 1,
                   unitPrice: Number(li.unitPrice ?? li.total ?? 0),
                   saveToProductsAndServices: false,
@@ -1923,11 +1982,9 @@ async function executePushQuoteToJobberInternal(
               : [
                   {
                     name: quoteTitle,
-                    description:
-                      quote.notes ||
-                      `${quoteTitle} at ${quote.serviceAddress || "Edmonton, AB"}${
-                        quote.depositRequired ? ` (Required Deposit: $${quote.depositRequired})` : ""
-                      }`,
+                    description: `${quoteTitle} — ${quote.serviceAddress || "Edmonton, AB"}${
+                      quote.depositRequired ? ` (Deposit: $${quote.depositRequired})` : ""
+                    }`,
                     quantity: 1,
                     unitPrice: Number(quote.total) || 280,
                     saveToProductsAndServices: false,
@@ -1955,11 +2012,7 @@ async function executePushQuoteToJobberInternal(
             clientId: jobberClientId,
             propertyId,
             title: quoteTitle,
-            message:
-              quote.notes ||
-              `Thank you for choosing TidyUps Cleaning Service Inc! ${quoteTitle} at ${
-                quote.serviceAddress || "Edmonton, AB"
-              }.`,
+            message: cleanQuoteNoteMessage,
             lineItems: lineItemsInput,
           };
           if (Number(quote.depositRequired) > 0) {

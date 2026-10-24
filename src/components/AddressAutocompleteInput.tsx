@@ -195,27 +195,21 @@ function buildInstantLocalPredictions(rawQuery: string): Prediction[] {
     }
   };
 
-  if (!q) {
-    return EDMONTON_CORRIDOR_PRESETS.slice(0, 6).map((item, idx) => ({
-      description: `${item.address}, ${item.city} (${item.area})`,
-      place_id: `preset-init-${idx}`,
-      main_text: item.address,
-      secondary_text: `${item.city} • ${item.area}`,
-      lat: item.lat,
-      lng: item.lng,
-      tag: item.area
-    }));
+  // Do not pop up preset addresses when the field is empty or has fewer than 3 characters
+  if (!q || q.length < 3) {
+    return [];
   }
 
-  // 1. If the user starts with a house number (e.g., "10824", "10824 82", "4512 118 Ave", "1240 Windermere")
-  const leadingNumMatch = q.match(/^(\d{1,5})(?:\s+(.*))?$/);
+  // 1. If the user typed a house number AND started typing a street/avenue number or street name
+  // (e.g., "10824 82", "4512 118 Ave", "1240 Windermere")
+  const leadingNumMatch = q.match(/^(\d{1,5})\s+(.+)$/);
   if (leadingNumMatch) {
     const houseNum = leadingNumMatch[1];
     const rest = (leadingNumMatch[2] || '').trim();
     const restLower = rest.toLowerCase();
 
-    // Case 1A: User typed house number + partial or full numbered street/ave (e.g. "10824 82", "10824 82 ave")
-    const numRoadMatch = rest.match(/^(\d{1,3})\s*(st|street|ave|avenue)?\s*(nw|sw|ne|se)?/i);
+    // Case 1A: User typed house number + numbered street/ave (e.g. "10824 82", "10824 82 ave")
+    const numRoadMatch = rest.match(/^(\d{1,3})\s*(st|street|ave|avenue)?\s*(nw|sw|ne|se)?$/i);
     if (numRoadMatch) {
       const roadNum = numRoadMatch[1];
       const roadTypeRaw = (numRoadMatch[2] || '').toLowerCase();
@@ -240,14 +234,14 @@ function buildInstantLocalPredictions(rawQuery: string): Prediction[] {
             secondary_text: `Edmonton, AB • ${areaHint}`,
             lat: coords?.lat,
             lng: coords?.lng,
-            tag: 'Instant Auto-Fill'
+            tag: 'Edmonton Grid'
           });
         }
       }
     }
 
-    // Case 1B: User typed house number + named street prefix (e.g. "10420 jasper", "1215 wind", "420 st albert")
-    if (rest.length > 0) {
+    // Case 1B: User typed house number + named street prefix (e.g. "10420 jasper", "1215 wind")
+    if (rest.length >= 2) {
       for (const ns of NAMED_STREETS) {
         if (ns.street.toLowerCase().includes(restLower) || ns.area.toLowerCase().includes(restLower)) {
           const mainText = `${houseNum} ${ns.street}${ns.quadrant ? ` ${ns.quadrant}` : ''}`;
@@ -262,70 +256,28 @@ function buildInstantLocalPredictions(rawQuery: string): Prediction[] {
           });
         }
       }
-    } else {
-      // User only typed a house number so far (e.g., "10420" or "8215") -> suggest common Edmonton streets with that house number!
-      const hInt = parseInt(houseNum, 10);
-      const inferredStOrAve = hInt >= 1000 ? Math.floor(hInt / 100) : 104;
-      const candidateStreets = [
-        `${houseNum} Jasper Ave NW`,
-        `${houseNum} 82 Ave NW`,
-        `${houseNum} ${Math.min(170, Math.max(50, inferredStOrAve))} St NW`,
-        `${houseNum} ${Math.min(167, Math.max(23, inferredStOrAve))} Ave NW`,
-        `${houseNum} Windermere Blvd SW`,
-        `${houseNum} Ellerslie Rd SW`
-      ];
-      candidateStreets.forEach((mainText, idx) => {
-        const coords = estimateEdmontonGridCoords(mainText);
+    }
+  }
+
+  // 2. Match against curated presets ONLY if the query matches an address or postal code
+  if (q.length >= 4) {
+    for (const item of EDMONTON_CORRIDOR_PRESETS) {
+      const haystack = `${item.address} ${item.postal}`.toLowerCase();
+      if (haystack.includes(qLower)) {
         pushUnique({
-          description: `${mainText}, Edmonton, AB`,
-          place_id: `synth-numonly-${idx}-${mainText}`,
-          main_text: mainText,
-          secondary_text: 'Edmonton, AB • Street Auto-Fill',
-          lat: coords?.lat,
-          lng: coords?.lng,
-          tag: 'Auto-Fill'
+          description: `${item.address}, ${item.city}`,
+          place_id: `preset-${item.address}`,
+          main_text: item.address,
+          secondary_text: `${item.city} • ${item.area}`,
+          lat: item.lat,
+          lng: item.lng,
+          tag: item.area
         });
-      });
+      }
     }
   }
 
-  // 2. Match against curated presets by address, neighborhood/area, city, or postal code
-  for (const item of EDMONTON_CORRIDOR_PRESETS) {
-    const haystack = `${item.address} ${item.area} ${item.city} ${item.postal}`.toLowerCase();
-    if (haystack.includes(qLower)) {
-      pushUnique({
-        description: `${item.address}, ${item.city} (${item.area})`,
-        place_id: `preset-${item.address}`,
-        main_text: item.address,
-        secondary_text: `${item.city} • ${item.area}`,
-        lat: item.lat,
-        lng: item.lng,
-        tag: item.area
-      });
-    }
-  }
-
-  // 3. Match against named streets even without a leading house number (e.g. "Whyte", "Windermere", "Jasper")
-  for (const ns of NAMED_STREETS) {
-    if (
-      ns.street.toLowerCase().includes(qLower) ||
-      ns.area.toLowerCase().includes(qLower) ||
-      ns.city.toLowerCase().includes(qLower)
-    ) {
-      const sampleMain = `10120 ${ns.street}${ns.quadrant ? ` ${ns.quadrant}` : ''}`;
-      pushUnique({
-        description: `${sampleMain}, ${ns.city}`,
-        place_id: `named-default-${ns.street}`,
-        main_text: sampleMain,
-        secondary_text: `${ns.city} • ${ns.area}`,
-        lat: ns.lat,
-        lng: ns.lng,
-        tag: ns.area
-      });
-    }
-  }
-
-  return results.slice(0, 7);
+  return results.slice(0, 6);
 }
 
 export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> = ({
@@ -361,14 +313,19 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
   }, []);
 
   const fetchPredictions = async (input: string) => {
-    const localSmart = buildInstantLocalPredictions(input);
-    setPredictions(localSmart);
-    setHighlightedIndex(0);
-    setIsOpen(true);
-
-    if (!input || input.trim().length < 2) {
+    const trimmed = (input || '').trim();
+    if (trimmed.length < 3) {
+      setPredictions([]);
+      setIsOpen(false);
       setIsLoading(false);
       return;
+    }
+
+    const localSmart = buildInstantLocalPredictions(trimmed);
+    setPredictions(localSmart);
+    setHighlightedIndex(0);
+    if (localSmart.length > 0) {
+      setIsOpen(true);
     }
 
     setIsLoading(true);
@@ -379,7 +336,7 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
         if (typeof w.google.maps.places.AutocompleteSuggestion?.fetchAutocompleteSuggestions === 'function') {
           try {
             const { suggestions } = await w.google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-              input,
+              input: trimmed,
               includedRegionCodes: ['ca'],
               locationBias: {
                 center: { lat: 53.5461, lng: -113.4938 },
@@ -407,8 +364,9 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
                 })
                 .filter(Boolean);
               if (gmpPreds.length > 0) {
-                const merged = [...gmpPreds, ...localSmart].slice(0, 7);
+                const merged = [...gmpPreds, ...localSmart].slice(0, 6);
                 setPredictions(merged);
+                setIsOpen(true);
                 setIsLoading(false);
                 return;
               }
@@ -420,8 +378,8 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
 
         if (typeof w.google.maps.places.AutocompleteService === 'function') {
           const service = new w.google.maps.places.AutocompleteService();
-          const hasEdmontonContext = /edmonton|st\.?\s*albert|sherwood|spruce|leduc|beaumont|\bab\b/i.test(input);
-          const searchInput = hasEdmontonContext ? input : `${input}, Edmonton, AB`;
+          const hasEdmontonContext = /edmonton|st\.?\s*albert|sherwood|spruce|leduc|beaumont|\bab\b/i.test(trimmed);
+          const searchInput = hasEdmontonContext ? trimmed : `${trimmed}, Edmonton, AB`;
 
           const googlePreds = await new Promise<Prediction[]>((resolve) => {
             service.getPlacePredictions(
@@ -457,8 +415,9 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
             const combined = [
               ...googlePreds,
               ...localSmart.filter(l => !seenDesc.has(l.main_text.toLowerCase()))
-            ].slice(0, 7);
+            ].slice(0, 6);
             setPredictions(combined);
+            setIsOpen(true);
             setIsLoading(false);
             return;
           }
@@ -466,7 +425,7 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
       }
 
       // 2. Try Server Proxy (/api/places/autocomplete)
-      const response = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(input)}`);
+      const response = await fetch(`/api/places/autocomplete?input=${encodeURIComponent(trimmed)}`);
       if (response.ok) {
         const data = await response.json();
         if (Array.isArray(data.predictions) && data.predictions.length > 0) {
@@ -483,10 +442,12 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
             };
           });
           const seenDesc = new Set(serverPreds.map(s => s.main_text.toLowerCase()));
-          setPredictions([
+          const finalPreds = [
             ...serverPreds,
             ...localSmart.filter(l => !seenDesc.has(l.main_text.toLowerCase()))
-          ].slice(0, 7));
+          ].slice(0, 6);
+          setPredictions(finalPreds);
+          setIsOpen(finalPreds.length > 0);
         }
       }
     } catch {
@@ -506,15 +467,21 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
       clearTimeout(debounceTimer.current);
     }
 
+    if (!newVal || newVal.trim().length < 3) {
+      setPredictions([]);
+      setIsOpen(false);
+      return;
+    }
+
     // Immediate local smart predictions + debounced remote enrichment
     const immediateLocal = buildInstantLocalPredictions(newVal);
     setPredictions(immediateLocal);
     setHighlightedIndex(0);
-    setIsOpen(true);
+    setIsOpen(immediateLocal.length > 0);
 
     debounceTimer.current = setTimeout(() => {
       fetchPredictions(newVal);
-    }, 150);
+    }, 180);
   };
 
   const handleSelect = (prediction: Prediction) => {
@@ -574,10 +541,14 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => {
-            const list = buildInstantLocalPredictions(value);
-            setPredictions(list);
-            setHighlightedIndex(0);
-            setIsOpen(true);
+            if (value && value.trim().length >= 3 && !justAutoFilled) {
+              const list = buildInstantLocalPredictions(value);
+              if (list.length > 0) {
+                setPredictions(list);
+                setHighlightedIndex(0);
+                setIsOpen(true);
+              }
+            }
           }}
           onBlur={onBlur}
           placeholder={placeholder}
@@ -591,8 +562,8 @@ export const AddressAutocompleteInput: React.FC<AddressAutocompleteInputProps> =
               type="button"
               onClick={() => {
                 onChange('', undefined);
-                setPredictions(buildInstantLocalPredictions(''));
-                setIsOpen(true);
+                setPredictions([]);
+                setIsOpen(false);
               }}
               title="Clear address"
               className={`p-1 rounded-full transition-colors ${

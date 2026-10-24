@@ -3351,8 +3351,14 @@ export function App() {
               setQuotesList((prev) => {
                 const newDay = String(newQuote.createdAt || '').slice(0, 10);
                 const newClient = String(newQuote.clientName || '').trim().toLowerCase();
+                const newPhone = String(newQuote.clientPhone || '').replace(/\D/g, '').slice(-10);
+                const newAddr = String(newQuote.serviceAddress || '').trim().toLowerCase();
                 const filtered = prev.filter((q) => {
                   if (q.id === newQuote.id || (q.quoteNumber && q.quoteNumber === newQuote.quoteNumber)) return false;
+                  const qPhone = String(q.clientPhone || '').replace(/\D/g, '').slice(-10);
+                  const qAddr = String(q.serviceAddress || '').trim().toLowerCase();
+                  if (newPhone && qPhone && newPhone !== qPhone) return true;
+                  if (newAddr && qAddr && newAddr !== qAddr) return true;
                   if (
                     newClient &&
                     String(q.clientName || '').trim().toLowerCase() === newClient &&

@@ -1434,8 +1434,7 @@ function parseVoiceTicketHeuristic(transcript: string) {
   }
   const specificInstructions = [
     addonsDetected.length > 0 ? `Add-ons: ${addonsDetected.join(", ")}` : "",
-    accessNotes,
-    t,
+    accessNotes ? accessNotes.slice(0, 140) : "",
   ]
     .filter(Boolean)
     .join(" • ");
@@ -3542,9 +3541,40 @@ function upsertJobberClientAndLeadFromQuote(
     !cleanQuoteName.startsWith("(") &&
     !cleanQuoteName.startsWith("+");
 
+  const isRealNormPhone =
+    normPhone.length >= 7 && normPhone !== "7805550199" && normPhone !== "7805550100";
+  const normalizeStreetAddr = (addr?: string) => {
+    const cleaned = String(addr || "")
+      .toLowerCase()
+      .replace(/,?\s*(edmonton|st\.?\s*albert|sherwood\s*park|leduc|spruce\s*grove|beaumont|ab|alberta|canada)\b.*/gi, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned || cleaned === "edmonton" || cleaned === "10405 jasper ave") return "";
+    return cleaned;
+  };
+  const quoteStreet = normalizeStreetAddr(quote.serviceAddress);
+
   let matchedClient = store.clients.find((c: any) => {
+    if (jobberClientId && (c.id === jobberClientId || c.jobberId === jobberClientId)) return true;
     const cPhone = (c.phone || "").replace(/\D/g, "").slice(-10);
-    return (normPhone && cPhone === normPhone) || (normName && c.name?.trim().toLowerCase() === normName);
+    const isRealClientPhone =
+      cPhone.length >= 7 && cPhone !== "7805550199" && cPhone !== "7805550100";
+    // NEVER merge if both have real phone numbers and they are different!
+    if (isRealNormPhone && isRealClientPhone && cPhone !== normPhone) return false;
+
+    const cStreet = normalizeStreetAddr(c.address);
+    // NEVER merge if both have real street addresses and they are different!
+    if (quoteStreet && cStreet && quoteStreet !== cStreet) return false;
+
+    if (isRealNormPhone && isRealClientPhone && cPhone === normPhone) return true;
+
+    const hasFullName = normName.split(/\s+/).filter(Boolean).length >= 2;
+    if (normName && c.name?.trim().toLowerCase() === normName) {
+      if (quoteStreet && cStreet && quoteStreet === cStreet) return true;
+      if (hasFullName && !isRealNormPhone && !isRealClientPhone && !quoteStreet && !cStreet) return true;
+    }
+    return false;
   });
 
   const isLiveJobberClient = Boolean(
@@ -3600,13 +3630,17 @@ function upsertJobberClientAndLeadFromQuote(
   const { source, sourceTab } = resolveCleanSheetTab(sourceHint || quote.source);
 
   let matchedLead = store.adLeads.find((l: any) => {
+    if (l.quoteId === quote.id || (quote.quoteNumber && l.quoteNumber === quote.quoteNumber)) return true;
     const lPhone = (l.phone || "").replace(/\D/g, "").slice(-10);
-    return (
-      l.quoteId === quote.id ||
-      (quote.quoteNumber && l.quoteNumber === quote.quoteNumber) ||
-      (normPhone && lPhone === normPhone) ||
-      (normName && l.customerName?.trim().toLowerCase() === normName)
-    );
+    const isRealLeadPhone = lPhone.length >= 7 && lPhone !== "7805550199" && lPhone !== "7805550100";
+    if (isRealNormPhone && isRealLeadPhone && lPhone !== normPhone) return false;
+    const lStreet = normalizeStreetAddr(l.address);
+    if (quoteStreet && lStreet && quoteStreet !== lStreet) return false;
+    if (isRealNormPhone && isRealLeadPhone && lPhone === normPhone) return true;
+    if (normName && l.customerName?.trim().toLowerCase() === normName && quoteStreet && lStreet === quoteStreet) {
+      return true;
+    }
+    return false;
   });
 
   if (matchedLead) {
@@ -4128,12 +4162,32 @@ app.post("/api/database/quotes", async (req, res) => {
       .trim();
   const normClientName = normalizePersonKey(clientName);
   const normClientPhone = (clientPhone || "").replace(/\D/g, "").slice(-10);
+  const isRealTargetPhone =
+    normClientPhone.length >= 7 && normClientPhone !== "7805550199" && normClientPhone !== "7805550100";
+  const normalizeStreetKey = (addr?: string) => {
+    const cleaned = String(addr || "")
+      .toLowerCase()
+      .replace(/,?\s*(edmonton|st\.?\s*albert|sherwood\s*park|leduc|spruce\s*grove|beaumont|ab|alberta|canada)\b.*/gi, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned || cleaned === "edmonton" || cleaned === "10405 jasper ave") return "";
+    return cleaned;
+  };
+  const normTargetStreet = normalizeStreetKey(serviceAddress);
+
   const existingRecentQuote = (currentStore.quotes || []).find((q: any) => {
     const qName = normalizePersonKey(q.clientName);
     const qPhone = (q.clientPhone || "").replace(/\D/g, "").slice(-10);
+    const isRealQPhone = qPhone.length >= 7 && qPhone !== "7805550199" && qPhone !== "7805550100";
+    // NEVER merge if phones differ or street addresses differ!
+    if (isRealTargetPhone && isRealQPhone && qPhone !== normClientPhone) return false;
+    const qStreet = normalizeStreetKey(q.serviceAddress);
+    if (normTargetStreet && qStreet && normTargetStreet !== qStreet) return false;
+
     const sameClient =
-      (normClientName && qName === normClientName) ||
-      (normClientPhone.length >= 7 && normClientPhone !== "7805550199" && qPhone === normClientPhone);
+      (isRealTargetPhone && isRealQPhone && qPhone === normClientPhone) ||
+      (normClientName && qName === normClientName && normTargetStreet && qStreet === normTargetStreet);
     if (!sameClient) return false;
     const ageMs = Date.now() - new Date(q.createdAt || 0).getTime();
     return ageMs >= 0 && ageMs < 30 * 60 * 1000;
@@ -4142,9 +4196,15 @@ app.post("/api/database/quotes", async (req, res) => {
   const existingMatchedClient = (currentStore.clients || []).find((c: any) => {
     const cName = normalizePersonKey(c.name);
     const cPhone = (c.phone || "").replace(/\D/g, "").slice(-10);
+    const isRealCPhone = cPhone.length >= 7 && cPhone !== "7805550199" && cPhone !== "7805550100";
+    // NEVER merge if phones differ or street addresses differ!
+    if (isRealTargetPhone && isRealCPhone && cPhone !== normClientPhone) return false;
+    const cStreet = normalizeStreetKey(c.address);
+    if (normTargetStreet && cStreet && normTargetStreet !== cStreet) return false;
+
     return (
-      (normClientName && cName === normClientName) ||
-      (normClientPhone.length >= 7 && normClientPhone !== "7805550199" && cPhone === normClientPhone)
+      (isRealTargetPhone && isRealCPhone && cPhone === normClientPhone) ||
+      (normClientName && cName === normClientName && normTargetStreet && cStreet === normTargetStreet)
     );
   });
 
@@ -4270,9 +4330,20 @@ app.post("/api/database/quotes", async (req, res) => {
       newQuote,
       ...(currentStore.quotes || []).filter((q: any) => {
         if (q.id === newQuote.id || q.quoteNumber === newQuote.quoteNumber) return false;
-        const qName = (q.clientName || "").trim().toLowerCase();
+        const qName = normalizePersonKey(q.clientName);
+        const qPhone = (q.clientPhone || "").replace(/\D/g, "").slice(-10);
+        const qStreet = normalizeStreetKey(q.serviceAddress);
         const qDay = String(q.createdAt || "").slice(0, 10);
-        if (normClientName && qName === normClientName && qDay === todayPrefix) return false;
+        // Only replace a same-day quote if it is the exact same customer (same phone AND same street address)
+        if (
+          normClientName &&
+          qName === normClientName &&
+          qDay === todayPrefix &&
+          (!isRealTargetPhone || qPhone === normClientPhone) &&
+          (!normTargetStreet || !qStreet || qStreet === normTargetStreet)
+        ) {
+          return false;
+        }
         return true;
       }),
     ];
