@@ -625,6 +625,7 @@ export function App() {
   ];
 
   const DEFAULT_FOOTER_BTN_ORDER = [
+    'FB_MESSENGER_AI',
     'PASTE_TABLE',
     'MASTER_TABLE',
     'QUICK_MAPS',
@@ -657,7 +658,7 @@ export function App() {
   const [footerBtnOrder, setFooterBtnOrder] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('tidyups_footer_btn_order_v2');
+        const saved = localStorage.getItem('tidyups_footer_btn_order_v3');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -713,7 +714,7 @@ export function App() {
     (nextOrder: string[]) => {
       setFooterBtnOrder(nextOrder);
       try {
-        localStorage.setItem('tidyups_footer_btn_order_v2', JSON.stringify(nextOrder));
+        localStorage.setItem('tidyups_footer_btn_order_v3', JSON.stringify(nextOrder));
       } catch {}
       persistBarLayoutToServer({ footerBtnOrder: nextOrder });
     },
@@ -3846,7 +3847,26 @@ export function App() {
               {footerBtnOrder.map((btnKey, idx) => {
                 let btnNode: React.ReactNode = null;
 
-                if (btnKey === 'PASTE_TABLE') {
+                if (btnKey === 'FB_MESSENGER_AI') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffAuthenticated(true);
+                        setActiveTopView('FB_MESSENGER_AI');
+                      }}
+                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                        activeTopView === 'FB_MESSENGER_AI'
+                          ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white ring-2 ring-blue-300'
+                          : 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40'
+                      }`}
+                      title="Drag left/right to rearrange • 3-Page Facebook Messenger AI Bot & Conversation Board"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                      <span>Facebook AI (3 Pages)</span>
+                    </button>
+                  );
+                } else if (btnKey === 'PASTE_TABLE') {
                   btnNode = (
                     <button
                       type="button"
@@ -4040,12 +4060,11 @@ export function App() {
           </footer>
         )}
 
-        {/* Native iOS Bottom Navigation Bar for iPhone & iPad */}
+        {/* Bottom Navigation Dock Row for Desktop, iPad, and iPhone */}
         {!isZenMode &&
           isStaffAuthenticated &&
           !isStandaloneBookingDomain &&
-          !isCustomerLockPreview &&
-          deviceOverride !== 'DESKTOP' && (
+          !isCustomerLockPreview && (
             <MobileBottomNav
               activeTopView={activeTopView}
               onSelectView={(targetView) => {
@@ -4061,7 +4080,7 @@ export function App() {
               scheduledCount={scheduledJobsList.length}
               unassignedCount={unassignedCount}
               onOpenSpamShield={() => handleOpenSpamShield()}
-              forceShow={deviceOverride === 'IPHONE' || deviceOverride === 'IPAD'}
+              forceShow={true}
             />
           )}
         </div>

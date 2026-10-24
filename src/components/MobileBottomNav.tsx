@@ -9,6 +9,7 @@ import {
   ShieldAlert,
   WifiOff,
   Truck,
+  MessageSquare,
 } from 'lucide-react';
 
 export interface MobileBottomNavProps {
@@ -34,7 +35,6 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   scheduledCount = 0,
   unassignedCount = 0,
   onOpenSpamShield,
-  forceShow = false,
 }) => {
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
@@ -61,10 +61,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           </div>
         )}
         <nav
-          aria-label="Cleaner Mobile Navigation"
-          className={`${
-            forceShow ? 'flex' : 'flex lg:hidden'
-          } fixed bottom-0 inset-x-0 z-45 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 text-white px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] items-center justify-around shadow-[0_-8px_25px_rgba(0,0,0,0.35)] shrink-0`}
+          aria-label="Cleaner Bottom Navigation"
+          className="flex w-full z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 text-white px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] items-center justify-around shadow-[0_-8px_25px_rgba(0,0,0,0.35)] shrink-0"
         >
           <button
             type="button"
@@ -111,6 +109,13 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       badge: '🔴',
     },
     {
+      id: 'FB_MESSENGER_AI',
+      label: 'Facebook AI',
+      icon: MessageSquare,
+      activeColor: 'text-blue-400 bg-blue-500/15 border-blue-500/40',
+      badge: '3 Pages',
+    },
+    {
       id: 'MASTER_HUB',
       label: 'Master Hub',
       icon: FileSpreadsheet,
@@ -155,10 +160,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       )}
       <nav
         id="ios-mobile-bottom-nav"
-        aria-label="iPhone and iPad Bottom Navigation"
-        className={`${
-          forceShow ? 'flex' : 'flex xl:hidden'
-        } fixed bottom-0 inset-x-0 z-45 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 text-white px-1.5 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] items-center justify-between gap-1 shadow-[0_-8px_25px_rgba(0,0,0,0.35)] shrink-0`}
+        aria-label="Desktop, iPad, and iPhone Bottom Navigation"
+        className="flex w-full z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 text-white px-1.5 sm:px-3 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] items-center justify-between gap-1 sm:gap-2 shadow-[0_-8px_25px_rgba(0,0,0,0.35)] shrink-0"
       >
         {navItems.map((item) => {
           const Icon = item.icon;

@@ -9957,6 +9957,9 @@ app.get("/api/facebook/webhook", (req, res) => {
   return res.status(403).send("Verification token mismatch");
 });
 
+const fbInFlightPsids = new Set<string>();
+const FB_SERVER_BOOT_MS = Date.now();
+
 app.post("/api/facebook/webhook", async (req, res) => {
   try {
     const body = req.body;
@@ -9974,87 +9977,99 @@ app.post("/api/facebook/webhook", async (req, res) => {
 
       for (const webhookEvent of entry.messaging || []) {
         const senderPsid = String(webhookEvent?.sender?.id || "");
+        const messageId = String(webhookEvent?.message?.mid || `fbm-${Date.now()}-live`);
         const messageText = String(webhookEvent?.message?.text || "").trim();
         if (!senderPsid || !messageText || webhookEvent?.message?.is_echo) continue;
+        if (fbInFlightPsids.has(senderPsid)) continue;
 
-        let thread = store.fbMessengerThreads.find((t: any) => t.psid === senderPsid);
-        if (!thread) {
-          thread = {
-            id: `fb-thread-${Date.now()}`,
-            pageSlotId: matchedPage.id || "page_1",
-            pageName: matchedPage.pageName,
-            psid: senderPsid,
-            customerName: `FB Customer (${senderPsid.slice(-4)})`,
-            adSourceLabel: matchedPage.adCampaignLabel || "Facebook Messenger",
-            aiPaused: false,
-            status: "COLLECTING_INFO",
-            extracted: {
+        fbInFlightPsids.add(senderPsid);
+        try {
+          let thread = store.fbMessengerThreads.find((t: any) => t.psid === senderPsid);
+          if (!thread) {
+            thread = {
+              id: `fb-thread-${senderPsid}`,
+              pageSlotId: matchedPage.id || "page_1",
+              pageName: matchedPage.pageName,
+              psid: senderPsid,
               customerName: `FB Customer (${senderPsid.slice(-4)})`,
-              phone: "",
-              email: "",
-              serviceType: "",
-              bedrooms: "",
-              bathrooms: "",
-              preferredDate: "",
-              timeWindow: "",
-              address: "",
-              addons: [],
-              estimatedHours: 3.5,
-              estimatedCleaners: 2,
-              estimatedHourlyRate: 105,
-              estimatedTotal: 427.5,
-              depositRequired: 75,
-              specificNotes: "",
-            },
-            messages: [],
-            updatedAt: new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-          };
-          store.fbMessengerThreads.unshift(thread);
-        }
+              adSourceLabel: matchedPage.adCampaignLabel || "Facebook Messenger",
+              aiPaused: false,
+              status: "COLLECTING_INFO",
+              extracted: {
+                customerName: `FB Customer (${senderPsid.slice(-4)})`,
+                phone: "",
+                email: "",
+                serviceType: "",
+                bedrooms: "",
+                bathrooms: "",
+                preferredDate: "",
+                timeWindow: "",
+                address: "",
+                addons: [],
+                estimatedHours: 3.5,
+                estimatedCleaners: 2,
+                estimatedHourlyRate: 105,
+                estimatedTotal: 427.5,
+                depositRequired: 75,
+                specificNotes: "",
+              },
+              messages: [],
+              updatedAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            };
+            store.fbMessengerThreads.unshift(thread);
+          }
 
-        thread.messages.push({
-          id: `fbm-${Date.now()}-live`,
-          sender: "customer",
-          senderName: thread.extracted.customerName || thread.customerName,
-          text: messageText,
-          timestamp: new Date().toISOString(),
-        });
-        thread.updatedAt = new Date().toISOString();
+          if (thread.messages.some((m: any) => m.id === messageId)) {
+            continue;
+          }
 
-        if (!thread.aiPaused && matchedPage.autoReplyEnabled !== false) {
-          const { replyText, updatedExtracted } = await runFacebookMessengerAiTurn(
-            thread,
-            store.fbBotSettings
-          );
-          thread.extracted = updatedExtracted;
           thread.messages.push({
-            id: `fbm-${Date.now()}-aireply`,
-            sender: "ai",
-            senderName: store.fbBotSettings.botName,
-            text: replyText,
+            id: messageId,
+            sender: "customer",
+            senderName: thread.extracted.customerName || thread.customerName,
+            text: messageText,
             timestamp: new Date().toISOString(),
           });
+          thread.updatedAt = new Date().toISOString();
+          thread.lastRepliedCustomerMsgId = messageId;
 
-          if (matchedPage.pageAccessToken) {
-            fetch(
-              `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(
-                matchedPage.pageAccessToken
-              )}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  recipient: { id: senderPsid },
-                  message: { text: replyText },
-                }),
-              }
-            ).catch(() => {});
+          if (!thread.aiPaused && matchedPage.autoReplyEnabled !== false) {
+            const { replyText, updatedExtracted } = await runFacebookMessengerAiTurn(
+              thread,
+              store.fbBotSettings
+            );
+            thread.extracted = updatedExtracted;
+            thread.messages.push({
+              id: `fbm-${Date.now()}-aireply`,
+              sender: "ai",
+              senderName: store.fbBotSettings.botName,
+              text: replyText,
+              timestamp: new Date().toISOString(),
+            });
+
+            if (matchedPage.pageAccessToken) {
+              await fetch(
+                `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(
+                  matchedPage.pageAccessToken
+                )}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    recipient: { id: senderPsid },
+                    message: { text: replyText },
+                  }),
+                }
+              ).catch(() => {});
+            }
           }
-        }
 
-        if (store.fbBotSettings?.autoSyncToGoogleSheet) {
-          await syncFbThreadToSheetAndOptionallyJobber(store, thread, false);
+          if (store.fbBotSettings?.autoSyncToGoogleSheet) {
+            await syncFbThreadToSheetAndOptionallyJobber(store, thread, false);
+          }
+        } finally {
+          fbInFlightPsids.delete(senderPsid);
         }
       }
     }
@@ -10067,6 +10082,166 @@ app.post("/api/facebook/webhook", async (req, res) => {
     return res.status(200).send("EVENT_RECEIVED");
   }
 });
+
+// 24/7 Server-Side Background Monitor for All 3 Facebook Pages (Runs even when owner's app/computer is closed)
+async function runFacebook24x7BackgroundMonitor() {
+  try {
+    const store = loadStore("tidyups");
+    ensureFbStoreInitialized(store);
+    let storeModified = false;
+
+    for (const pg of store.fbPages || []) {
+      const token = String(pg.pageAccessToken || "").trim();
+      const pageId = String(pg.pageId || "").trim();
+      if (!token || !pageId || pg.autoReplyEnabled === false) continue;
+
+      const url = `https://graph.facebook.com/v19.0/${encodeURIComponent(
+        pageId
+      )}/conversations?fields=participants,updated_time,messages.limit(5){message,from,created_time}&limit=10&access_token=${encodeURIComponent(
+        token
+      )}`;
+      const fbRes = await fetch(url);
+      const fbData: any = await fbRes.json();
+      if (!Array.isArray(fbData?.data)) continue;
+
+      for (const convo of fbData.data) {
+        const participants = Array.isArray(convo?.participants?.data)
+          ? convo.participants.data
+          : [];
+        const customerParticipant =
+          participants.find((p: any) => String(p.id) !== pageId) || participants[0];
+        if (!customerParticipant?.id) continue;
+
+        const psid = String(customerParticipant.id);
+        if (fbInFlightPsids.has(psid)) continue;
+
+        const rawMessages = Array.isArray(convo?.messages?.data)
+          ? [...convo.messages.data].reverse()
+          : [];
+        const formattedMessages = rawMessages
+          .filter((m: any) => m && String(m.message || "").trim())
+          .map((m: any) => {
+            const isFromPage = String(m.from?.id || "") === pageId;
+            return {
+              id: String(m.id || `fbm-${Date.now()}`),
+              sender: isFromPage ? "owner" : "customer",
+              senderName: isFromPage ? pg.pageName : String(customerParticipant.name || "FB Customer"),
+              text: String(m.message || "").trim(),
+              timestamp: m.created_time || convo.updated_time || new Date().toISOString(),
+            };
+          });
+
+        if (formattedMessages.length === 0) continue;
+        const latestMsg = formattedMessages[formattedMessages.length - 1];
+        const latestMsgTimeMs = new Date(latestMsg.timestamp).getTime() || 0;
+
+        // Only auto-reply to brand-new incoming customer messages that arrived after server boot
+        if (
+          latestMsg.sender === "customer" &&
+          latestMsgTimeMs >= FB_SERVER_BOOT_MS - 30000
+        ) {
+          let thread = store.fbMessengerThreads.find((t: any) => String(t.psid) === psid);
+          if (thread?.aiPaused) continue;
+          if (thread?.lastRepliedCustomerMsgId === latestMsg.id) continue;
+          if (thread?.messages?.some((m: any) => m.id === latestMsg.id && m.sender !== "customer")) {
+            continue;
+          }
+
+          fbInFlightPsids.add(psid);
+          try {
+            const customerName = String(
+              customerParticipant.name || `FB Customer (${psid.slice(-4)})`
+            );
+            if (!thread) {
+              thread = {
+                id: `fb-thread-${psid}`,
+                pageSlotId: pg.id || "page_1",
+                pageName: pg.pageName,
+                psid,
+                customerName,
+                adSourceLabel: pg.adCampaignLabel || "Facebook Messenger",
+                aiPaused: false,
+                status: "COLLECTING_INFO",
+                extracted: {
+                  customerName,
+                  phone: "",
+                  email: "",
+                  serviceType: "",
+                  bedrooms: "",
+                  bathrooms: "",
+                  preferredDate: "",
+                  timeWindow: "",
+                  address: "",
+                  addons: [],
+                  estimatedHours: 3.5,
+                  estimatedCleaners: 2,
+                  estimatedHourlyRate: 105,
+                  estimatedTotal: 427.5,
+                  depositRequired: 75,
+                  specificNotes: "",
+                },
+                messages: formattedMessages,
+                updatedAt: new Date().toISOString(),
+                createdAt: new Date().toISOString(),
+              };
+              store.fbMessengerThreads.unshift(thread);
+            } else {
+              if (!thread.messages.some((m: any) => m.id === latestMsg.id)) {
+                thread.messages.push(latestMsg);
+              }
+              thread.updatedAt = new Date().toISOString();
+            }
+
+            thread.lastRepliedCustomerMsgId = latestMsg.id;
+
+            const { replyText, updatedExtracted } = await runFacebookMessengerAiTurn(
+              thread,
+              store.fbBotSettings
+            );
+            thread.extracted = updatedExtracted;
+            thread.messages.push({
+              id: `fbm-${Date.now()}-aireply`,
+              sender: "ai",
+              senderName: store.fbBotSettings.botName,
+              text: replyText,
+              timestamp: new Date().toISOString(),
+            });
+
+            await fetch(
+              `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(
+                token
+              )}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  recipient: { id: psid },
+                  message: { text: replyText },
+                }),
+              }
+            ).catch(() => {});
+
+            if (store.fbBotSettings?.autoSyncToGoogleSheet) {
+              await syncFbThreadToSheetAndOptionallyJobber(store, thread, false);
+            }
+            storeModified = true;
+          } finally {
+            fbInFlightPsids.delete(psid);
+          }
+        }
+      }
+    }
+
+    if (storeModified) {
+      store.lastSavedAt = new Date().toISOString();
+      saveStore(store, "tidyups");
+    }
+  } catch {
+    // Silent background check
+  }
+}
+
+setInterval(runFacebook24x7BackgroundMonitor, 45000);
 
 // POST /api/facebook/lead-intake (External Agent / ManyChat / Zapier / Make Webhook)
 app.post("/api/facebook/lead-intake", async (req, res) => {
