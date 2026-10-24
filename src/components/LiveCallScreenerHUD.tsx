@@ -35,6 +35,8 @@ export interface LiveScreenedCallItem {
   lastQuoteNumber?: string;
   lastQuoteTotal?: number;
   isRepeatClient?: boolean;
+  transcriptText?: string;
+  summary?: string;
   countryCode: string;
   status: 'ALLOWED' | 'BLOCKED';
   liveState?: 'RINGING' | 'ANSWERED_IN_APP' | 'BLOCKED' | 'TERMINATED';
@@ -152,14 +154,21 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
       serviceRequested: 'Residential Standard Cleaning',
       source: `${call.campaignLabel} (${call.originalDialedNumber})`,
       campaignName: `${call.originalDialedNumber} — ${call.campaignLabel}`,
+      callTranscript: call.transcriptText || '',
+      callSummary: call.summary || '',
       status: 'New',
-      notes: `Inbound call dialed ${call.originalDialedNumber} (${call.campaignLabel}) • Screened by Twilio ${call.shieldNumber} • Routed to ${call.receivingLineLabel}`,
+      notes: `Inbound call dialed ${call.originalDialedNumber} (${call.campaignLabel})${
+        call.transcriptText ? `\n\nCall Transcript:\n${call.transcriptText}` : ''
+      }`,
     };
     onStartQuoteWithCaller(prefillLead);
   };
 
   const formatElapsed = (iso: string) => {
     const diffSec = Math.max(0, Math.floor((nowTick - new Date(iso).getTime()) / 1000));
+    if (diffSec >= 3600) {
+      return `${Math.floor(diffSec / 60)}m ago`;
+    }
     const mins = String(Math.floor(diffSec / 60)).padStart(2, '0');
     const secs = String(diffSec % 60).padStart(2, '0');
     return `${mins}:${secs}`;
@@ -178,7 +187,9 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
         >
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="font-bold tracking-tight text-white">LIVE SCREENER</span>
-          <span className="font-mono text-emerald-400 tabular-nums">(587) 900-7223</span>
+          <span className="font-mono text-emerald-400 tabular-nums">
+            {recentCalls[0]?.callerNumber || '(587) 900-7223'}
+          </span>
           {isDrawerOpen ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
         </button>
 
@@ -244,7 +255,7 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
                 <>
                   <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
                   <span className="text-[11px] font-black uppercase tracking-wider text-emerald-300">
-                    ACTIVE CALL IN CONSOLE
+                    LIVE CALL CAPTURED IN CONSOLE
                   </span>
                 </>
               ) : (
@@ -311,6 +322,16 @@ export const LiveCallScreenerHUD: React.FC<LiveCallScreenerHUDProps> = ({
                     Last: ${activeCall.lastQuoteTotal.toFixed(2)}
                   </span>
                 )}
+              </div>
+            )}
+
+            {/* Live Transcript Preview if Captured */}
+            {activeCall.transcriptText && (
+              <div className="bg-slate-950/90 border border-white/10 rounded-lg p-2.5 text-[11px] text-slate-300 max-h-24 overflow-y-auto font-mono leading-relaxed">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
+                  LIVE CALL TRANSCRIPT CAPTURED:
+                </div>
+                {activeCall.transcriptText}
               </div>
             )}
 

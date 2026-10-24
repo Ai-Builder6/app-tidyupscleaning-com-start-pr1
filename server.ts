@@ -10084,6 +10084,66 @@ async function processQuoCallEvent(
     store.quoCallLogs = store.quoCallLogs.slice(0, 300);
   }
 
+  // 4. ALSO PUSH INBOUND CALL DIRECTLY INTO LIVE CALL SCREENER HUD & RECENT INBOUND CALLS
+  if (direction === "inbound" && callerDigits && !TIDYUPS_OWN_PHONE_DIGITS.has(callerDigits)) {
+    const linePhoneMatch = String(lineName || "").match(/\+?1?\s*\(?(\d{3})\)?[-.\s]*(\d{3})[-.\s]*(\d{4})/);
+    const dialedFromLine = linePhoneMatch ? `+1 (${linePhoneMatch[1]}) ${linePhoneMatch[2]}-${linePhoneMatch[3]}` : "+1 (587) 900-7223";
+    const campaignClean = String(lineName || "Tidyups Cleaning - GMB").replace(/\s*\(\+?1?.*?\)/, "").trim();
+    const areaCode3 = callerDigits.length === 11 && callerDigits.startsWith("1") ? callerDigits.slice(1, 4) : callerDigits.slice(0, 3);
+
+    const hudRecord = {
+      id: `quo-hud-${callId}`,
+      callSid: callId,
+      timestamp: timestamp || new Date().toISOString(),
+      callerNumber: cleanCallerPhone,
+      areaCode: areaCode3,
+      dialedNumber: dialedFromLine,
+      shieldNumber: "+1 (825) 533-4317",
+      originalDialedNumber: dialedFromLine,
+      campaignLabel: campaignClean || "Tidyups Cleaning GMB Direct",
+      destinationNumber: dialedFromLine,
+      receivingLineLabel: lineName || "+1 (587) 900-7223 (Quo GMB)",
+      callerName:
+        effectiveCallerName && effectiveCallerName !== "0 Lead(s)" && effectiveCallerName !== cleanCallerPhone
+          ? effectiveCallerName
+          : "Inbound Caller",
+      matchedAddress: analysis.address || matchedJob?.serviceAddress || matchedClientRecord?.address || "",
+      matchedEmail: matchedClientRecord?.email || "",
+      lastQuoteNumber: matchedQuote?.quoteNumber || "",
+      lastQuoteTotal: typeof matchedQuote?.total === "number" ? matchedQuote.total : undefined,
+      isRepeatClient: Boolean(matchedClientRecord || matchedQuote || matchedJob),
+      transcriptText: transcriptText || "",
+      summary: summary || "",
+      countryCode: "+1",
+      status: isAutoSolicitorOrSpam ? "BLOCKED" : "ALLOWED",
+      liveState: eventType === "call.ringing" ? "RINGING" : isAutoSolicitorOrSpam ? "BLOCKED" : "ANSWERED_IN_APP",
+      dismissedInHud: false,
+      reason: isAutoSolicitorOrSpam
+        ? callLogEntry.blockedReason || "Blocked by Spam Shield"
+        : `Dialed ${dialedFromLine} (${campaignClean})`,
+    };
+
+    for (const pid of ["tidyups", "dispatchgeeni"]) {
+      const activeList = getActiveScreenerCalls(pid);
+      const exHudIdx = activeList.findIndex((c: any) => c.callSid === callId || c.id === hudRecord.id || (normalizePhoneDigits(c.callerNumber) === callerDigits && Math.abs(new Date(c.timestamp).getTime() - new Date(hudRecord.timestamp).getTime()) < 120000));
+      if (exHudIdx >= 0) {
+        activeList[exHudIdx] = { ...activeList[exHudIdx], ...hudRecord, dismissedInHud: activeList[exHudIdx].dismissedInHud };
+      } else {
+        activeList.unshift(hudRecord);
+      }
+      if (activeList.length > 25) activeList.length = 25;
+    }
+
+    if (!Array.isArray(store.recentInboundCalls)) store.recentInboundCalls = [];
+    const exRecIdx = store.recentInboundCalls.findIndex((c: any) => c.callSid === callId || c.id === hudRecord.id || (normalizePhoneDigits(c.callerNumber) === callerDigits && Math.abs(new Date(c.timestamp).getTime() - new Date(hudRecord.timestamp).getTime()) < 120000));
+    if (exRecIdx >= 0) {
+      store.recentInboundCalls[exRecIdx] = { ...store.recentInboundCalls[exRecIdx], ...hudRecord };
+    } else {
+      store.recentInboundCalls.unshift(hudRecord);
+    }
+    if (store.recentInboundCalls.length > 40) store.recentInboundCalls = store.recentInboundCalls.slice(0, 40);
+  }
+
   if (!options?.skipSave) {
     saveStore(store);
   }
@@ -11945,24 +12005,113 @@ const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) =
   return res.send(twiml);
 };
 
+// Track dismissed callSids/ids so dismissed HUD banners stay dismissed across polls
+const dismissedHudCallIds = new Set<string>();
+let lastRemoteCallSyncMs = 0;
+
+function quoLogToScreenerRecord(q: any, store: any): any {
+  const linePhoneMatch = String(q.lineName || "").match(/\+?1?\s*\(?(\d{3})\)?[-.\s]*(\d{3})[-.\s]*(\d{4})/);
+  const dialedFromLine = linePhoneMatch
+    ? `+1 (${linePhoneMatch[1]}) ${linePhoneMatch[2]}-${linePhoneMatch[3]}`
+    : "+1 (587) 900-7223";
+  const campaignClean = String(q.lineName || "Tidyups Cleaning - GMB").replace(/\s*\(\+?1?.*?\)/, "").trim();
+  const callerDigits = normalizePhoneDigits(q.callerPhone || "");
+  const areaCode3 =
+    callerDigits.length === 11 && callerDigits.startsWith("1")
+      ? callerDigits.slice(1, 4)
+      : callerDigits.slice(0, 3);
+  const crm = findCallerCrmMatch(q.callerPhone || "", store);
+  const cleanName =
+    crm.matchedClientName ||
+    (q.callerName && q.callerName !== "0 Lead(s)" && q.callerName !== q.callerPhone ? q.callerName : "Inbound Caller");
+
+  return {
+    id: q.id || q.callId,
+    callSid: q.callId || q.id,
+    timestamp: q.timestamp || q.createdAt || new Date().toISOString(),
+    callerNumber: q.callerPhone || "Unknown",
+    areaCode: areaCode3,
+    dialedNumber: dialedFromLine,
+    shieldNumber: "+1 (825) 533-4317",
+    originalDialedNumber: dialedFromLine,
+    campaignLabel: campaignClean || "Tidyups Cleaning GMB Direct",
+    destinationNumber: dialedFromLine,
+    receivingLineLabel: q.lineName || "+1 (587) 900-7223 (Quo GMB)",
+    callerName: cleanName,
+    matchedAddress: crm.matchedAddress || q.extractedAddress || "",
+    matchedEmail: crm.matchedEmail || "",
+    lastQuoteNumber: crm.lastQuoteNumber || "",
+    lastQuoteTotal: crm.lastQuoteTotal,
+    isRepeatClient: Boolean(crm.isRepeatClient),
+    transcriptText: q.transcriptText || "",
+    summary: q.summary || "",
+    countryCode: "+1",
+    status: q.isBlocked || q.status === "SOLICITOR_BLOCKED" ? "BLOCKED" : "ALLOWED",
+    liveState:
+      q.eventType === "call.ringing"
+        ? "RINGING"
+        : q.isBlocked || q.status === "SOLICITOR_BLOCKED"
+        ? "BLOCKED"
+        : "ANSWERED_IN_APP",
+    dismissedInHud: dismissedHudCallIds.has(q.id) || dismissedHudCallIds.has(q.callId),
+    reason:
+      q.isBlocked || q.status === "SOLICITOR_BLOCKED"
+        ? q.blockedReason || "Blocked by Spam Shield"
+        : `Dialed ${dialedFromLine} (${campaignClean})`,
+  };
+}
+
 // GET live incoming & recent screened calls with Original Dialed-Line Attribution
-app.get("/api/twilio/live-calls", (req, res) => {
+app.get("/api/twilio/live-calls", async (req, res) => {
   const projectId = getProjectId(req);
   const store = loadStore(projectId);
   const activeList = getActiveScreenerCalls(projectId);
   const nowMs = Date.now();
 
-  // Calls within the last 75 seconds that haven't been dismissed are shown in the floating HUD
-  const liveHudCalls = activeList.filter((c) => {
-    if (c.dismissedInHud) return false;
-    const ageMs = nowMs - new Date(c.timestamp).getTime();
-    return ageMs <= 75000;
-  });
+  // Every 4 seconds, pull any brand-new Quo/Twilio calls that arrived on app.tidyupscleaning.com so preview & live stay 100% synced
+  if (nowMs - lastRemoteCallSyncMs > 4000 && store) {
+    lastRemoteCallSyncMs = nowMs;
+    try {
+      const remRes = await fetch(`https://app.tidyupscleaning.com/api/store?project=${projectId}`);
+      if (remRes.ok) {
+        const remData = await remRes.json();
+        let storeUpdated = false;
+        if (Array.isArray(remData.quoCallLogs)) {
+          if (!Array.isArray(store.quoCallLogs)) store.quoCallLogs = [];
+          for (const rq of remData.quoCallLogs.slice(0, 10)) {
+            const exists = store.quoCallLogs.some((lq: any) => (lq.callId || lq.id) === (rq.callId || rq.id));
+            if (!exists) {
+              store.quoCallLogs.unshift(rq);
+              storeUpdated = true;
+            }
+          }
+        }
+        if (Array.isArray(remData.recentInboundCalls)) {
+          if (!Array.isArray(store.recentInboundCalls)) store.recentInboundCalls = [];
+          for (const rc of remData.recentInboundCalls.slice(0, 10)) {
+            const exists = store.recentInboundCalls.some((lc: any) => (lc.callSid || lc.id) === (rc.callSid || rc.id));
+            if (!exists) {
+              store.recentInboundCalls.unshift(rc);
+              storeUpdated = true;
+            }
+          }
+        }
+        if (storeUpdated) {
+          saveStore(store, projectId);
+        }
+      }
+    } catch {
+      // ignore remote sync error
+    }
+  }
 
-  // Merge active in-memory calls with store.recentInboundCalls and enrich any legacy entries with attribution
+  // Merge active in-memory calls, store.recentInboundCalls, and store.quoCallLogs (deduped by caller + 2-minute window)
   const rawRecent = Array.isArray(store?.recentInboundCalls) ? store.recentInboundCalls : [];
   const enrichedRecent = rawRecent.map((c: any) => {
-    if (c.originalDialedNumber && c.campaignLabel) return c;
+    const isDismissed = Boolean(c.dismissedInHud || dismissedHudCallIds.has(c.id) || dismissedHudCallIds.has(c.callSid));
+    if (c.originalDialedNumber && c.campaignLabel) {
+      return { ...c, dismissedInHud: isDismissed };
+    }
     const attr = resolveOriginalDialedLineInfo(c.dialedNumber || "+18255334317", c.forwardedFrom);
     const crm = findCallerCrmMatch(c.callerNumber || "", store);
     const dest = c.destinationNumber || store?.spamShieldConfig?.forwardDestinationNumber || "+15875708005";
@@ -11978,13 +12127,44 @@ app.get("/api/twilio/live-calls", (req, res) => {
       lastQuoteNumber: crm.lastQuoteNumber || c.lastQuoteNumber || "",
       lastQuoteTotal: crm.lastQuoteTotal ?? c.lastQuoteTotal,
       isRepeatClient: Boolean(crm.isRepeatClient || c.isRepeatClient),
+      dismissedInHud: isDismissed,
     };
+  });
+
+  // Also include recent inbound Quo calls (such as 780-722-3960 on 587-900-7223)
+  const quoInbound = (Array.isArray(store?.quoCallLogs) ? store.quoCallLogs : [])
+    .filter((q: any) => q.direction !== "outbound" && q.eventType !== "message.delivered")
+    .slice(0, 20)
+    .map((q: any) => quoLogToScreenerRecord(q, store));
+
+  const combinedMap = new Map<string, any>();
+  for (const item of [...activeList, ...enrichedRecent, ...quoInbound]) {
+    const digits = normalizePhoneDigits(item.callerNumber || "");
+    const timeBucket = Math.floor(new Date(item.timestamp || Date.now()).getTime() / 90000);
+    const dedupeKey = item.isSimulated ? item.id : `${digits}-${timeBucket}`;
+    const existing = combinedMap.get(dedupeKey);
+    if (!existing) {
+      combinedMap.set(dedupeKey, item);
+    } else if (!existing.transcriptText && item.transcriptText) {
+      combinedMap.set(dedupeKey, { ...existing, ...item, dismissedInHud: existing.dismissedInHud || item.dismissedInHud });
+    }
+  }
+
+  const combinedRecent = Array.from(combinedMap.values()).sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  // Show the most recent non-dismissed call from the last 30 minutes in the floating HUD so Richard never misses it
+  const liveHudCalls = combinedRecent.filter((c) => {
+    if (c.dismissedInHud || dismissedHudCallIds.has(c.id) || dismissedHudCallIds.has(c.callSid)) return false;
+    const ageMs = nowMs - new Date(c.timestamp).getTime();
+    return ageMs <= 30 * 60 * 1000;
   });
 
   res.json({
     success: true,
-    liveHudCalls,
-    recentCalls: enrichedRecent.slice(0, 35),
+    liveHudCalls: liveHudCalls.slice(0, 2),
+    recentCalls: combinedRecent.slice(0, 35),
   });
 });
 
@@ -12080,7 +12260,12 @@ app.post("/api/twilio/live-calls/:callSid/action", async (req, res) => {
   const targetCall = activeList.find((c) => c.callSid === callSid || c.id === callSid);
 
   if (action === "dismiss") {
-    if (targetCall) targetCall.dismissedInHud = true;
+    dismissedHudCallIds.add(callSid);
+    if (targetCall) {
+      targetCall.dismissedInHud = true;
+      if (targetCall.id) dismissedHudCallIds.add(targetCall.id);
+      if (targetCall.callSid) dismissedHudCallIds.add(targetCall.callSid);
+    }
     return res.json({ success: true, action: "dismiss" });
   }
 
