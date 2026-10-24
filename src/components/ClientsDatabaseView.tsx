@@ -118,9 +118,32 @@ export const ClientsDatabaseView: React.FC<ClientsDatabaseViewProps> = ({
     }
   };
 
+  // Deduplicate clients by normalized name + phone so synced records never show 3 identical cards
+  const uniqueClients = useMemo(() => {
+    const seen = new Map<string, ClientRecord>();
+    for (const c of clients) {
+      if (!c) continue;
+      const normName = String(c.name || '').trim().toLowerCase();
+      const normPhone = String(c.phone || '').replace(/\D/g, '').slice(-10);
+      const key = `${normName}|${normPhone || c.id}`;
+      if (!seen.has(key)) {
+        seen.set(key, c);
+      } else {
+        const existing = seen.get(key)!;
+        seen.set(key, {
+          ...existing,
+          ...c,
+          isJobberLinked: existing.isJobberLinked || c.isJobberLinked,
+          tags: Array.from(new Set([...(existing.tags || []), ...(c.tags || [])])),
+        });
+      }
+    }
+    return Array.from(seen.values());
+  }, [clients]);
+
   // Filter clients
   const filteredClients = useMemo(() => {
-    return clients.filter((c) => {
+    return uniqueClients.filter((c) => {
       // Text query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -153,20 +176,20 @@ export const ClientsDatabaseView: React.FC<ClientsDatabaseViewProps> = ({
 
       return true;
     });
-  }, [clients, searchQuery, verdictFilter, fromDate, toDate]);
+  }, [uniqueClients, searchQuery, verdictFilter, fromDate, toDate]);
 
   // Counts
   const counts = useMemo(() => {
     return {
-      total: clients.length,
-      goodLead: clients.filter((c) => c.verdict === 'Good lead').length,
-      badLead: clients.filter((c) => c.verdict === 'Bad lead').length,
-      spam: clients.filter((c) => c.verdict === 'Spam').length,
-      garbage: clients.filter((c) => c.verdict === 'Garbage').length,
-      client: clients.filter((c) => c.verdict === 'Client').length,
-      jobberLinked: clients.filter((c) => c.isJobberLinked).length,
+      total: uniqueClients.length,
+      goodLead: uniqueClients.filter((c) => c.verdict === 'Good lead').length,
+      badLead: uniqueClients.filter((c) => c.verdict === 'Bad lead').length,
+      spam: uniqueClients.filter((c) => c.verdict === 'Spam').length,
+      garbage: uniqueClients.filter((c) => c.verdict === 'Garbage').length,
+      client: uniqueClients.filter((c) => c.verdict === 'Client').length,
+      jobberLinked: uniqueClients.filter((c) => c.isJobberLinked).length,
     };
-  }, [clients]);
+  }, [uniqueClients]);
 
   // Quick verdict update on card
   const handleQuickVerdictChange = (client: ClientRecord, newVerdict: ClientVerdict) => {
