@@ -210,6 +210,25 @@ if (typeof window !== 'undefined') {
       }
     }
   });
+  // Automatically check for and apply new PWA updates whenever the downloaded app is opened or focused
+  if ('serviceWorker' in navigator) {
+    const checkForPwaUpdate = () => {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((regs) => {
+          for (const reg of regs) {
+            reg.update().catch(() => {});
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('focus', checkForPwaUpdate);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        checkForPwaUpdate();
+      }
+    });
+  }
 }
 
 createRoot(document.getElementById('root')!).render(

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   MessageSquare,
   Bot,
@@ -27,6 +27,9 @@ import {
   ArrowLeft,
   Zap,
   Edit3,
+  Mic,
+  MicOff,
+  X,
 } from 'lucide-react';
 
 export interface FbPageConfig {
@@ -153,8 +156,8 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
   const [threads, setThreads] = useState<FbMessengerThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string>('');
   const [pageFilter, setPageFilter] = useState<'ALL' | 'page_1' | 'page_2' | 'page_3'>('ALL');
-  const [rightPanelTab, setRightPanelTab] = useState<'CHECKLIST' | 'TWEAK_AI' | 'WEBHOOK_SETUP'>('CHECKLIST');
-  const [composerMode, setComposerMode] = useState<'SIMULATE_CUSTOMER' | 'OWNER_REPLY'>('SIMULATE_CUSTOMER');
+  const [popupModal, setPopupModal] = useState<'NONE' | 'TWEAK_AI' | 'WEBHOOK_SETUP'>('NONE');
+  const [composerMode, setComposerMode] = useState<'SIMULATE_CUSTOMER' | 'OWNER_REPLY'>('OWNER_REPLY');
   const [messageInput, setMessageInput] = useState<string>('');
   const [isSending, setIsSending] = useState<boolean>(false);
   const [isSavingConfig, setIsSavingConfig] = useState<boolean>(false);
@@ -166,6 +169,13 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
   const [importCustomerMsg, setImportCustomerMsg] = useState<string>('');
   const [statusBanner, setStatusBanner] = useState<{ tone: 'success' | 'info' | 'warning'; text: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Microphone Voice Dictation State (for both Lead Info & Sync and Messenger Chat Box)
+  const [voiceMode, setVoiceMode] = useState<'NONE' | 'LEAD_INFO' | 'CHAT_MESSAGE'>('NONE');
+  const [voiceTranscript, setVoiceTranscript] = useState<string>('');
+  const [isParsingVoice, setIsParsingVoice] = useState<boolean>(false);
+  const recognitionRef = useRef<any>(null);
+  const voiceAccRef = useRef<string>('');
 
   const webhookUrl = 'https://app.tidyupscleaning.com/api/facebook/webhook';
   const externalIntakeUrl = 'https://app.tidyupscleaning.com/api/facebook/lead-intake';
@@ -205,6 +215,135 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
     navigator.clipboard.writeText(val);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const applySpokenLeadInfoToThread = useCallback(
+    async (spokenText: string) => {
+      const clean = spokenText.trim();
+      if (!clean || !activeThread) return;
+      setIsParsingVoice(true);
+      try {
+        const res = await fetch(
+          `/api/facebook/threads/${activeThread.id}/voice-intake?project=${projectId}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcript: clean }),
+          }
+        );
+        const data = await res.json();
+        if (data.success && data.thread) {
+          setThreads((prev) => prev.map((t) => (t.id === data.thread.id ? data.thread : t)));
+          setStatusBanner({
+            tone: 'success',
+            text: `🎙️ Filled Lead Info from your voice: "${clean}"`,
+          });
+        }
+      } catch (err: any) {
+        setStatusBanner({
+          tone: 'warning',
+          text: `Voice parse note: ${err?.message || 'Could not parse voice'}`,
+        });
+      } finally {
+        setIsParsingVoice(false);
+      }
+    },
+    [activeThread, projectId]
+  );
+
+  const stopVoiceMic = useCallback(
+    async (shouldApplyLeadInfo = true) => {
+      const currentMode = voiceMode;
+      const finalSpoken = voiceAccRef.current.trim();
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.onend = null;
+          recognitionRef.current.stop();
+        } catch {}
+        recognitionRef.current = null;
+      }
+      setVoiceMode('NONE');
+      if (currentMode === 'LEAD_INFO' && shouldApplyLeadInfo && finalSpoken) {
+        await applySpokenLeadInfoToThread(finalSpoken);
+      }
+    },
+    [voiceMode, applySpokenLeadInfoToThread]
+  );
+
+  const startOrToggleVoiceMic = (targetMode: 'LEAD_INFO' | 'CHAT_MESSAGE') => {
+    if (voiceMode === targetMode) {
+      stopVoiceMic(true);
+      return;
+    }
+    if (voiceMode !== 'NONE') {
+      stopVoiceMic(false);
+    }
+
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setStatusBanner({
+        tone: 'warning',
+        text: 'Microphone speech recognition is supported in Chrome, Safari, and Edge.',
+      });
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognitionCtor();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+      voiceAccRef.current = targetMode === 'CHAT_MESSAGE' ? messageInput : '';
+      setVoiceTranscript('');
+      setVoiceMode(targetMode);
+
+      if (targetMode === 'CHAT_MESSAGE') {
+        setComposerMode('OWNER_REPLY');
+      }
+
+      recognition.onresult = (event: any) => {
+        let finalChunk = '';
+        let interimChunk = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const piece = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalChunk += piece + ' ';
+          } else {
+            interimChunk += piece;
+          }
+        }
+        if (finalChunk) {
+          voiceAccRef.current = `${voiceAccRef.current} ${finalChunk}`.trim();
+        }
+        const combined = `${voiceAccRef.current} ${interimChunk}`.trim();
+        setVoiceTranscript(combined);
+        if (targetMode === 'CHAT_MESSAGE') {
+          setMessageInput(combined);
+        }
+      };
+
+      recognition.onerror = () => {
+        setVoiceMode('NONE');
+      };
+
+      recognition.onend = () => {
+        const spoken = voiceAccRef.current.trim();
+        setVoiceMode('NONE');
+        if (targetMode === 'LEAD_INFO' && spoken) {
+          applySpokenLeadInfoToThread(spoken);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err: any) {
+      setVoiceMode('NONE');
+      setStatusBanner({
+        tone: 'warning',
+        text: `Could not start microphone: ${err?.message || 'Check mic permission'}`,
+      });
+    }
   };
 
   const handleSaveConfig = async (updatedPages = pages, updatedBot = botSettings) => {
@@ -294,7 +433,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
       } else {
         setStatusBanner({
           tone: 'info',
-          text: `Checked all 3 Facebook Pages: ${summaryText || 'All new customer messages arrive automatically via live webhook. To pull older pre-webhook inbox history via Graph API, enable pages_read_engagement on your Page tokens in Meta or use "Paste Existing FB Message" below.'}`,
+          text: `Checked all 3 Facebook Pages: ${summaryText || 'All new customer messages arrive automatically via live webhook.'}`,
         });
       }
     } catch (err: any) {
@@ -328,6 +467,9 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
 
   const handleSendMessage = async (e?: React.FormEvent, customText?: string, forceRole?: 'customer' | 'owner') => {
     if (e) e.preventDefault();
+    if (voiceMode === 'CHAT_MESSAGE') {
+      stopVoiceMic(false);
+    }
     const textToSend = (customText ?? messageInput).trim();
     if (!textToSend || !activeThread || isSending) return;
 
@@ -385,19 +527,39 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
     }
   };
 
-  const handleToggleThreadAi = async (thread: FbMessengerThread) => {
+  const handleToggleThreadAi = async (
+    thread: FbMessengerThread,
+    explicitPaused?: boolean,
+    triggerReplyNow = false
+  ) => {
+    const nextPaused = typeof explicitPaused === 'boolean' ? explicitPaused : !thread.aiPaused;
+    setIsSending(true);
     try {
       const res = await fetch(`/api/facebook/threads/${thread.id}/toggle-ai?project=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aiPaused: !thread.aiPaused }),
+        body: JSON.stringify({
+          aiPaused: nextPaused,
+          triggerReplyNow,
+        }),
       });
       const data = await res.json();
       if (data.success && data.thread) {
         setThreads((prev) => prev.map((t) => (t.id === data.thread.id ? data.thread : t)));
+        if (data.leads && onLeadsUpdated) onLeadsUpdated(data.leads);
+        if (data.quotes && onQuotesUpdated) onQuotesUpdated(data.quotes);
+        if (data.clients && onClientsUpdated) onClientsUpdated(data.clients);
+        if (data.statusNotice) {
+          setStatusBanner({
+            tone: nextPaused ? 'info' : 'success',
+            text: data.statusNotice,
+          });
+        }
       }
     } catch {
       // ignore
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -540,54 +702,49 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
           </div>
         </div>
 
-        {/* Right Quick Action Pills */}
+        {/* Right Quick Action Pills + Subtle Little Links for Tweak AI & Page Setup */}
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={handlePullExistingInbox}
             disabled={isPullingExisting}
-            className="px-3 py-1.5 rounded-xl bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-400/40 text-indigo-200 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+            className="px-2.5 py-1.5 rounded-xl bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-400/40 text-indigo-200 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isPullingExisting ? 'animate-spin' : ''}`} />
-            <span>{isPullingExisting ? 'Checking 3 Pages...' : 'Pull Existing FB Inbox'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setRightPanelTab('TWEAK_AI')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border transition-all cursor-pointer ${
-              rightPanelTab === 'TWEAK_AI'
-                ? 'bg-pink-600 text-white border-pink-400 shadow-lg'
-                : 'bg-slate-900 hover:bg-slate-800 text-pink-300 border-pink-500/40'
-            }`}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>AI Intake &amp; SMS Alerts</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setRightPanelTab('WEBHOOK_SETUP')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border transition-all cursor-pointer ${
-              rightPanelTab === 'WEBHOOK_SETUP'
-                ? 'bg-blue-600 text-white border-blue-400 shadow-lg'
-                : 'bg-slate-900 hover:bg-slate-800 text-blue-300 border-blue-500/40'
-            }`}
-          >
-            <Key className="w-3.5 h-3.5" />
-            <span>3 FB Pages &amp; Webhook Setup</span>
+            <span>{isPullingExisting ? 'Checking 3 Pages...' : 'Sync FB Inbox'}</span>
           </button>
 
           {onNavigateToMasterHub && (
             <button
               type="button"
               onClick={onNavigateToMasterHub}
-              className="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+              className="px-2.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>View FB Leads in Master Hub</span>
+              <span>FB Leads Sheet</span>
             </button>
           )}
+
+          {/* Small, subtle popup links for Tweak AI Bot & Page Setup */}
+          <button
+            type="button"
+            onClick={() => setPopupModal('TWEAK_AI')}
+            className="px-2 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-white/10 text-[11px] font-semibold text-pink-300 hover:text-pink-200 flex items-center gap-1 cursor-pointer"
+            title="Open AI Bot Instructions & SMS Alert Settings"
+          >
+            <SlidersHorizontal className="w-3 h-3" />
+            <span>Tweak AI &amp; SMS</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPopupModal('WEBHOOK_SETUP')}
+            className="px-2 py-1 rounded-lg bg-transparent hover:bg-white/5 text-[11px] font-medium text-slate-400 hover:text-blue-300 underline underline-offset-2 flex items-center gap-1 cursor-pointer"
+            title="View 3-Page Webhook & Token Setup"
+          >
+            <Key className="w-3 h-3" />
+            <span>Page Setup</span>
+          </button>
         </div>
       </div>
 
@@ -614,11 +771,11 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
       )}
 
       {/* 3 Facebook Pages Status Strip */}
-      <div className="px-4 sm:px-6 py-2.5 bg-[#0A0F1A] border-b border-white/10 grid grid-cols-1 md:grid-cols-3 gap-2.5 shrink-0">
+      <div className="px-4 sm:px-6 py-2 bg-[#0A0F1A] border-b border-white/10 grid grid-cols-1 md:grid-cols-3 gap-2 shrink-0">
         {pages.map((pg, idx) => (
           <div
             key={pg.id}
-            className="p-2.5 rounded-xl bg-slate-900/90 border border-white/10 flex items-center justify-between gap-2"
+            className="px-2.5 py-2 rounded-xl bg-slate-900/90 border border-white/10 flex items-center justify-between gap-2"
           >
             <div className="flex items-center gap-2 min-w-0">
               <span
@@ -634,7 +791,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                 </div>
                 <div className="text-[10px] text-emerald-300 font-mono truncate">
                   {pg.pageAccessToken
-                    ? `🟢 Live Token Connected (ID: ${pg.pageId})`
+                    ? `🟢 Live (ID: ${pg.pageId})`
                     : '🔵 Webhook Ready'}
                 </div>
               </div>
@@ -818,31 +975,6 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                   <strong className="text-purple-300">Page 2 (1-833-TIDYUPS)</strong>, and{' '}
                   <strong className="text-emerald-300">Page 3 (TidyUps Cleaning)</strong>.
                 </p>
-                <div className="p-2.5 rounded-xl bg-slate-900/90 border border-white/10 text-left text-[11px] text-slate-300 space-y-1.5">
-                  <div className="font-black text-amber-300">💡 What about messages already in your FB Inbox?</div>
-                  <p className="text-slate-400 leading-relaxed">
-                    Meta webhooks automatically push every <strong>new message</strong> sent from now on. For older messages that arrived before the bot was connected:
-                  </p>
-                  <div className="flex flex-col gap-1.5 pt-1">
-                    <button
-                      type="button"
-                      onClick={handlePullExistingInbox}
-                      disabled={isPullingExisting}
-                      className="w-full py-1.5 px-2.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/40 border border-indigo-400/40 text-indigo-200 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <RefreshCw className={`w-3 h-3 ${isPullingExisting ? 'animate-spin' : ''}`} />
-                      <span>1. Try Pulling Existing FB Inbox</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowImportExistingModal(true)}
-                      className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-200 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>2. Paste an Existing FB Message</span>
-                    </button>
-                  </div>
-                </div>
               </div>
             ) : (
               filteredThreads.map((thread) => {
@@ -890,7 +1022,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                         </span>
                       ) : thread.aiPaused ? (
                         <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold">
-                          Human Mode
+                          You In Control
                         </span>
                       ) : (
                         <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[10px] font-bold">
@@ -932,14 +1064,14 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
           </div>
         </div>
 
-        {/* CENTER COLUMN (5 cols): Live Messenger Chat + Co-Pilot / Tweak & Intervene */}
+        {/* CENTER COLUMN (5 cols): Live Messenger Chat + Take Over / Give Back to AI + Voice Mic */}
         <div className="lg:col-span-5 border-r border-white/10 bg-[#070B12] flex flex-col min-h-0">
           {activeThread ? (
             <>
-              {/* Thread Header */}
+              {/* Thread Header with Take Over Chat <-> Give Back to AI Bot */}
               <div className="p-3.5 bg-[#0D131F] border-b border-white/10 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-black text-white">
                       {activeThread.extracted.customerName || activeThread.customerName}
                     </span>
@@ -949,33 +1081,48 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
                     {activeThread.aiPaused
-                      ? '👤 You are in control (AI Auto-Reply is paused for this customer)'
-                      : '🤖 AI Bot is actively replying & collecting Service, Beds/Baths, Date & Address'}
+                      ? '👤 You took over this chat (Click "Give Back to AI Bot" anytime so the AI resumes)'
+                      : '🤖 AI Bot is in control — gathering info (No prices shared with client)'}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleThreadAi(activeThread)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 border cursor-pointer transition-all ${
-                      activeThread.aiPaused
-                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
-                        : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30'
-                    }`}
-                  >
-                    {activeThread.aiPaused ? (
-                      <>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {activeThread.aiPaused ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleThreadAi(activeThread, false, false)}
+                        disabled={isSending}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer"
+                      >
                         <PlayCircle className="w-3.5 h-3.5" />
-                        <span>Resume AI Bot</span>
-                      </>
-                    ) : (
-                      <>
-                        <PauseCircle className="w-3.5 h-3.5" />
-                        <span>Take Over Chat</span>
-                      </>
-                    )}
-                  </button>
+                        <span>🤖 Give Back to AI Bot</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleThreadAi(activeThread, false, true)}
+                        disabled={isSending}
+                        className="px-2.5 py-1.5 rounded-xl bg-blue-600/25 hover:bg-blue-600/40 border border-blue-400/40 text-blue-200 text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
+                        title="Hand the chat back to the AI and have the AI immediately send the next reply to the customer"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>Give Back &amp; Reply Now</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setComposerMode('OWNER_REPLY');
+                        handleToggleThreadAi(activeThread, true, false);
+                      }}
+                      disabled={isSending}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <PauseCircle className="w-3.5 h-3.5" />
+                      <span>✋ Take Over Chat</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1029,21 +1176,10 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                 )}
               </div>
 
-              {/* Dual-Mode Composer (Simulate Customer vs. Jump In as Owner) */}
+              {/* Dual-Mode Composer + Live Microphone to Talk on Messenger + Give Back to AI */}
               <form onSubmit={(e) => handleSendMessage(e)} className="p-3 bg-[#0D131F] border-t border-white/10 space-y-2">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-white/10 text-[11px] font-bold">
-                    <button
-                      type="button"
-                      onClick={() => setComposerMode('SIMULATE_CUSTOMER')}
-                      className={`px-2.5 py-1 rounded-lg cursor-pointer ${
-                        composerMode === 'SIMULATE_CUSTOMER'
-                          ? 'bg-blue-600 text-white'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      💬 Add Customer Msg (Triggers AI)
-                    </button>
                     <button
                       type="button"
                       onClick={() => setComposerMode('OWNER_REPLY')}
@@ -1053,23 +1189,87 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                           : 'text-slate-400 hover:text-white'
                       }`}
                     >
-                      ✍️ Jump In &amp; Reply as Owner
+                      ✍️ Reply to Client on Messenger
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setComposerMode('SIMULATE_CUSTOMER')}
+                      className={`px-2.5 py-1 rounded-lg cursor-pointer ${
+                        composerMode === 'SIMULATE_CUSTOMER'
+                          ? 'bg-blue-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      💬 Test Customer Msg
                     </button>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleDraftAiReplyForOwner}
-                    disabled={isSending}
-                    className="px-2.5 py-1 rounded-lg bg-pink-600/20 hover:bg-pink-600/30 border border-pink-500/40 text-pink-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                    title="Let AI draft a response into your box so you can edit it before sending"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>Draft AI Reply to Edit</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {activeThread.aiPaused && (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleThreadAi(activeThread, false, true)}
+                        disabled={isSending}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-400/40 text-emerald-300 text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
+                      >
+                        <PlayCircle className="w-3 h-3" />
+                        <span>Give Back to AI</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleDraftAiReplyForOwner}
+                      disabled={isSending}
+                      className="px-2.5 py-1 rounded-lg bg-pink-600/20 hover:bg-pink-600/30 border border-pink-500/40 text-pink-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      title="Let AI draft a response into your box so you can edit it before sending"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>AI Draft</span>
+                    </button>
+                  </div>
                 </div>
 
+                {voiceMode === 'CHAT_MESSAGE' && (
+                  <div className="px-3 py-1.5 rounded-xl bg-rose-950/80 border border-rose-500/40 text-[11px] text-rose-200 flex items-center justify-between gap-2">
+                    <span className="font-bold animate-pulse">
+                      🎙️ Listening for Messenger reply... Speak now (click Mic again or Send when done)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => stopVoiceMic(false)}
+                      className="px-2 py-0.5 rounded bg-rose-600 text-white font-black text-[10px] cursor-pointer"
+                    >
+                      Stop Mic
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2">
+                  {/* Microphone Button to Talk Directly to Client on Messenger */}
+                  <button
+                    type="button"
+                    onClick={() => startOrToggleVoiceMic('CHAT_MESSAGE')}
+                    className={`px-3 py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 border transition-all cursor-pointer shrink-0 ${
+                      voiceMode === 'CHAT_MESSAGE'
+                        ? 'bg-rose-600 text-white border-rose-400 animate-pulse shadow-lg'
+                        : 'bg-slate-900 hover:bg-slate-800 text-emerald-300 border-emerald-500/40'
+                    }`}
+                    title="Click to use your microphone to talk/dictate your reply to the client on Facebook Messenger"
+                  >
+                    {voiceMode === 'CHAT_MESSAGE' ? (
+                      <>
+                        <MicOff className="w-4 h-4" />
+                        <span className="hidden sm:inline">Stop Mic</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="w-4 h-4" />
+                        <span className="hidden sm:inline">Talk</span>
+                      </>
+                    )}
+                  </button>
+
                   <input
                     type="text"
                     value={messageInput}
@@ -1077,7 +1277,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                     placeholder={
                       composerMode === 'SIMULATE_CUSTOMER'
                         ? 'Paste or type customer message...'
-                        : 'Type your manual reply to send directly to the customer on Facebook Messenger...'
+                        : 'Type or tap 🎙️ Talk to speak your reply to the client on Facebook Messenger...'
                     }
                     className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/15 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-pink-500"
                   />
@@ -1091,7 +1291,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                     }`}
                   >
                     <Send className="w-3.5 h-3.5" />
-                    <span>{composerMode === 'SIMULATE_CUSTOMER' ? 'Send Customer Msg' : 'Send as Owner'}</span>
+                    <span>{composerMode === 'SIMULATE_CUSTOMER' ? 'Send Customer Msg' : 'Send to Messenger'}</span>
                   </button>
                 </div>
               </form>
@@ -1106,93 +1306,96 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                   All 3 Facebook Pages Are Connected &amp; Listening Live
                 </h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Fake demo conversations have been cleared. Whenever a real customer messages{' '}
-                  <strong className="text-blue-300">Page 1 (TidyUps Cleaning Service Inc)</strong>,{' '}
-                  <strong className="text-purple-300">Page 2 (1-833-TIDYUPS)</strong>, or{' '}
-                  <strong className="text-emerald-300">Page 3 (TidyUps Cleaning)</strong>, their conversation will pop up here automatically!
+                  Select any conversation on the left to read the thread, talk to the client on Messenger, or voice-fill their quote info!
                 </p>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={handlePullExistingInbox}
-                  disabled={isPullingExisting}
-                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-md"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isPullingExisting ? 'animate-spin' : ''}`} />
-                  <span>Pull Existing FB Inbox (3 Pages)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowImportExistingModal(true)}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-emerald-300 text-xs font-black flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Paste an Existing FB Message</span>
-                </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* RIGHT COLUMN (4 cols): Extracted Intake Checklist + Tweak AI Prompt + Meta Webhook Setup */}
+        {/* RIGHT COLUMN (4 cols): Always-On Lead Info & Sync + Voice Mic Dictation */}
         <div className="lg:col-span-4 bg-[#0B101B] flex flex-col min-h-0 overflow-y-auto">
-          {/* Sub-Navigation Tabs */}
-          <div className="p-3 border-b border-white/10 bg-[#0D131F] grid grid-cols-3 gap-1 text-xs font-extrabold shrink-0">
-            <button
-              type="button"
-              onClick={() => setRightPanelTab('CHECKLIST')}
-              className={`py-2 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer ${
-                rightPanelTab === 'CHECKLIST'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'bg-slate-900 text-slate-400 hover:text-white'
-              }`}
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Lead Info &amp; Sync</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setRightPanelTab('TWEAK_AI')}
-              className={`py-2 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer ${
-                rightPanelTab === 'TWEAK_AI'
-                  ? 'bg-pink-600 text-white shadow-sm'
-                  : 'bg-slate-900 text-slate-400 hover:text-white'
-              }`}
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>Tweak AI Bot</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setRightPanelTab('WEBHOOK_SETUP')}
-              className={`py-2 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer ${
-                rightPanelTab === 'WEBHOOK_SETUP'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-slate-900 text-slate-400 hover:text-white'
-              }`}
-            >
-              <Key className="w-3.5 h-3.5" />
-              <span>3-Page Setup</span>
-            </button>
+          {/* Compact Header Bar with Voice-Fill Mic Button & Little Popup Links */}
+          <div className="p-3 border-b border-white/10 bg-[#0D131F] flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span className="text-xs font-black uppercase tracking-wider text-white">
+                Lead Info &amp; Sync
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setPopupModal('TWEAK_AI')}
+                className="text-pink-300 hover:text-pink-200 underline underline-offset-2 font-semibold cursor-pointer"
+              >
+                Tweak AI
+              </button>
+              <span className="text-slate-600">•</span>
+              <button
+                type="button"
+                onClick={() => setPopupModal('WEBHOOK_SETUP')}
+                className="text-slate-400 hover:text-blue-300 underline underline-offset-2 font-medium cursor-pointer"
+              >
+                Page Setup
+              </button>
+            </div>
           </div>
 
-          {/* TAB 1: LIVE EXTRACTED LEAD CHECKLIST & 1-CLICK GOOGLE SHEET / JOBBER SYNC */}
-          {rightPanelTab === 'CHECKLIST' && activeThread && (
+          {activeThread ? (
             <div className="p-4 space-y-4">
               <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-emerald-500/30 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
                     <h3 className="text-xs font-black uppercase tracking-wider text-emerald-300">
                       AI Extracted Intake Checklist
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      Auto-fills as the customer chats on Facebook Messenger (editable anytime)
+                      Auto-fills from Messenger OR tap the Mic below to speak the info!
                     </p>
                   </div>
                   <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black">
                     {countCollectedCoreFields(activeThread.extracted)} / 4 Core Fields
                   </span>
+                </div>
+
+                {/* Microphone Voice-Fill Bar for Lead Info & Sync */}
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-emerald-500/30 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                      <Mic className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Use Microphone to Fill Out Lead Info</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => startOrToggleVoiceMic('LEAD_INFO')}
+                      disabled={isParsingVoice}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
+                        voiceMode === 'LEAD_INFO'
+                          ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse shadow-lg'
+                          : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md'
+                      }`}
+                    >
+                      {voiceMode === 'LEAD_INFO' ? (
+                        <>
+                          <MicOff className="w-3.5 h-3.5" />
+                          <span>Stop &amp; Fill Fields</span>
+                        </>
+                      ) : (
+                        <>
+                          <Mic className="w-3.5 h-3.5" />
+                          <span>{isParsingVoice ? 'Filling Fields...' : '🎙️ Activate Mic'}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {(voiceMode === 'LEAD_INFO' || voiceTranscript) && (
+                    <div className="p-2 rounded-lg bg-slate-900 border border-white/10 text-[11px] text-emerald-200 font-mono">
+                      {voiceTranscript || 'Listening... Speak service, beds/baths, date, address, or phone number...'}
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
@@ -1360,286 +1563,259 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                 )}
               </div>
             </div>
-          )}
-
-          {rightPanelTab === 'CHECKLIST' && !activeThread && (
+          ) : (
             <div className="p-5 text-xs text-slate-400 space-y-3">
               <div className="p-4 rounded-2xl bg-slate-900/90 border border-emerald-500/30 space-y-2">
                 <h3 className="text-xs font-black uppercase tracking-wider text-emerald-300">
                   Live Lead Intake Checklist (No Prices Discussed by AI)
                 </h3>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  As soon as a customer messages any of your 3 Facebook Pages, the AI warmly answers general service questions without quoting prices and gathers:
-                </p>
-                <ul className="space-y-1 text-[11px] text-slate-200 font-semibold list-disc list-inside">
-                  <li>1. Service Needed (Standard, Deep Clean, Move-Out) + Special Add-ons</li>
-                  <li>2. Bedrooms, Bathrooms &amp; Home Layout</li>
-                  <li>3. Preferred Date &amp; Time Window</li>
-                  <li>4. Property Street Address, Phone Number &amp; Email</li>
-                </ul>
-                <p className="text-[11px] text-emerald-300 pt-1">
-                  ✓ Sends the info to your Google Sheet (&ldquo;FB Leads&rdquo;), creates a <strong>DRAFT Quote</strong> in Jobber for you to look over and send, and texts your phone!
+                  Select a conversation on the left to view or voice-fill the customer&apos;s intake checklist and create their Jobber Draft Quote!
                 </p>
               </div>
             </div>
           )}
+        </div>
+      </div>
 
-          {/* TAB 2: TWEAK AI BOT INSTRUCTIONS & SMS LEAD NOTIFICATIONS */}
-          {rightPanelTab === 'TWEAK_AI' && (
-            <div className="p-4 space-y-4">
-              {/* Instant Owner SMS & In-App Lead Alert Card */}
-              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-950/80 via-slate-900 to-indigo-950/80 border border-emerald-500/40 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black uppercase">
-                      📲 Instant Lead &amp; Draft Quote Alerts
-                    </span>
-                    <h3 className="text-xs font-black uppercase tracking-wider text-white mt-1">
-                      Notify Me When a New Lead Hits Jobber or Google Sheets
-                    </h3>
-                  </div>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Whenever the Facebook AI bot (or online booking form) submits a new lead to <strong>Google Sheets (&ldquo;FB Leads&rdquo;)</strong> or creates a <strong>Draft Quote in Jobber</strong>, we immediately text your cell phone via Quo/OpenPhone and ping your Owner App!
-                </p>
-
-                <div>
-                  <label className="text-[11px] font-bold text-emerald-300 block mb-1">
-                    Your Mobile Phone Number for SMS Lead Alerts:
-                  </label>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={botSettings.ownerNotificationPhone || ''}
-                      onChange={(e) =>
-                        setBotSettings({ ...botSettings, ownerNotificationPhone: e.target.value })
-                      }
-                      placeholder="+1 (780) XXX-XXXX"
-                      className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-xs font-mono text-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleSendTestNotification}
-                      disabled={isTestingAlert}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black cursor-pointer shrink-0 disabled:opacity-50"
-                    >
-                      {isTestingAlert ? 'Sending SMS...' : '📲 Send Test SMS Alert'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <label className="flex items-center justify-between p-2 rounded-xl bg-slate-950/90 border border-white/10 cursor-pointer">
-                    <span className="text-[11px] font-bold text-slate-200">
-                      SMS Text Alert (via Quo)
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={botSettings.notifyViaSms !== false}
-                      onChange={(e) =>
-                        setBotSettings({ ...botSettings, notifyViaSms: e.target.checked })
-                      }
-                      className="accent-emerald-500 w-4 h-4"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between p-2 rounded-xl bg-slate-950/90 border border-white/10 cursor-pointer">
-                    <span className="text-[11px] font-bold text-slate-200">
-                      In-App / Team Chat Alert
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={botSettings.notifyViaInAppChat !== false}
-                      onChange={(e) =>
-                        setBotSettings({ ...botSettings, notifyViaInAppChat: e.target.checked })
-                      }
-                      className="accent-emerald-500 w-4 h-4"
-                    />
-                  </label>
-                </div>
-
-                {notifications.length > 0 && (
-                  <div className="pt-2 border-t border-white/10 space-y-1.5">
-                    <div className="text-[10px] font-black uppercase text-slate-400">
-                      Recent Lead Alerts Sent ({notifications.length})
-                    </div>
-                    <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
-                      {notifications.slice(0, 5).map((n) => (
-                        <div
-                          key={n.id}
-                          className="p-2 rounded-lg bg-slate-950/90 border border-white/10 text-[10px] flex items-center justify-between gap-2"
-                        >
-                          <div className="truncate">
-                            <span className="font-bold text-white">{n.customerName}</span>{' '}
-                            <span className="text-slate-400">({n.serviceType})</span> •{' '}
-                            <span className="text-emerald-300 font-mono">{n.quoteNumber}</span>
-                          </div>
-                          <span className="text-[9px] text-slate-400 shrink-0">
-                            {n.sentSms ? '✅ SMS Sent' : '🔔 App Alert'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+      {/* POPUP MODAL FOR TWEAK AI BOT & 3-PAGE SETUP (Opened via the subtle links) */}
+      {popupModal !== 'NONE' && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setPopupModal('NONE')}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[88vh] overflow-y-auto rounded-2xl bg-[#0B101B] border border-white/15 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                {popupModal === 'TWEAK_AI' ? (
+                  <>
+                    <SlidersHorizontal className="w-4 h-4 text-pink-400" />
+                    <h2 className="text-sm font-black text-white uppercase tracking-wider">
+                      Tweak AI Bot Instructions &amp; SMS Lead Alerts
+                    </h2>
+                  </>
+                ) : (
+                  <>
+                    <Key className="w-4 h-4 text-blue-400" />
+                    <h2 className="text-sm font-black text-white uppercase tracking-wider">
+                      3 Facebook Pages &amp; Webhook Setup
+                    </h2>
+                  </>
                 )}
               </div>
-
-              <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-pink-500/30 space-y-3">
-                <div>
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <h3 className="text-xs font-black uppercase tracking-wider text-pink-300">
-                      Tweak How Your AI Talks to Facebook Clients
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black">
-                      🚫 No Price Discussion Mode
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Your AI is configured to <strong>never discuss prices with clients</strong> — it gathers as much detail as possible so you can review the draft quote and send it yourself.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                    AI Bot Behavior, No-Price Rule &amp; Question Order:
-                  </label>
-                  <textarea
-                    rows={5}
-                    value={botSettings.systemPrompt}
-                    onChange={(e) => setBotSettings({ ...botSettings, systemPrompt: e.target.value })}
-                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-white/15 text-xs text-white leading-relaxed"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                    Intake Checklist &amp; What Info to Gather (No Prices Shared With Clients):
-                  </label>
-                  <textarea
-                    rows={5}
-                    value={botSettings.pricingRulesSummary}
-                    onChange={(e) => setBotSettings({ ...botSettings, pricingRulesSummary: e.target.value })}
-                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-white/15 text-xs font-mono text-emerald-200 leading-relaxed"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                    First-Message Ad Click Greeting:
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={botSettings.greetingTemplate}
-                    onChange={(e) => setBotSettings({ ...botSettings, greetingTemplate: e.target.value })}
-                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-white/15 text-xs text-white leading-relaxed"
-                  />
-                </div>
-
-                <div className="space-y-2 pt-1">
-                  <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-white/10 cursor-pointer">
-                    <span className="text-xs font-bold text-slate-200">
-                      Auto-Add Lead to Google Sheet (&ldquo;FB Leads&rdquo; Tab)
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={botSettings.autoSyncToGoogleSheet}
-                      onChange={(e) =>
-                        setBotSettings({ ...botSettings, autoSyncToGoogleSheet: e.target.checked })
-                      }
-                      className="accent-pink-500 w-4 h-4"
-                    />
-                  </label>
-
-                  <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-white/10 cursor-pointer">
-                    <span className="text-xs font-bold text-slate-200">
-                      Auto-Create DRAFT Quote in Jobber (For You to Review &amp; Send)
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={botSettings.autoCreateJobberQuote}
-                      onChange={(e) =>
-                        setBotSettings({ ...botSettings, autoCreateJobberQuote: e.target.checked })
-                      }
-                      className="accent-pink-500 w-4 h-4"
-                    />
-                  </label>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleSaveConfig(pages, botSettings)}
-                  disabled={isSavingConfig}
-                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-black text-xs shadow-lg cursor-pointer"
-                >
-                  {isSavingConfig ? 'Saving AI & Alert Settings...' : 'Save AI Intake Rules & SMS Notification Settings'}
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setPopupModal('NONE')}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          )}
 
-          {/* TAB 3: 2 FACEBOOK PAGES & WEBHOOK CONNECTION SETUP */}
-          {rightPanelTab === 'WEBHOOK_SETUP' && (
-            <div className="p-4 space-y-4">
-              {/* Connected Meta App Badge & Direct Deep Links */}
-              <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-950/80 via-slate-900 to-blue-950/80 border border-emerald-500/40 space-y-2.5 text-xs">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-black uppercase">
-                      ✅ Meta App Registered
-                    </span>
-                    <h3 className="text-sm font-black text-white mt-1">
-                      TidyUps Messenger AI • App ID: <span className="font-mono text-emerald-300">997522660032668</span>
-                    </h3>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <a
-                      href="https://developers.facebook.com/apps/997522660032668/messenger/settings/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black flex items-center gap-1 shrink-0"
-                    >
-                      <span>Open App 997522660032668 Messenger Settings</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                    <a
-                      href="https://developers.facebook.com/apps/997522660032668/settings/basic/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 text-[10px] font-bold flex items-center gap-1 shrink-0"
-                    >
-                      <span>Basic Settings (Privacy URL)</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                </div>
-                <ol className="space-y-1.5 text-[11px] text-slate-200 list-decimal list-inside leading-relaxed pt-1 border-t border-white/10">
-                  <li>
-                    Click <strong>Open App 997522660032668 Messenger Settings</strong> above (or click <strong>Set up</strong> on <strong>Messenger</strong> inside your app dashboard).
-                  </li>
-                  <li>
-                    Under <strong>Access Tokens</strong>, click <strong>Add or Remove Pages</strong>, check <strong>both of your Facebook Pages</strong>, click <strong>Generate Token</strong> for each page, and paste each token into the Page #1 and Page #2 boxes below (our server will automatically detect your Page IDs &amp; names when you click Save!).
-                  </li>
-                  <li>
-                    Under <strong>Webhooks</strong>, click <strong>Add Callback URL</strong>, paste the <strong>Callback URL</strong> and <strong>Verify Token</strong> below, and click <strong>Verify and Save</strong>.
-                  </li>
-                  <li>
-                    Click <strong>Add Subscriptions</strong> next to both Pages, check <code className="text-emerald-300 font-mono">messages</code> and <code className="text-emerald-300 font-mono">messaging_postbacks</code>, and flip the top switch to <strong>Live</strong>!
-                  </li>
-                </ol>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-blue-500/30 space-y-3 text-xs">
-                <h3 className="text-xs font-black uppercase tracking-wider text-blue-300">
-                  1. Direct Meta Messenger Webhook (For Both Facebook Pages)
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  Paste this Callback URL and Verify Token in your Meta Developer App (Messenger &rarr; Webhooks):
-                </p>
-
-                <div className="space-y-2">
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      Meta Messenger Webhook Callback URL:
+            {popupModal === 'TWEAK_AI' && (
+              <div className="space-y-4">
+                {/* Instant Owner SMS & In-App Lead Alert Card */}
+                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-950/80 via-slate-900 to-indigo-950/80 border border-emerald-500/40 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black uppercase">
+                        📲 Instant Lead &amp; Draft Quote Alerts
+                      </span>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-white mt-1">
+                        Notify Me When a New Lead Hits Jobber or Google Sheets
+                      </h3>
                     </div>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Whenever the Facebook AI bot (or online booking form) submits a new lead to <strong>Google Sheets (&ldquo;FB Leads&rdquo;)</strong> or creates a <strong>Draft Quote in Jobber</strong>, we immediately text your cell phone via Quo/OpenPhone and ping your Owner App!
+                  </p>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-emerald-300 block mb-1">
+                      Your Mobile Phone Number for SMS Lead Alerts:
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={botSettings.ownerNotificationPhone || ''}
+                        onChange={(e) =>
+                          setBotSettings({ ...botSettings, ownerNotificationPhone: e.target.value })
+                        }
+                        placeholder="+1 (780) XXX-XXXX"
+                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-xs font-mono text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSendTestNotification}
+                        disabled={isTestingAlert}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black cursor-pointer shrink-0 disabled:opacity-50"
+                      >
+                        {isTestingAlert ? 'Sending SMS...' : '📲 Send Test SMS Alert'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className="flex items-center justify-between p-2 rounded-xl bg-slate-950/90 border border-white/10 cursor-pointer">
+                      <span className="text-[11px] font-bold text-slate-200">
+                        SMS Text Alert (via Quo)
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={botSettings.notifyViaSms !== false}
+                        onChange={(e) =>
+                          setBotSettings({ ...botSettings, notifyViaSms: e.target.checked })
+                        }
+                        className="accent-emerald-500 w-4 h-4"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between p-2 rounded-xl bg-slate-950/90 border border-white/10 cursor-pointer">
+                      <span className="text-[11px] font-bold text-slate-200">
+                        In-App / Team Chat Alert
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={botSettings.notifyViaInAppChat !== false}
+                        onChange={(e) =>
+                          setBotSettings({ ...botSettings, notifyViaInAppChat: e.target.checked })
+                        }
+                        className="accent-emerald-500 w-4 h-4"
+                      />
+                    </label>
+                  </div>
+
+                  {notifications.length > 0 && (
+                    <div className="pt-2 border-t border-white/10 space-y-1.5">
+                      <div className="text-[10px] font-black uppercase text-slate-400">
+                        Recent Lead Alerts Sent ({notifications.length})
+                      </div>
+                      <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                        {notifications.slice(0, 5).map((n) => (
+                          <div
+                            key={n.id}
+                            className="p-2 rounded-lg bg-slate-950/90 border border-white/10 text-[10px] flex items-center justify-between gap-2"
+                          >
+                            <div className="truncate">
+                              <span className="font-bold text-white">{n.customerName}</span>{' '}
+                              <span className="text-slate-400">({n.serviceType})</span> •{' '}
+                              <span className="text-emerald-300 font-mono">{n.quoteNumber}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 shrink-0">
+                              {n.sentSms ? '✅ SMS Sent' : '🔔 App Alert'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-pink-500/30 space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-pink-300">
+                        Tweak How Your AI Talks to Facebook Clients
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black">
+                        🚫 No Price Discussion Mode
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Your AI is configured to <strong>never discuss prices with clients</strong> — it gathers as much detail as possible so you can review the draft quote and send it yourself.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      AI Bot Behavior, No-Price Rule &amp; Question Order:
+                    </label>
+                    <textarea
+                      rows={5}
+                      value={botSettings.systemPrompt}
+                      onChange={(e) => setBotSettings({ ...botSettings, systemPrompt: e.target.value })}
+                      className="w-full p-2.5 rounded-xl bg-slate-950 border border-white/15 text-xs text-white leading-relaxed"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      Intake Checklist &amp; What Info to Gather (No Prices Shared With Clients):
+                    </label>
+                    <textarea
+                      rows={5}
+                      value={botSettings.pricingRulesSummary}
+                      onChange={(e) => setBotSettings({ ...botSettings, pricingRulesSummary: e.target.value })}
+                      className="w-full p-2.5 rounded-xl bg-slate-950 border border-white/15 text-xs font-mono text-emerald-200 leading-relaxed"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                      First-Message Ad Click Greeting:
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={botSettings.greetingTemplate}
+                      onChange={(e) => setBotSettings({ ...botSettings, greetingTemplate: e.target.value })}
+                      className="w-full p-2.5 rounded-xl bg-slate-950 border border-white/15 text-xs text-white leading-relaxed"
+                    />
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-white/10 cursor-pointer">
+                      <span className="text-xs font-bold text-slate-200">
+                        Auto-Add Lead to Google Sheet (&ldquo;FB Leads&rdquo; Tab)
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={botSettings.autoSyncToGoogleSheet}
+                        onChange={(e) =>
+                          setBotSettings({ ...botSettings, autoSyncToGoogleSheet: e.target.checked })
+                        }
+                        className="accent-pink-500 w-4 h-4"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-white/10 cursor-pointer">
+                      <span className="text-xs font-bold text-slate-200">
+                        Auto-Create DRAFT Quote in Jobber (For You to Review &amp; Send)
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={botSettings.autoCreateJobberQuote}
+                        onChange={(e) =>
+                          setBotSettings({ ...botSettings, autoCreateJobberQuote: e.target.checked })
+                        }
+                        className="accent-pink-500 w-4 h-4"
+                      />
+                    </label>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleSaveConfig(pages, botSettings);
+                      setPopupModal('NONE');
+                    }}
+                    disabled={isSavingConfig}
+                    className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-black text-xs shadow-lg cursor-pointer"
+                  >
+                    {isSavingConfig ? 'Saving AI & Alert Settings...' : 'Save AI Intake Rules & Close'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {popupModal === 'WEBHOOK_SETUP' && (
+              <div className="space-y-4 text-xs">
+                <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-blue-500/30 space-y-2.5">
+                  <div className="font-black text-blue-300 uppercase">
+                    Meta Webhook &amp; Privacy URLs (App ID: 997522660032668)
+                  </div>
+                  <div className="grid grid-cols-1 gap-2">
                     <div className="flex items-center gap-1.5">
                       <input
                         type="text"
@@ -1650,209 +1826,27 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                       <button
                         type="button"
                         onClick={() => handleCopyText('webhook', webhookUrl)}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold cursor-pointer"
                       >
-                        {copiedKey === 'webhook' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'webhook' ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      Webhook Verify Token:
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={botSettings.verifyToken}
-                        onChange={(e) => setBotSettings({ ...botSettings, verifyToken: e.target.value })}
-                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 font-mono text-[11px] text-pink-300"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText('verify', botSettings.verifyToken)}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                      >
-                        {copiedKey === 'verify' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'verify' ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      External Agent / ManyChat / Zapier Lead Intake Webhook:
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        readOnly
-                        value={externalIntakeUrl}
-                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 font-mono text-[11px] text-blue-300"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText('intake', externalIntakeUrl)}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                      >
-                        {copiedKey === 'intake' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'intake' ? 'Copied' : 'Copy'}</span>
+                        {copiedKey === 'webhook' ? 'Copied' : 'Copy Webhook'}
                       </button>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Meta App Basic Settings URLs (Privacy Policy & Data Deletion URLs) */}
-              <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-purple-500/30 space-y-3 text-xs">
-                <h3 className="text-xs font-black uppercase tracking-wider text-purple-300">
-                  2. Meta App Basic Settings URLs (Privacy Policy &amp; Data Deletion)
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  Paste these into <strong>App Settings &rarr; Basic</strong> in Meta Developers so you can flip your app switch to <strong>Live</strong>:
-                </p>
-
-                <div className="space-y-2">
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      Privacy Policy URL:
+                {pages.map((pg, idx) => (
+                  <div
+                    key={pg.id}
+                    className="p-3.5 rounded-2xl bg-slate-900/90 border border-emerald-500/30 space-y-2"
+                  >
+                    <div className="font-black text-white flex items-center justify-between">
+                      <span>
+                        Page #{idx + 1}: {pg.pageName}
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-300">
+                        ID: {pg.pageId}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        readOnly
-                        value="https://app.tidyupscleaning.com/privacy-policy"
-                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 font-mono text-[11px] text-emerald-300"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText('privacy_url', 'https://app.tidyupscleaning.com/privacy-policy')}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                      >
-                        {copiedKey === 'privacy_url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'privacy_url' ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      Data Deletion Instructions URL:
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        readOnly
-                        value="https://app.tidyupscleaning.com/data-deletion"
-                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 font-mono text-[11px] text-amber-300"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText('del_inst_url', 'https://app.tidyupscleaning.com/data-deletion')}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                      >
-                        {copiedKey === 'del_inst_url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'del_inst_url' ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      Data Deletion Callback URL:
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        readOnly
-                        value="https://app.tidyupscleaning.com/api/facebook/data-deletion"
-                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 font-mono text-[11px] text-pink-300"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText('del_cb_url', 'https://app.tidyupscleaning.com/api/facebook/data-deletion')}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                      >
-                        {copiedKey === 'del_cb_url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'del_cb_url' ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Configure Connected Facebook Pages */}
-              {pages.map((pg, idx) => (
-                <div
-                  key={pg.id}
-                  className="p-3.5 rounded-2xl bg-slate-900/90 border border-emerald-500/30 space-y-2.5 text-xs"
-                >
-                  <div className="font-black text-white flex items-center justify-between flex-wrap gap-1.5">
-                    <span>Facebook Page #{idx + 1} Settings</span>
-                    <div className="flex items-center gap-1.5">
-                      {(pg.secretConnected || pg.pageAccessToken) && (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black">
-                          ✅ Secret Token Active ({pg.secretEnvName || 'Connected'})
-                        </span>
-                      )}
-                      <span className="text-[10px] font-mono text-slate-400">ID: {pg.pageId || pg.id}</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
-                      Facebook Page Name:
-                    </label>
-                    <input
-                      type="text"
-                      value={pg.pageName}
-                      onChange={(e) => {
-                        const next = pages.map((p) => (p.id === pg.id ? { ...p, pageName: e.target.value } : p));
-                        setPages(next);
-                      }}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-white"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
-                        Facebook Page ID:
-                      </label>
-                      <input
-                        type="text"
-                        value={pg.pageId}
-                        onChange={(e) => {
-                          const next = pages.map((p) => (p.id === pg.id ? { ...p, pageId: e.target.value } : p));
-                          setPages(next);
-                        }}
-                        placeholder="e.g. 10482910492"
-                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
-                        Ad Tag / Label:
-                      </label>
-                      <input
-                        type="text"
-                        value={pg.adCampaignLabel}
-                        onChange={(e) => {
-                          const next = pages.map((p) =>
-                            p.id === pg.id ? { ...p, adCampaignLabel: e.target.value } : p
-                          );
-                          setPages(next);
-                        }}
-                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-white"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
-                      Meta Page Access Token (For Live Outbound Messenger Replies):
-                    </label>
                     <input
                       type="password"
                       value={pg.pageAccessToken}
@@ -1862,25 +1856,28 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                         );
                         setPages(next);
                       }}
-                      placeholder="EAA..."
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-white font-mono"
+                      placeholder="Meta Page Access Token..."
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-white font-mono text-[11px]"
                     />
                   </div>
-                </div>
-              ))}
+                ))}
 
-              <button
-                type="button"
-                onClick={() => handleSaveConfig(pages, botSettings)}
-                disabled={isSavingConfig}
-                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-xs shadow-lg cursor-pointer"
-              >
-                {isSavingConfig ? 'Saving Page Settings...' : 'Save All 3 Facebook Pages Configuration'}
-              </button>
-            </div>
-          )}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleSaveConfig(pages, botSettings);
+                    setPopupModal('NONE');
+                  }}
+                  disabled={isSavingConfig}
+                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs cursor-pointer"
+                >
+                  Save Page Configuration &amp; Close
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

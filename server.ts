@@ -10156,7 +10156,7 @@ app.post("/api/facebook/threads/:threadId/draft-ai", async (req, res) => {
 });
 
 // POST /api/facebook/threads/:threadId/toggle-ai
-app.post("/api/facebook/threads/:threadId/toggle-ai", (req, res) => {
+app.post("/api/facebook/threads/:threadId/toggle-ai", async (req, res) => {
   const projectId = getProjectId(req);
   const store = loadStore(projectId);
   ensureFbStoreInitialized(store);
@@ -10164,11 +10164,180 @@ app.post("/api/facebook/threads/:threadId/toggle-ai", (req, res) => {
   const thread = store.fbMessengerThreads.find((t: any) => t.id === req.params.threadId);
   if (!thread) return res.status(404).json({ error: "Thread not found" });
 
-  thread.aiPaused = Boolean(req.body?.aiPaused);
+  const nextPaused = Boolean(req.body?.aiPaused);
+  const triggerReplyNow = Boolean(req.body?.triggerReplyNow);
+  thread.aiPaused = nextPaused;
+  thread.updatedAt = new Date().toISOString();
+
+  let statusNotice = nextPaused
+    ? "👤 You took over this chat — AI auto-reply is paused until you give it back."
+    : "🤖 Handed chat back to AI Bot — AI is now actively monitoring and replying to this client!";
+
+  // When handing the conversation back to the AI, if the customer sent the last message (or owner requested immediate AI reply), let AI reply right now
+  const lastMsg = Array.isArray(thread.messages) && thread.messages.length > 0
+    ? thread.messages[thread.messages.length - 1]
+    : null;
+  if (!nextPaused && (triggerReplyNow || lastMsg?.sender === "customer")) {
+    const matchedPage =
+      store.fbPages.find((p: any) => p.id === thread.pageSlotId) || store.fbPages[0];
+    const { replyText, updatedExtracted } = await runFacebookMessengerAiTurn(
+      thread,
+      store.fbBotSettings
+    );
+    thread.extracted = updatedExtracted;
+    thread.messages.push({
+      id: `fbm-${Date.now()}-ai-handback`,
+      sender: "ai",
+      senderName: store.fbBotSettings.botName,
+      text: replyText,
+      timestamp: new Date().toISOString(),
+    });
+    if (lastMsg?.id) {
+      thread.lastRepliedCustomerMsgId = lastMsg.id;
+    }
+
+    if (matchedPage?.pageAccessToken && thread.psid && !String(thread.psid).startsWith("psid_demo")) {
+      fetch(
+        `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(
+          matchedPage.pageAccessToken
+        )}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipient: { id: thread.psid },
+            message: { text: replyText },
+          }),
+        }
+      ).catch(() => {});
+    }
+
+    if (store.fbBotSettings?.autoSyncToGoogleSheet) {
+      await syncFbThreadToSheetAndOptionallyJobber(store, thread, false);
+    }
+    statusNotice = "🤖 Handed chat back to AI Bot & sent AI reply to the customer on Facebook Messenger!";
+  }
+
+  store.lastSavedAt = new Date().toISOString();
+  saveStore(store, projectId);
+
+  res.json({
+    success: true,
+    thread,
+    statusNotice,
+    leads: store.adLeads,
+    quotes: store.quotes,
+    clients: store.clients,
+  });
+});
+
+// POST /api/facebook/threads/:threadId/voice-intake (Fill Lead Info & Sync checklist by speaking into the microphone)
+app.post("/api/facebook/threads/:threadId/voice-intake", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  ensureFbStoreInitialized(store);
+
+  const thread = store.fbMessengerThreads.find((t: any) => t.id === req.params.threadId);
+  if (!thread) return res.status(404).json({ error: "Thread not found" });
+
+  const transcript = String(req.body?.transcript || "").trim();
+  if (!transcript) {
+    return res.status(400).json({ error: "Voice transcript required" });
+  }
+
+  const heuristic = parseVoiceTicketHeuristic(transcript);
+  const ext = thread.extracted || {};
+  const lower = transcript.toLowerCase();
+
+  if (heuristic.customerName && heuristic.customerName !== "Residential Client") {
+    ext.customerName = heuristic.customerName;
+  }
+  if (heuristic.phone) ext.phone = heuristic.phone;
+  if (heuristic.email) ext.email = heuristic.email;
+  if (lower.includes("move")) {
+    ext.serviceType = "Move-Out / Turnover Vacate Cleaning";
+  } else if (lower.includes("deep")) {
+    ext.serviceType = "Deep Cleaning & Baseboards";
+  } else if (lower.includes("standard") || lower.includes("regular") || lower.includes("basic")) {
+    ext.serviceType = "Residential Standard Cleaning";
+  }
+  if (/\b(\d)\s*bed/i.test(transcript) && heuristic.bedrooms) {
+    ext.bedrooms = heuristic.bedrooms;
+  }
+  if (/\b(\d(?:\.5)?)\s*bath/i.test(transcript) && heuristic.bathrooms) {
+    ext.bathrooms = heuristic.bathrooms;
+  }
+  if (heuristic.preferredDate) ext.preferredDate = heuristic.preferredDate;
+  if (heuristic.timeWindow) ext.timeWindow = heuristic.timeWindow;
+  if (heuristic.address && heuristic.address !== "Edmonton, AB") {
+    ext.address = heuristic.address;
+  }
+
+  // Also append or extract any special requests spoken into the mic
+  const specialKeywords = ["oven", "fridge", "baseboard", "window", "cabinet", "basement", "carpet", "pet", "garage", "wall"];
+  if (specialKeywords.some((kw) => lower.includes(kw)) || !ext.specificNotes) {
+    ext.specificNotes = ext.specificNotes
+      ? `${ext.specificNotes}; ${transcript}`
+      : transcript;
+  }
+
+  // Optional Gemini structured pass for high-precision voice extraction
+  if (ai) {
+    try {
+      const todayEdmontonStr = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Edmonton",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+
+      const voiceRes = await withTimeout(
+        ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: `Extract cleaning lead fields from this spoken voice note (Today is ${todayEdmontonStr}): "${transcript}". Return JSON with any mentioned fields: customerName, phone, email, serviceType, bedrooms, bathrooms, preferredDate (YYYY-MM-DD), address, specificNotes.`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                customerName: { type: Type.STRING },
+                phone: { type: Type.STRING },
+                email: { type: Type.STRING },
+                serviceType: { type: Type.STRING },
+                bedrooms: { type: Type.STRING },
+                bathrooms: { type: Type.STRING },
+                preferredDate: { type: Type.STRING },
+                address: { type: Type.STRING },
+                specificNotes: { type: Type.STRING },
+              },
+            },
+          },
+        }),
+        5500
+      );
+      const parsed = JSON.parse(voiceRes.text || "{}");
+      if (parsed.customerName) ext.customerName = parsed.customerName;
+      if (parsed.phone) ext.phone = parsed.phone;
+      if (parsed.email) ext.email = parsed.email;
+      if (parsed.serviceType) ext.serviceType = parsed.serviceType;
+      if (parsed.bedrooms) ext.bedrooms = parsed.bedrooms;
+      if (parsed.bathrooms) ext.bathrooms = parsed.bathrooms;
+      if (parsed.preferredDate) ext.preferredDate = parsed.preferredDate;
+      if (parsed.address) ext.address = parsed.address;
+      if (parsed.specificNotes) ext.specificNotes = parsed.specificNotes;
+    } catch {}
+  }
+
+  thread.extracted = ext;
   thread.updatedAt = new Date().toISOString();
   saveStore(store, projectId);
 
-  res.json({ success: true, thread });
+  res.json({
+    success: true,
+    thread,
+    extracted: ext,
+    message: "🎙️ Updated Lead Info & Sync fields from your voice!",
+  });
 });
 
 // POST /api/facebook/threads/:threadId/sync-quote
