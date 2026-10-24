@@ -397,16 +397,22 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
   useEffect(() => {
     if (initialLead) {
       if (initialLead.customerName) setCustomerName(initialLead.customerName);
-      if (initialLead.phone) setCustomerPhone(initialLead.phone);
+      if (initialLead.phone) {
+        setCustomerPhone(initialLead.phone);
+        triggerFieldHighlight('phone', initialLead.phone);
+      }
       if (initialLead.email) setCustomerEmail(initialLead.email);
       if (initialLead.address) {
         setServiceAddress(initialLead.address);
         geocodeAddressOnQuickMap(initialLead.address);
       }
+      if (initialLead.source) {
+        setSelectedSource(initialLead.source);
+      }
       if (initialLead.serviceRequested) setServiceType(initialLead.serviceRequested);
       if (initialLead.notes) setQuoteNotes(initialLead.notes);
     }
-  }, [initialLead]);
+  }, [initialLead, triggerFieldHighlight]);
 
   // Geocode address to update the Quick Map & Closest Cleaners
   const geocodeAddressOnQuickMap = useCallback(async (addr: string, isSecond = false) => {

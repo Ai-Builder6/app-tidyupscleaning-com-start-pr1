@@ -553,15 +553,36 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
                 </div>
               </div>
 
-              {/* Live Recent Callers Strip (1-Click Block Without Typing) */}
-              {recentCalls.length > 0 && (
-                <div className="mt-2.5 pt-2 border-t border-slate-800/80">
-                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1.5">
+              {/* Live Recent Callers & Original Dialed-Line Attribution Strip */}
+              <div className="mt-2.5 pt-2 border-t border-slate-800/80">
+                <div className="flex items-center justify-between gap-2 flex-wrap mb-1.5">
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                     <PhoneCall className="w-3 h-3 text-emerald-400" />
-                    <span>Recent Live Callers — Click to Block in 1 Tap:</span>
+                    <span>Live Call Screener & Original Line Attribution (Shows Caller ID + Which Number Was Dialed):</span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await fetch(`/api/twilio/live-calls/simulate?project=${projectId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          scenario: 'clean_7223',
+                          callerNumber: '+1 (780) 600-0607',
+                          dialedQuoLine: '+15879007223',
+                          shieldLine: '+18255334317',
+                        }),
+                      });
+                      await loadConfig();
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-extrabold cursor-pointer transition-colors"
+                  >
+                    + Simulate Live Call on (587) 900-7223
+                  </button>
+                </div>
+                {recentCalls.length > 0 && (
                   <div className="flex items-center gap-2 flex-wrap">
-                    {recentCalls.slice(0, 4).map((call) => {
+                    {recentCalls.slice(0, 4).map((call: any) => {
                       const callArea = call.areaCode || extractAreaCode(call.callerNumber || '');
                       const isAlreadyBlocked = call.status === 'BLOCKED';
                       const dateObj = new Date(call.timestamp);
@@ -571,18 +592,21 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
                       return (
                         <div
                           key={call.id}
-                          className={`px-2.5 py-1 rounded-xl border flex items-center gap-2 text-xs ${
+                          className={`px-2.5 py-1.5 rounded-xl border flex items-center gap-2.5 text-xs ${
                             isAlreadyBlocked
                               ? 'bg-rose-950/40 border-rose-500/30 text-rose-200'
                               : 'bg-slate-900/90 border-slate-700/80 text-slate-200'
                           }`}
                         >
                           <div className="flex flex-col">
-                            <span className="font-mono font-black text-white text-[11px]">
-                              {call.callerNumber}
+                            <span className="font-mono font-black text-white text-[11px] tabular-nums">
+                              Caller: {call.callerNumber}
+                            </span>
+                            <span className="font-mono text-[10px] text-amber-300 font-bold tabular-nums">
+                              Dialed: {call.originalDialedNumber || '+1 (587) 900-7223'} ({call.campaignLabel || 'GMB Direct'})
                             </span>
                             <span className="text-[9px] text-slate-400">
-                              {formattedTime} • {isAlreadyBlocked ? '🚫 Blocked' : '✅ Rang'}
+                              {formattedTime} • {isAlreadyBlocked ? '🚫 Severed (1s Hangup)' : `✅ Routed to ${call.receivingLineLabel || 'Quo Dispatch'}`}
                             </span>
                           </div>
                           <div className="flex items-center gap-1">
@@ -619,8 +643,8 @@ export const TwilioSpamShieldModal: React.FC<TwilioSpamShieldModalProps> = ({
                       );
                     })}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
           {/* TAB 1: ROTATING NUMBERS & PREFIXES */}

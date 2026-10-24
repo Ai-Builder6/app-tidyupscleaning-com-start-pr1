@@ -46,6 +46,7 @@ import { ServiceCatalogModal } from './components/ServiceCatalogModal';
 import { ServiceCatalogItem, CANONICAL_SERVICE_CATALOG } from './data/serviceCatalogData';
 import { TwilioSpamShieldModal } from './components/TwilioSpamShieldModal';
 import { SpamShieldView } from './components/SpamShieldView';
+import { LiveCallScreenerHUD } from './components/LiveCallScreenerHUD';
 import { AdLeadItem } from './types/lead';
 import { INITIAL_AD_LEADS } from './data/adLeadsData';
 import { LegalPagesView, LegalPageType } from './components/LegalPagesView';
@@ -4143,6 +4144,16 @@ export function App() {
           onClose={() => setIsSpamShieldModalOpen(false)}
           projectId={activeProjectId}
           preFillNumber={spamShieldNumber}
+        />
+
+        {/* Global Floating Live Call Screener HUD (Original Dialed Line Attribution + 1-Click Quote + In-App Call Control) */}
+        <LiveCallScreenerHUD
+          projectId={activeProjectId}
+          onStartQuoteWithCaller={(prefillLead) => {
+            setSelectedLeadForQuickQuote(prefillLead);
+            setActiveTopView('QUICK_QUOTE');
+          }}
+          onOpenSpamShieldModal={() => handleOpenSpamShield()}
         />
 
         {/* Role Selector, Mandatory Password Login & Owner Access Control Modal */}

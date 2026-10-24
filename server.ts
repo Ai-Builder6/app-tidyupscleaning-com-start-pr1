@@ -11670,6 +11670,139 @@ app.post("/api/twilio/clear-history", (req, res) => {
   });
 });
 
+// Helper: Resolve which public Quo / Marketing number the customer originally dialed
+// (even when OpenPhone forwards 587-900-7223 -> Twilio 825-533-4317 -> Receiving Quo 587-570-8005)
+function resolveOriginalDialedLineInfo(rawShieldDialed: string, rawForwardedFrom?: string): {
+  shieldNumber: string;
+  originalDialedNumber: string;
+  campaignLabel: string;
+} {
+  const shieldDigits = normalizePhoneDigits(rawShieldDialed);
+  const fwdDigits = normalizePhoneDigits(rawForwardedFrom || "");
+
+  const QUO_PUBLIC_LINES: Record<string, { formatted: string; campaign: string }> = {
+    "5879007223": { formatted: "+1 (587) 900-7223", campaign: "Tidyups Cleaning GMB Direct (Main Line)" },
+    "5878556865": { formatted: "+1 (587) 855-6865", campaign: "Tidyups GMB Secondary Line" },
+    "5875708005": { formatted: "+1 (587) 570-8005", campaign: "Primary Dispatch & Ads Line" },
+    "5877417791": { formatted: "+1 (587) 741-7791", campaign: "Dispatch Geeni Main Line" },
+    "8338439877": { formatted: "+1 (833) 843-9877", campaign: "1-833-TIDYUPS Toll-Free Vanity" },
+  };
+
+  // 1-to-1 Twilio Shield Number -> Public Quo Number pairing
+  const TWILIO_TO_ORIGINAL_QUO: Record<string, { formatted: string; campaign: string; shieldFormatted: string }> = {
+    "8255334317": {
+      formatted: "+1 (587) 900-7223",
+      campaign: "Tidyups Cleaning GMB Direct (Main Line)",
+      shieldFormatted: "+1 (825) 533-4317",
+    },
+    "5872063733": {
+      formatted: "+1 (587) 855-6865",
+      campaign: "Tidyups GMB Secondary Line",
+      shieldFormatted: "+1 (587) 206-3733",
+    },
+    "8254351073": {
+      formatted: "+1 (587) 570-8005",
+      campaign: "Primary Dispatch & Ads Line",
+      shieldFormatted: "+1 (825) 435-1073",
+    },
+    "8254451029": {
+      formatted: "+1 (587) 741-7791",
+      campaign: "Dispatch Geeni Main Line",
+      shieldFormatted: "+1 (825) 445-1029",
+    },
+    "8338439877": {
+      formatted: "+1 (833) 843-9877",
+      campaign: "1-833-TIDYUPS Toll-Free Vanity",
+      shieldFormatted: "+1 (833) 843-9877",
+    },
+  };
+
+  if (fwdDigits && QUO_PUBLIC_LINES[fwdDigits]) {
+    const quo = QUO_PUBLIC_LINES[fwdDigits];
+    const shieldInfo = TWILIO_TO_ORIGINAL_QUO[shieldDigits];
+    return {
+      shieldNumber: shieldInfo?.shieldFormatted || rawShieldDialed || "+1 (825) 533-4317",
+      originalDialedNumber: quo.formatted,
+      campaignLabel: quo.campaign,
+    };
+  }
+
+  if (shieldDigits && TWILIO_TO_ORIGINAL_QUO[shieldDigits]) {
+    const info = TWILIO_TO_ORIGINAL_QUO[shieldDigits];
+    return {
+      shieldNumber: info.shieldFormatted,
+      originalDialedNumber: info.formatted,
+      campaignLabel: info.campaign,
+    };
+  }
+
+  if (shieldDigits && QUO_PUBLIC_LINES[shieldDigits]) {
+    const quo = QUO_PUBLIC_LINES[shieldDigits];
+    return {
+      shieldNumber: quo.formatted,
+      originalDialedNumber: quo.formatted,
+      campaignLabel: quo.campaign,
+    };
+  }
+
+  return {
+    shieldNumber: rawShieldDialed || "+1 (825) 533-4317",
+    originalDialedNumber: rawForwardedFrom || rawShieldDialed || "+1 (587) 900-7223",
+    campaignLabel: "Tidyups Cleaning GMB Direct (Main Line)",
+  };
+}
+
+function formatReceivingLineLabel(destNumber: string): string {
+  const digits = normalizePhoneDigits(destNumber);
+  if (digits === "5875708005") return "+1 (587) 570-8005 (Quo Primary Dispatch)";
+  if (digits === "8338439877") return "+1 (833) 843-9877 (Quo 1-833-TIDYUPS)";
+  if (digits === "5879007223") return "+1 (587) 900-7223 (Quo GMB Direct)";
+  if (digits === "5878556865") return "+1 (587) 855-6865 (Quo GMB Secondary)";
+  if (digits === "5877417791") return "+1 (587) 741-7791 (Quo Dispatch Geeni)";
+  return destNumber || "+1 (587) 570-8005 (Quo Dispatch)";
+}
+
+function findCallerCrmMatch(callerNumber: string, store: any): {
+  matchedClientName?: string;
+  matchedAddress?: string;
+  matchedEmail?: string;
+  lastQuoteNumber?: string;
+  lastQuoteTotal?: number;
+  isRepeatClient?: boolean;
+} {
+  const callerDigits = normalizePhoneDigits(callerNumber);
+  if (!callerDigits || callerDigits.length < 7 || !store) return {};
+
+  const clients = Array.isArray(store.clients) ? store.clients : [];
+  const quotes = Array.isArray(store.quotes) ? store.quotes : [];
+  const leads = Array.isArray(store.leads) ? store.leads : [];
+
+  const matchedClient = clients.find((c: any) => normalizePhoneDigits(c.phone || "") === callerDigits);
+  const matchedQuote = quotes.find((q: any) => normalizePhoneDigits(q.clientPhone || q.phone || "") === callerDigits);
+  const matchedLead = leads.find((l: any) => normalizePhoneDigits(l.phone || "") === callerDigits);
+
+  if (!matchedClient && !matchedQuote && !matchedLead) return {};
+
+  return {
+    matchedClientName: matchedClient?.name || matchedQuote?.clientName || matchedLead?.customerName || undefined,
+    matchedAddress: matchedClient?.address || matchedQuote?.propertyAddress || matchedLead?.address || undefined,
+    matchedEmail: matchedClient?.email || matchedQuote?.clientEmail || matchedLead?.email || undefined,
+    lastQuoteNumber: matchedQuote?.quoteNumber || undefined,
+    lastQuoteTotal: typeof matchedQuote?.total === "number" ? matchedQuote.total : undefined,
+    isRepeatClient: Boolean(matchedClient || matchedQuote),
+  };
+}
+
+// In-memory active call screener state for instant low-latency HUD popups
+const activeScreenerCallsByProject: Record<string, any[]> = {};
+
+function getActiveScreenerCalls(projectId: string): any[] {
+  if (!activeScreenerCallsByProject[projectId]) {
+    activeScreenerCallsByProject[projectId] = [];
+  }
+  return activeScreenerCallsByProject[projectId];
+}
+
 // Inbound Twilio Voice Webhook (POST & GET) with TwiML generation
 const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) => {
   const projectId = getProjectId(req);
@@ -11680,12 +11813,14 @@ const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) =
     config = { ...DEFAULT_SPAM_SHIELD_CONFIG, ...config };
   }
 
+  const callSid = String(req.body?.CallSid || req.query?.CallSid || `CA${Date.now().toString(36)}`).trim();
   const rawFrom = req.body?.From || req.query?.From || req.body?.Caller || req.query?.Caller || "Unknown";
   // Clean urlencoded leading spaces that express creates for '+'
   const fromNumber = String(rawFrom).trim().replace(/^ 1/, "+1").replace(/^ (\d)/, "+$1");
   const callerCity = req.body?.FromCity || req.query?.FromCity || "";
   const callerCountry = req.body?.FromCountry || req.query?.FromCountry || "";
   const rawDialed = req.body?.To || req.query?.To || req.body?.Called || req.query?.Called || "";
+  const rawForwardedFrom = req.body?.ForwardedFrom || req.query?.ForwardedFrom || "";
 
   // Extract 3-digit North American area code for 1-click blocking on the website
   const fromDigits = fromNumber.replace(/\D/g, "");
@@ -11694,20 +11829,68 @@ const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) =
 
   const check = evaluateSpamCallRule(fromNumber, config);
 
-  // Record every inbound call in store.recentInboundCalls so user can 1-click block from main website
+  // Resolve destination receiving line first
+  const dialedDigits = normalizePhoneDigits(rawDialed);
+  let destination = config.forwardDestinationNumber || "+15875708005";
+
+  if (config.lineMappings && typeof config.lineMappings === "object") {
+    for (const [inboundLine, target] of Object.entries(config.lineMappings)) {
+      if (normalizePhoneDigits(inboundLine) === dialedDigits || inboundLine === rawDialed) {
+        if (target && typeof target === "string" && target.trim()) {
+          destination = target.trim();
+          break;
+        }
+      }
+    }
+  }
+
+  let cleanDestination = destination.trim();
+  if (!cleanDestination.startsWith("+")) {
+    const destDigits = normalizePhoneDigits(cleanDestination);
+    cleanDestination = destDigits.length === 10 ? `+1${destDigits}` : `+${destDigits}`;
+  }
+
+  // Resolve Original Public Quo Line & Campaign Name (e.g. +1 (587) 900-7223 GMB Direct)
+  const lineAttribution = resolveOriginalDialedLineInfo(rawDialed, rawForwardedFrom);
+  const crmMatch = findCallerCrmMatch(fromNumber, store);
+  const receivingLineLabel = formatReceivingLineLabel(cleanDestination);
+
+  const callRecord = {
+    id: `call-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
+    callSid,
+    timestamp: new Date().toISOString(),
+    callerNumber: fromNumber,
+    areaCode: extractedAreaCode,
+    dialedNumber: rawDialed || "+18255334317",
+    shieldNumber: lineAttribution.shieldNumber,
+    originalDialedNumber: lineAttribution.originalDialedNumber,
+    campaignLabel: lineAttribution.campaignLabel,
+    destinationNumber: cleanDestination,
+    receivingLineLabel,
+    callerName: crmMatch.matchedClientName || (callerCity ? `${callerCity}, ${callerCountry}` : "Inbound Caller"),
+    matchedAddress: crmMatch.matchedAddress || "",
+    matchedEmail: crmMatch.matchedEmail || "",
+    lastQuoteNumber: crmMatch.lastQuoteNumber || "",
+    lastQuoteTotal: crmMatch.lastQuoteTotal,
+    isRepeatClient: Boolean(crmMatch.isRepeatClient),
+    countryCode: check.countryCode || callerCountry || "+1",
+    status: check.isBlocked ? "BLOCKED" : "ALLOWED",
+    liveState: check.isBlocked ? "BLOCKED" : "RINGING",
+    dismissedInHud: false,
+    reason: check.isBlocked
+      ? (check.reason || "Blocked by Spam Shield")
+      : `Verified (${lineAttribution.originalDialedNumber}) ➔ Routed to ${receivingLineLabel}`,
+  };
+
+  // Push into active live screener calls so the Global Floating Call Screener HUD pops up immediately
+  const activeList = getActiveScreenerCalls(projectId);
+  activeList.unshift(callRecord);
+  if (activeList.length > 25) activeList.length = 25;
+
+  // Record every inbound call in store.recentInboundCalls so user can 1-click quote or block from main website
   if (store && fromNumber && fromNumber !== "Unknown") {
     if (!Array.isArray(store.recentInboundCalls)) store.recentInboundCalls = [];
-    store.recentInboundCalls.unshift({
-      id: `call-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
-      timestamp: new Date().toISOString(),
-      callerNumber: fromNumber,
-      areaCode: extractedAreaCode,
-      dialedNumber: rawDialed || "+18338439877",
-      callerName: callerCity ? `${callerCity}, ${callerCountry}` : "Inbound Caller",
-      countryCode: check.countryCode || callerCountry || "+1",
-      status: check.isBlocked ? "BLOCKED" : "ALLOWED",
-      reason: check.isBlocked ? (check.reason || "Blocked by Spam Shield") : "Connected to Quo Dispatch Line",
-    });
+    store.recentInboundCalls.unshift(callRecord);
     if (store.recentInboundCalls.length > 40) {
       store.recentInboundCalls = store.recentInboundCalls.slice(0, 40);
     }
@@ -11725,17 +11908,15 @@ const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) =
         callerNumber: fromNumber,
         callerName: callerCity ? `${callerCity}, ${callerCountry}` : "Inbound Robocaller",
         countryCode: check.countryCode || callerCountry || "+1",
-        reason: check.reason || "Rejected by Spam Shield rules",
+        reason: `${check.reason || "Rejected by Spam Shield"} (Dialed ${lineAttribution.originalDialedNumber})`,
       });
       store.lastSavedAt = new Date().toISOString();
       saveStore(store, projectId);
     }
 
     // CRITICAL FOR OPENPHONE FORWARDING:
-    // If OpenPhone forwards a call (e.g. 587-900-7223 -> Twilio +18255334317) and Twilio returns <Reject reason="busy"/>,
-    // OpenPhone treats the forward as "unanswered" and pulls the spammer back into Sona AI on 587-900-7223!
-    // By answering for 1 second of silence and immediately hanging up (<Pause length="1"/><Hangup/>),
-    // OpenPhone sees the forwarded call as answered & completed, killing the call completely so Sona AI never picks up.
+    // Answering for 1 second of silence and immediately hanging up (<Pause length="1"/><Hangup/>)
+    // ensures OpenPhone sees the forwarded call as answered & completed, killing the call completely so Sona AI never picks up.
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Pause length="1"/>
@@ -11748,29 +11929,6 @@ const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) =
   if (store) {
     store.lastSavedAt = new Date().toISOString();
     saveStore(store, projectId);
-  }
-
-  // Allowed legitimate caller: Forward to Quo / Dispatch Line
-  const dialedDigits = normalizePhoneDigits(rawDialed);
-  let destination = config.forwardDestinationNumber || "+15879007223";
-
-  // Check if there is a 1-to-1 route for this specific line dialed
-  if (config.lineMappings && typeof config.lineMappings === "object") {
-    for (const [inboundLine, target] of Object.entries(config.lineMappings)) {
-      if (normalizePhoneDigits(inboundLine) === dialedDigits || inboundLine === rawDialed) {
-        if (target && typeof target === "string" && target.trim()) {
-          destination = target.trim();
-          break;
-        }
-      }
-    }
-  }
-
-  // Clean E.164 destination
-  let cleanDestination = destination.trim();
-  if (!cleanDestination.startsWith("+")) {
-    const destDigits = normalizePhoneDigits(cleanDestination);
-    cleanDestination = destDigits.length === 10 ? `+1${destDigits}` : `+${destDigits}`;
   }
 
   // Caller ID Presentation:
@@ -11786,6 +11944,248 @@ const handleTwilioVoiceWebhook = (req: express.Request, res: express.Response) =
 </Response>`;
   return res.send(twiml);
 };
+
+// GET live incoming & recent screened calls with Original Dialed-Line Attribution
+app.get("/api/twilio/live-calls", (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  const activeList = getActiveScreenerCalls(projectId);
+  const nowMs = Date.now();
+
+  // Calls within the last 75 seconds that haven't been dismissed are shown in the floating HUD
+  const liveHudCalls = activeList.filter((c) => {
+    if (c.dismissedInHud) return false;
+    const ageMs = nowMs - new Date(c.timestamp).getTime();
+    return ageMs <= 75000;
+  });
+
+  // Merge active in-memory calls with store.recentInboundCalls and enrich any legacy entries with attribution
+  const rawRecent = Array.isArray(store?.recentInboundCalls) ? store.recentInboundCalls : [];
+  const enrichedRecent = rawRecent.map((c: any) => {
+    if (c.originalDialedNumber && c.campaignLabel) return c;
+    const attr = resolveOriginalDialedLineInfo(c.dialedNumber || "+18255334317", c.forwardedFrom);
+    const crm = findCallerCrmMatch(c.callerNumber || "", store);
+    const dest = c.destinationNumber || store?.spamShieldConfig?.forwardDestinationNumber || "+15875708005";
+    return {
+      ...c,
+      shieldNumber: attr.shieldNumber,
+      originalDialedNumber: attr.originalDialedNumber,
+      campaignLabel: attr.campaignLabel,
+      destinationNumber: dest,
+      receivingLineLabel: formatReceivingLineLabel(dest),
+      callerName: crm.matchedClientName || c.callerName || "Inbound Caller",
+      matchedAddress: crm.matchedAddress || c.matchedAddress || "",
+      lastQuoteNumber: crm.lastQuoteNumber || c.lastQuoteNumber || "",
+      lastQuoteTotal: crm.lastQuoteTotal ?? c.lastQuoteTotal,
+      isRepeatClient: Boolean(crm.isRepeatClient || c.isRepeatClient),
+    };
+  });
+
+  res.json({
+    success: true,
+    liveHudCalls,
+    recentCalls: enrichedRecent.slice(0, 35),
+  });
+});
+
+// POST simulate an incoming live call (Clean Customer on 587-900-7223 or Spam 408 Call) to test the In-App Screener HUD
+app.post("/api/twilio/live-calls/simulate", (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  const config = store?.spamShieldConfig || DEFAULT_SPAM_SHIELD_CONFIG;
+  const { scenario, callerNumber, dialedQuoLine, shieldLine } = req.body || {};
+
+  const isSpamScenario = scenario === "spam_408";
+  const simCaller = callerNumber || (isSpamScenario ? "+1 (408) 458-5452" : "+1 (780) 600-0607");
+  const simShield = shieldLine || "+18255334317";
+  const simForwardedFrom = dialedQuoLine || "+15879007223";
+
+  const check = evaluateSpamCallRule(simCaller, config);
+  const lineAttribution = resolveOriginalDialedLineInfo(simShield, simForwardedFrom);
+  const crmMatch = findCallerCrmMatch(simCaller, store);
+
+  let destination = config.forwardDestinationNumber || "+15875708005";
+  const shieldDigits = normalizePhoneDigits(simShield);
+  if (config.lineMappings) {
+    for (const [k, v] of Object.entries(config.lineMappings)) {
+      if (normalizePhoneDigits(k) === shieldDigits && typeof v === "string" && v.trim()) {
+        destination = v.trim();
+        break;
+      }
+    }
+  }
+
+  const fromDigits = simCaller.replace(/\D/g, "");
+  const norm10 = fromDigits.length === 11 && fromDigits.startsWith("1") ? fromDigits.slice(1) : fromDigits;
+  const extractedAreaCode = norm10.length >= 3 ? norm10.slice(0, 3) : "780";
+  const receivingLineLabel = formatReceivingLineLabel(destination);
+
+  const simRecord = {
+    id: `sim-${Date.now().toString(36)}`,
+    callSid: `CAsim${Date.now().toString(36)}`,
+    timestamp: new Date().toISOString(),
+    callerNumber: simCaller,
+    areaCode: extractedAreaCode,
+    dialedNumber: simShield,
+    shieldNumber: lineAttribution.shieldNumber,
+    originalDialedNumber: lineAttribution.originalDialedNumber,
+    campaignLabel: lineAttribution.campaignLabel,
+    destinationNumber: destination,
+    receivingLineLabel,
+    callerName:
+      crmMatch.matchedClientName ||
+      (isSpamScenario ? "San Jose, CA Robocaller (408)" : "Edmonton Verified Customer"),
+    matchedAddress: crmMatch.matchedAddress || (isSpamScenario ? "" : "10405 Jasper Ave NW, Edmonton, AB"),
+    matchedEmail: crmMatch.matchedEmail || "",
+    lastQuoteNumber: crmMatch.lastQuoteNumber || "",
+    lastQuoteTotal: crmMatch.lastQuoteTotal,
+    isRepeatClient: Boolean(crmMatch.isRepeatClient),
+    countryCode: "+1",
+    status: check.isBlocked ? "BLOCKED" : "ALLOWED",
+    liveState: check.isBlocked ? "BLOCKED" : "RINGING",
+    dismissedInHud: false,
+    isSimulated: true,
+    reason: check.isBlocked
+      ? `${check.reason || "Blocked by Spam Shield"} — Terminated in 1s (<Hangup/>, $0 Sona AI cost)`
+      : `Verified (${lineAttribution.originalDialedNumber}) ➔ Ringing ${receivingLineLabel} & In-App HUD`,
+  };
+
+  const activeList = getActiveScreenerCalls(projectId);
+  activeList.unshift(simRecord);
+  if (activeList.length > 25) activeList.length = 25;
+
+  if (store) {
+    if (!Array.isArray(store.recentInboundCalls)) store.recentInboundCalls = [];
+    store.recentInboundCalls.unshift(simRecord);
+    if (store.recentInboundCalls.length > 40) store.recentInboundCalls = store.recentInboundCalls.slice(0, 40);
+    store.lastSavedAt = new Date().toISOString();
+    saveStore(store, projectId);
+  }
+
+  res.json({
+    success: true,
+    call: simRecord,
+    liveHudCalls: activeList.filter((c) => !c.dismissedInHud),
+  });
+});
+
+// POST in-app live call control actions: answer_in_app, terminate_and_block_caller, terminate_and_block_areacode, dismiss
+app.post("/api/twilio/live-calls/:callSid/action", async (req, res) => {
+  const projectId = getProjectId(req);
+  const store = loadStore(projectId);
+  const { callSid } = req.params;
+  const { action, callerNumber, areaCode } = req.body || {};
+
+  const activeList = getActiveScreenerCalls(projectId);
+  const targetCall = activeList.find((c) => c.callSid === callSid || c.id === callSid);
+
+  if (action === "dismiss") {
+    if (targetCall) targetCall.dismissedInHud = true;
+    return res.json({ success: true, action: "dismiss" });
+  }
+
+  if (action === "answer_in_app") {
+    if (targetCall) {
+      targetCall.liveState = "ANSWERED_IN_APP";
+      targetCall.reason = `Answered inside TidyUps App (${targetCall.originalDialedNumber})`;
+    }
+    if (store && Array.isArray(store.recentInboundCalls)) {
+      const rec = store.recentInboundCalls.find((c: any) => c.callSid === callSid || c.id === callSid);
+      if (rec) {
+        rec.liveState = "ANSWERED_IN_APP";
+        rec.reason = `Answered inside TidyUps App (${rec.originalDialedNumber || "+1 (587) 900-7223"})`;
+      }
+      saveStore(store, projectId);
+    }
+    return res.json({
+      success: true,
+      action: "answer_in_app",
+      message: "Call marked Active in TidyUps Console. Click 'Start Quote with Caller' to open intake with caller details pre-filled.",
+    });
+  }
+
+  // If terminating/blocking a live call, attempt to sever the real Twilio call leg via REST API
+  const accountSid = process.env.TWILIO_ACCOUNT_SID || "";
+  const authToken = process.env.TWILIO_AUTH_TOKEN || "";
+  let twilioSevered = false;
+
+  if (callSid && callSid.startsWith("CA") && !callSid.startsWith("CAsim") && accountSid && authToken) {
+    try {
+      const authHeader = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+      const twilioResp = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${callSid}.json`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${authHeader}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({ Status: "completed" }).toString(),
+        }
+      );
+      twilioSevered = twilioResp.ok;
+    } catch (err) {
+      console.warn("Twilio live call hangup note:", err);
+    }
+  }
+
+  const numToBlock = String(callerNumber || targetCall?.callerNumber || "").trim();
+  const codeToBlock = String(areaCode || targetCall?.areaCode || "").replace(/\D/g, "").slice(0, 3);
+
+  if (store) {
+    if (!store.spamShieldConfig) store.spamShieldConfig = { ...DEFAULT_SPAM_SHIELD_CONFIG };
+    const cfg = store.spamShieldConfig;
+
+    if (action === "terminate_and_block_areacode" && codeToBlock.length === 3) {
+      const prefixRule = `1${codeToBlock}*`;
+      if (!Array.isArray(cfg.blockedPrefixes)) cfg.blockedPrefixes = [];
+      if (!cfg.blockedPrefixes.includes(prefixRule)) {
+        cfg.blockedPrefixes.unshift(prefixRule);
+      }
+    } else if (numToBlock) {
+      if (!Array.isArray(cfg.blockedNumbers)) cfg.blockedNumbers = [];
+      if (!cfg.blockedNumbers.includes(numToBlock)) {
+        cfg.blockedNumbers.unshift(numToBlock);
+      }
+    }
+
+    if (targetCall) {
+      targetCall.status = "BLOCKED";
+      targetCall.liveState = "TERMINATED";
+      targetCall.dismissedInHud = true;
+      targetCall.reason =
+        action === "terminate_and_block_areacode"
+          ? `Live-Dropped & Blocked Area Code 1${codeToBlock}*`
+          : `Live-Dropped & Blocked Caller ${numToBlock}`;
+    }
+
+    if (Array.isArray(store.recentInboundCalls)) {
+      const rec = store.recentInboundCalls.find((c: any) => c.callSid === callSid || c.id === callSid);
+      if (rec) {
+        rec.status = "BLOCKED";
+        rec.liveState = "TERMINATED";
+        rec.reason =
+          action === "terminate_and_block_areacode"
+            ? `Live-Dropped & Blocked Area Code 1${codeToBlock}*`
+            : `Live-Dropped & Blocked Caller ${numToBlock}`;
+      }
+    }
+
+    store.lastSavedAt = new Date().toISOString();
+    saveStore({ ...store, explicitReplaceSpamShield: true }, projectId);
+  }
+
+  return res.json({
+    success: true,
+    twilioSevered,
+    config: store?.spamShieldConfig,
+    message:
+      action === "terminate_and_block_areacode"
+        ? `Severed live call & blocked entire ${codeToBlock} area code (1${codeToBlock}*).`
+        : `Severed live call & added ${numToBlock} to permanent Blocklist.`,
+  });
+});
+
 
 // Twilio Missed-Call Voicemail Fallback (if Quo/OpenPhone doesn't pick up within 25s)
 const handleTwilioDialStatus = (req: express.Request, res: express.Response) => {

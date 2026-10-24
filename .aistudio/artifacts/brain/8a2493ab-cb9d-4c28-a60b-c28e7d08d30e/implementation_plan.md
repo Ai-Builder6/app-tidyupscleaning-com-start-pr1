@@ -1,109 +1,105 @@
-# Live Google Sheets Lead Hub, FB/Google Ads Sheet Creator & Cookie-Gate Elimination Plan
+# In-App Live Call Screener, Original Line Attribution & Answering Console
 
-Resolves the **"Sorry, the file you have requested does not exist"** error when opening the Leads Google Sheet and eliminates the **"Action required to load your app (blocking a required security cookie)"** screen across the Clean Google Sheet Hub and Jobber Sync Management, while adding 1-click creation and syncing of a live, multi-tab Google Sheet in your Google Drive ready for Facebook Lead Ads and Google Ads connections.
+## 1. Overview & Goals
+When a customer dials one of your public Quo (OpenPhone) numbers—such as **`(587) 900-7223` (GMB Direct)**—and OpenPhone forwards the call to your Twilio Spam Shield to verify it is a real human caller, Twilio cannot loop the call back to `(587) 900-7223` without creating an infinite forwarding loop. Instead, Twilio delivers the verified call either to a **receiving line** (such as your `(587) 570-8005` Primary Dispatch line or `(833) 843-9877` TIDYUPS line) or **directly into our web app**.
 
-## User Review & Critical Decisions
-
-> [!IMPORTANT]
-> Your confirmed preferences from our clarification step are locked into this plan:
-
-- **Confirmed Decision 1 (Default & New Google Sheets)**: Default all broken placeholder links (`1TifULi7n2BylQdvla_clean_sheet`) to your real existing Primary Leads Sheet (`1TifULi7n2BylQdvla-8DRvYHul_A1wXXzypUdBJwEeA`), allow instant switching to your Secondary Leads Sheet (`1-1palHco2hOEKDh8ivnLYX6-PuzeQtHhLQGkaD_Dp4I`), and add a **1-Click "Create New Clean Leads Sheet in Google Drive"** button that provisions a real multi-tab Google Sheet in your Google Drive and automatically connects it across the entire app.
-- **Confirmed Decision 2 (FB Ads & Google Ads Ready + Cookie-Free Exports)**: Sync leads directly to your live Google Sheet in Google Drive (structured with dedicated `Facebook Leads`, `Google Leads`, `Voice & Quick Quotes`, and `Pasted Leads` tabs plus the 20-column lead schema and webhook endpoint so you can connect Facebook Lead Ads and Google Ads directly to the new sheet), and convert all spreadsheet downloads and OAuth links so they never trigger the `.run.app` security-cookie screen.
-
----
-
-## 1. Overview & Core Concept
-
-- **What It Does**:
-  1. **Fixes "File Does Not Exist" in Google Drive**: Replaces the non-existent placeholder spreadsheet ID (`1TifULi7n2BylQdvla_clean_sheet`) stored in the database and UI defaults with your real, verified Google Sheet (`1TifULi7n2BylQdvla-8DRvYHul_A1wXXzypUdBJwEeA`), and validates any custom URL so broken IDs are automatically repaired.
-  2. **1-Click "Create New Leads Sheet in Drive" (FB Ads & Google Ads Ready)**: Uses your Google Drive authorization to generate a real, native Google Spreadsheet (`application/vnd.google-apps.spreadsheet`) inside your Google Drive with four pre-configured tabs (`Facebook Leads`, `Google Leads`, `Voice & Quick Quotes`, `Pasted Leads`) and the 20-column lead headers. Once created, its live `https://docs.google.com/spreadsheets/d/<ID>/edit` URL becomes the active sheet across Leads Hub, Quick Quote, Quotes, and Jobber Sync Management.
-  3. **Direct Facebook Ads & Google Ads Connection Panel**: Displays the active Google Sheet URL, Spreadsheet ID, Tab names, and Inbound Lead Webhook URL (`/api/leads/webhook`) with 1-click copy buttons so you can plug the newly created Google Sheet straight into Meta Lead Ads, Google Ads Lead Forms, Zapier, or Make.
-  4. **Eliminates "Action Required to Load Your App (Security Cookie Blocked)"**:
-     - Replaces raw `<a href="/api/...">` download links (`.xlsx` and `.csv`) with authenticated in-app `fetch()` → `Blob` downloads that execute inside the current session without opening a unauthenticated `.run.app` tab.
-     - Updates the Jobber browser authorization link in **Jobber Sync Management** to point directly to `https://api.getjobber.com/api/oauth/authorize` rather than bouncing through `/api/jobber/oauth/start` in a new window.
-- **Target Audience / Persona**: Dispatchers, operations managers, and ad campaign managers at Tidyups Cleaning Service Inc managing inbound Facebook/Google leads and Jobber schedules.
-- **Key Value**: Every "Open Google Sheet", "Create New Sheet in Drive", "Push to Google Sheet", and "Export XLSX/CSV" button works on the first click without 404 Drive errors or browser cookie walls.
+This plan solves both of your core questions:
+1. **Can we answer or control the call right inside our app without leaving it?**
+   **Yes.** We will build a **Global Live Incoming Call Screener & Console** right inside the TidyUps app that pops up the split-second a call hits your Twilio Shield—regardless of which tab you are currently viewing (`Quick Quote`, `Schedule`, `Territory Map`, or `Management Hub`). You can answer directly inside the browser (via Twilio Client WebRTC audio when enabled) **or** pick up on your receiving Quo line while our app displays the full live caller dossier on your screen.
+2. **How do we preserve the exact number that was originally dialed (`587-900-7223`) AND the customer's Caller ID?**
+   Because Twilio receives both the **Customer's Caller ID (`From`)** and the **Original Dialed Quo Number (`ForwardedFrom` / 1-to-1 Shield Line Pairing)**, our app captures both pieces of information before the receiving line even rings and displays them side-by-side at the top of your screen.
 
 ---
 
-## 2. User Experience & Visual Design
-
-- **Key User Flows**:
-  1. **Opening the Active Google Sheet**: Clicking **Open Google Sheet** in the Clean Google Sheet Hub, Quick Quote, or Jobber Sync Management immediately opens your real Google Sheet (`docs.google.com/spreadsheets/d/...`) in a new tab.
-  2. **Creating a Brand-New Leads Sheet in Google Drive**:
-     - Click **+ Create New Leads Sheet in Drive (FB & Google Ads)** in the Clean Google Sheet Hub or Jobber Sync Management.
-     - If not yet signed into Google Drive, the synchronous Google Identity Services popup authorizes access.
-     - The app builds a clean multi-tab workbook (`Facebook Leads`, `Google Leads`, `Voice & Quick Quotes`, `Pasted Leads`) with your 20-column lead headers and current leads, converts it into a native **Google Sheet** inside your Google Drive folder (`TidyUps Cleaning App Backup Zips`), saves the new `https://docs.google.com/spreadsheets/d/<newId>/edit` URL to the server store, and shows a direct **Open New Google Sheet** link.
-  3. **Connecting Facebook Ads & Google Ads to the Sheet**:
-     - A collapsible **Connect FB Lead Ads & Google Ads** bar shows the exact **Spreadsheet ID**, **Target Tabs** (`Facebook Leads`, `Google Leads`), **20-Column Header Schema**, and **Inbound Lead Webhook URL** for instant copy-pasting into your ad integrations.
-  4. **Updating / Syncing Existing Sheet & Downloading Local Copies**:
-     - Clicking **Sync to Google Sheet in Drive** asks for confirmation before overwriting the sheet in Drive, then updates the live Google Sheet.
-     - Clicking **Download .XLSX** or **Export .CSV** fetches the file in-memory via `fetch()` and saves it directly to your device without navigating to a `.run.app` URL.
-- **Visual Identity & Theme**:
-  - *Aesthetic Direction*: High-contrast operational SaaS command center matching the existing dark slate (`#0F172A` / `#131724`) Leads Hub and crisp light slate Jobber Sync Management modal.
-  - *Color Palette & Mood*: Deep slate structural surfaces (`#131724`), emerald primary action accents (`#10B981`) for Google Sheets / Drive operations, blue (`#2563EB`) for Facebook/Google Ads connection controls, and amber (`#F59E0B`) for Jobber sync status.
-  - *Typography & Hierarchy*: Clean sans headings paired with `font-mono tabular-nums` for Spreadsheet IDs, counts, timestamps, and webhook URLs.
-- **Interactive Feedback & Motion**:
-  - Immediate spinner state on **Create New Leads Sheet in Drive**, **Sync to Drive Sheet**, and **Download .XLSX / .CSV** buttons.
-  - Confirmation modal before overwriting or resetting an existing Google Sheet in Drive.
-  - Clear toast/banner confirmation with a 1-click **Open Sheet in Google Drive ↗** button as soon as creation or sync completes.
+### Decisions & Trade-Offs
+- **Dual-Mode Answering (Recommended Default: Simultaneous Quo Receiving Line + In-App Live Screener HUD)**:
+  - *Why*: You emphasized keeping **Quo (OpenPhone) call recordings, transcripts, and Sona AI backup** intact. If you answer *exclusively* via browser WebRTC inside our app and bypass Quo completely, Quo never sees the answered call and cannot generate its transcript. By bridging clean calls to your designated Quo receiving line (`587-570-8005` or `833-843-9877`) while simultaneously popping up the **In-App Live Call Screener & Control Bar** in our app (and optionally ringing browser WebRTC when you toggle "Answer in Browser Mode"), you get the best of both worlds: Quo still logs every transcript, and our app shows you **who is calling**, **which number they dialed (`587-900-7223`)**, and lets you **1-Click Start a Quote** or **Kill & Block a Spammer Live** without leaving the screen.
+- **1-Second Answer-and-Hangup for Blocked Calls (`<Pause length="1"/><Hangup/>`)**:
+  - *Why*: When OpenPhone forwards a spammer (e.g., `408` area code) to Twilio, returning a "busy" signal caused OpenPhone to pull the spammer back after 23 seconds and hand them to Sona AI. Having Twilio answer for 1 second and hang up terminates the carrier leg completely so Sona AI never picks up and you are never billed by OpenPhone AI minutes.
+- **Zero-Loop 1-to-1 Campaign Mapping**:
+  - *Why*: Each of your 4 Twilio Shield numbers maps 1-to-1 to one of your public Quo lines (e.g., Twilio `825-533-4317` ➔ Quo `587-900-7223 GMB Direct`). Even when all 4 Twilio Shield lines forward clean calls into a single receiving Quo inbox (`587-570-8005`), our app knows with 100% certainty which public number the customer originally dialed and displays that exact campaign name on your screen.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+## 2. Visual Design & User Experience
 
-- **Decision 1: Native Google Sheets Creation via Google Drive Multipart Conversion**
-  - *Chosen Approach*: Upload the multi-tab `.xlsx` workbook buffer to `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart` with metadata `mimeType: 'application/vnd.google-apps.spreadsheet'` inside the user's `TidyUps Cleaning App Backup Zips` Drive folder.
-  - *Why*: Google Drive natively converts the uploaded `.xlsx` workbook into a true multi-tab Google Sheet (`Facebook Leads`, `Google Leads`, `Voice & Quick Quotes`, `Pasted Leads`) using the already-authorized Google Drive token, returning a permanent `https://docs.google.com/spreadsheets/d/<id>/edit` URL that works immediately with Facebook Ads and Google Ads connectors.
-  - *Alternatives Considered*: Downloading a local `.xlsx` file and asking the user to manually upload and convert it in Drive (adds friction and doesn't auto-link the URL).
-- **Decision 2: In-Memory `fetch()` + `Blob` Downloads Instead of `<a href="/api/...">` Links**
-  - *Chosen Approach*: Perform all `/api/leads/export.xlsx` and `/api/leads/export.csv` downloads via JavaScript `fetch()` inside the active app frame, then trigger download via an object URL (`URL.createObjectURL(blob)`), and point Jobber's "Open in New Tab" button directly to `https://api.getjobber.com/api/oauth/authorize`.
-  - *Why*: Bypasses the AI Studio `.run.app` cross-window security-cookie interstitial (`Action required to load your app — It looks like your browser is blocking a required security cookie`) on Safari, iOS, and Chrome.
+### Design Paradigm & Theme Polarity
+- **Atmospheric Minimalism & High-Craft Dark UI (P4 — 65%) + Kinetic Typography & Neo-Brutalist Swiss Grids (P2 — 35%)**:
+  - The **Live Call Screener Console** uses an intentional dark slate obsidian surface (`#0B0F17`) with hairline `1px solid rgba(255, 255, 255, 0.08)` structural borders and high-contrast emerald (`#10B981`) for verified clean calls or crimson (`#F43F5E`) for intercepted threats.
+  - All phone numbers, elapsed call timers, area codes, and historical quote totals enforce `font-variant-numeric: tabular-nums` (`font-mono`) for instant scannability while the phone is ringing.
+  - **Zero-Pill Metadata Discipline**: Campaign tags, dialed line labels, and spam scores are rendered as crisp typographic data cells separated by `1px` vertical dividers rather than cluttered rounded badges.
+
+### Key Interface Components
+
+#### A. Global Floating Live Call Screener HUD (Top-Right Command Overlay)
+Whenever a call passes through your Twilio Shield, a sleek command console slides into the top-right corner of the app (regardless of which tab you have open):
+- **Row 1 — Live Status & Elapsed Ring Timer**:
+  - Pulsing emerald status dot + `INCOMING VERIFIED CALL` + live `tabular-nums` ring timer (`00:04`).
+- **Row 2 — Customer Caller ID & CRM Match**:
+  - Large monospace display of the customer's phone number (e.g., `(780) 600-0607`), caller name/city if known, and instant match against your existing TidyUps Clients & Quotes (showing previous address, square footage, and last quote price if they have called before).
+- **Row 3 — Original Dialed Line & Marketing Attribution Box**:
+  - Explicitly highlights **which public number the customer dialed** vs. **which line is ringing**:
+    - `ORIGINAL LINE DIALED`: **`(587) 900-7223` — GMB Direct (Main Line)**
+    - `ROUTED TO`: **`(587) 570-8005` — Quo Primary Dispatch / In-App Audio**
+- **Row 4 — Instant In-App Action Bar**:
+  - **`Start Quote with Caller`**: Immediately opens the Quick Quote calculator and auto-populates the caller's phone number, matched name/address, and lead source (`GMB Direct - 587-900-7223`) without typing a single digit.
+  - **`Answer in App` / `Audio Bridge`**: Connects browser audio directly if Browser Softphone mode is enabled, or marks the call active on your screen while you talk on Quo.
+  - **`Drop & Block Caller`**: Immediately severs the live Twilio call in mid-ring and adds the caller's number to your Blocklist.
+  - **`Drop & Block Area Code (e.g. 408*)`**: Immediately severs the live call and permanently blocks that entire 3-digit area code so they can never rotate the last 4 digits again.
+
+#### B. Live Attribution Feed & "Test Incoming Call" Simulator inside Spam Shield
+- Inside the **Twilio Spam Shield** modal and dashboard view:
+  - A **Live Call Attribution Table** showing the last 25 calls with 4 clear columns: **Time**, **Customer Caller ID**, **Original Number Dialed (Campaign)**, and **Action / Destination Line** (with 1-click `Quote` and `Block Area Code` actions on every historical row).
+  - A **`Simulate Live Call`** button so you can test the exact pop-up screener banner at any time (simulating a customer dialing `587-900-7223`, passing through Twilio `825-533-4317`, and popping up on your screen with full attribution).
 
 ---
 
-## 4. Technical Architecture & Data Strategy *(Technical Reference)*
+## 3. System Architecture & Call Flow
 
-- **Architecture & Component Diagram**:
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                     Client UI (React SPA — Port 3000)                        │
-│                                                                              │
-│  ┌────────────────────────────────────┐  ┌────────────────────────────────┐  │
-│  │   Clean Google Sheet Hub           │  │   Jobber Sync Management       │  │
-│  │   • Sheet Preset Selector          │  │   • Direct Jobber OAuth Link   │  │
-│  │   • 1-Click Create Sheet in Drive  │  │     (api.getjobber.com)        │  │
-│  │   • 1-Click Sync to Drive Sheet    │  │   • Active Leads Sheet Link    │  │
-│  │   • FB Ads / Google Ads Connect    │  │   • 1-Click Create/Sync Sheet  │  │
-│  │   • Blob .XLSX / .CSV Download     │  │     in Google Drive            │  │
-│  └─────────────────┬──────────────────┘  └───────────────┬────────────────┘  │
-│                    └──────────────────┬──────────────────┘                   │
-│                                       ▼                                      │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │         Google Drive & Sheets Service (Client-Side OAuth Token)        │  │
-│  │  • Creates/Updates native Google Sheet (vnd.google-apps.spreadsheet)   │  │
-│  │    with 4 tabs (FB Leads, Google Leads, Voice Quotes, Pasted Leads)    │  │
-│  │  • Persists real spreadsheetId & sheetUrl to /api/google-sheets/config │  │
-│  └─────────────────┬─────────────────────────────────────┬────────────────┘  │
-└────────────────────┼─────────────────────────────────────┼───────────────────┘
-                     ▼                                     ▼
-┌─────────────────────────────────────────┐ ┌──────────────────────────────────┐
-│   Express Backend (/api/*)              │ │   Google Drive / Sheets API v3   │
-│  • Auto-repairs fake *_clean_sheet IDs  │ │  • Folder: TidyUps Cleaning App  │
-│    to 1TifULi7n2BylQdvla-8DRv...        │ │    Backup Zips                   │
-│  • Generates multi-tab .XLSX buffer     │ │  • Returns live webViewLink:     │
-│  • Inbound Webhook (/api/leads/webhook) │ │    docs.google.com/spreadsheets/ │
-│    for FB Lead Ads & Google Ads         │ │    d/<REAL_ID>/edit              │
-└─────────────────────────────────────────┘ └──────────────────────────────────┘
+```text
+Customer Dials Public Line: (587) 900-7223 (Quo GMB Direct)
+       │
+       ▼  (OpenPhone Call Forwarding to paired Twilio Shield Line)
+Twilio Shield Line: +1 (825) 533-4317
+       │
+       ▼  POST /api/twilio/voice (From: Customer, To: 825-533-4317, ForwardedFrom: 587-900-7223)
+┌─────────────────────────────────────────────────────────────────────────┐
+│ TidyUps Spam Shield Engine                                              │
+│  1. Checks Blocked Prefixes (1408*, 1301*, 1406*, 1800*, etc.)          │
+│  2. Checks Blocklist & Nomorobo / Carrier Robocall Score                │
+│  3. Resolves Original Dialed Line: (587) 900-7223 ("GMB Direct")        │
+└──────┬───────────────────────────────────────────────────────────┬──────┘
+       │                                                           │
+  [IF SPAM / BLOCKED]                                       [IF CLEAN HUMAN]
+       │                                                           │
+       ▼                                                           ▼
+Twilio TwiML:                                      1. Broadcasts Live Incoming Call Event
+<Pause length="1"/><Hangup/>                          to TidyUps App Screener HUD:
+(Answers 1s & hangs up completely                     • Customer ID: (780) 600-0607
+ so Quo never pulls call back                         • Dialed Line: (587) 900-7223 (GMB Direct)
+ to Sona AI — $0 AI cost)                             • CRM Match & 1-Click Quote Pre-fill
+                                                   2. Bridges Audio (<Dial answerOnBridge="true">)
+                                                      to Receiving Line (587-570-8005 / 833-843-9877)
+                                                      so Quo records & transcribes the call!
 ```
 
-- **Data Model & State**:
-  - `cleanSheetConfig` (persisted in server store & `baseJobberStoreSeed.json`):
-    - `spreadsheetId`: Valid Google Spreadsheet ID (defaults to `1TifULi7n2BylQdvla-8DRvYHul_A1wXXzypUdBJwEeA`; auto-sanitizes any legacy `1TifULi7n2BylQdvla_clean_sheet` placeholder).
-    - `sheetUrl`: `https://docs.google.com/spreadsheets/d/<spreadsheetId>/edit`.
-    - `createdDriveSheetId` / `createdDriveSheetUrl`: Tracks the user's newly created Google Sheet in Drive so they can switch between their existing sheet and their new FB/Google Ads sheet at any time.
-- **Interactive Component & State Mapping**:
-  - **Sheet Switcher & URL Bar**: Switching between *Existing Primary Sheet*, *Existing Secondary Sheet*, or *Newly Created Drive Sheet* immediately updates `googleSheetUrl` and persists to `/api/google-sheets/config`.
-  - **Create New Leads Sheet in Drive Handler**: Requests Google OAuth token synchronously via GIS if needed, fetches the multi-tab `.xlsx` binary from `/api/leads/export.xlsx`, uploads to Google Drive API with `mimeType: 'application/vnd.google-apps.spreadsheet'`, saves the returned `id` and `webViewLink` to `/api/google-sheets/config`, and updates UI state.
-  - **Sync to Existing Drive Sheet Handler**: Prompts user with an explicit confirmation modal before updating the existing Drive spreadsheet file via `PATCH https://www.googleapis.com/upload/drive/v3/files/<fileId>?uploadType=multipart`.
-  - **Inbound FB Ads / Google Ads Webhook (`/api/leads/webhook`)**: Accepts `POST` payloads from Facebook Lead Ads / Google Ads / Zapier, normalizes the lead into the 20-column format under `Facebook Leads` or `Google Leads`, and stores it immediately in the Clean Sheet Hub.
+---
+
+## 4. Functional Implementation Steps
+
+1. **Original-Line Attribution Engine & Active Call Registry**:
+   - Enhance the Twilio voice webhook handler so every incoming call records:
+     - `callSid`: Twilio's unique live call identifier (allowing mid-call hangup/blocking from our UI).
+     - `callerNumber`: Customer's real phone number (`From`).
+     - `shieldNumber`: The Twilio number that screened the call (`To`).
+     - `originalDialedNumber` & `campaignLabel`: Resolved automatically from `ForwardedFrom` or the 1-to-1 Twilio-to-Quo mapping (e.g., `(587) 900-7223 — GMB Direct`).
+     - `destinationNumber`: The receiving Quo line (`(587) 570-8005` or `(833) 843-9877`).
+     - `crmMatch`: Automatic lookup against saved Clients, Quotes, and Bookings by phone number.
+2. **Real-Time In-App Call Screener Endpoint & Live Control Actions**:
+   - Add `/api/twilio/live-calls` (polled every 2 seconds while the app is open, plus instant trigger on test/webhook) to surface ringing or active calls in real time.
+   - Add `/api/twilio/live-calls/:callSid/terminate` so clicking **Drop & Block Caller** or **Drop & Block Area Code** inside the web app uses the Twilio REST API (`calls(callSid).update({ status: 'completed' })`) to immediately hang up the live call and save the new block rule.
+   - Add `/api/twilio/live-calls/simulate` so you can trigger a realistic test ring on `(587) 900-7223` from inside the app and verify how the screener banner looks and pre-fills a Quick Quote.
+3. **Global Floating Call Screener HUD & 1-Click Quote Pre-Fill**:
+   - Mount the floating `LiveCallScreenerHUD` at the top level of the application so it works across all tabs.
+   - Wire **`Start Quote with Caller`** to switch directly to the Quick Quote tab and pre-populate the customer's phone number, name/address (if matched in CRM), and the exact marketing campaign line they dialed (`587-900-7223 GMB Direct`).
+   - Add an **In-App Call Screener & Answering Mode** section inside the Twilio Spam Shield settings so you can test the banner with 1 click and see the live attribution log of every call.
