@@ -8,6 +8,73 @@
     'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
     })(window,document,'script','dataLayer','GTM-PQ4NMPGP');</script>
     <!-- End Google Tag Manager -->
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18533917803"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+
+      // Initialize Google Consent Mode v2 before gtag('config') so EU/CA cookie banner consent is respected
+      (function() {
+        var adConsent = 'granted';
+        var analyticsConsent = 'granted';
+        try {
+          var saved = localStorage.getItem('tidyups_cookie_consent_v1');
+          if (saved) {
+            var parsed = JSON.parse(saved);
+            if (parsed && parsed.decided) {
+              adConsent = parsed.marketing ? 'granted' : 'denied';
+              analyticsConsent = parsed.analytics ? 'granted' : 'denied';
+            }
+          }
+        } catch (_) {}
+        gtag('consent', 'default', {
+          'ad_storage': adConsent,
+          'ad_user_data': adConsent,
+          'ad_personalization': adConsent,
+          'analytics_storage': analyticsConsent,
+          'functionality_storage': 'granted',
+          'security_storage': 'granted',
+          'wait_for_update': 500
+        });
+      })();
+
+      gtag('js', new Date());
+      gtag('config', 'AW-18533917803');
+
+      // Reusable helper + automatic conversion trigger on /booking conversion page
+      window.fireGoogleAdsBookingConversion = function(customValue, customCurrency) {
+        try {
+          gtag('event', 'conversion', {
+            'send_to': 'AW-18533917803/9UFlCKPg1KcdEOvI1IVF',
+            'value': typeof customValue === 'number' && customValue > 0 ? customValue : 1.0,
+            'currency': customCurrency || 'CAD'
+          });
+        } catch (_) {}
+      };
+    </script>
+
+    <!-- Event snippet for Hostinger Lead - app.dispatchgeni.com/booking (b9e1b84c) conversion page -->
+    <script>
+      (function() {
+        var path = (window.location.pathname || '').toLowerCase();
+        var search = (window.location.search || '').toLowerCase();
+        if (
+          path === '/booking' ||
+          path.indexOf('/booking/') === 0 ||
+          path === '/book' ||
+          path.indexOf('/book/') === 0 ||
+          search.indexOf('booking=1') !== -1
+        ) {
+          gtag('event', 'conversion', {
+            'send_to': 'AW-18533917803/9UFlCKPg1KcdEOvI1IVF',
+            'value': 1.0,
+            'currency': 'CAD'
+          });
+        }
+      })();
+    </script>
     <meta charset="UTF-8" />
     <script>
       // 0. Guard against browser Web3 wallet extensions (e.g., Phantom evmAsk.js / MetaMask) throwing

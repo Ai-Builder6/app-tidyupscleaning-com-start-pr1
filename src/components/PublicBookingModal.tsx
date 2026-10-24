@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { triggerGoogleAdsConversion } from './CookieConsentBanner';
 import {
   CheckCircle2,
   Sparkles,
@@ -644,15 +645,17 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
         try {
           const w = window as any;
           w.dataLayer = w.dataLayer || [];
+          const estValue = Number(data?.quote?.total || crewRuleDetails.startingSubtotal || 1.0);
           w.dataLayer.push({
             event: 'generate_lead',
             lead_source: heardAbout || 'Online Booking Form',
             service_type: serviceType,
             cleaners_count: crewRuleDetails.cleaners,
-            estimated_value: Number(data?.quote?.total || crewRuleDetails.startingSubtotal || 0),
+            estimated_value: estValue,
             currency: 'CAD',
             quote_number: data?.quoteNumber || '',
           });
+          triggerGoogleAdsConversion(estValue, 'CAD');
         } catch {
           // ignore dataLayer notice
         }

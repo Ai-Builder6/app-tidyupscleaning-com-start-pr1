@@ -51,6 +51,7 @@ import { AdLeadItem } from './types/lead';
 import { INITIAL_AD_LEADS } from './data/adLeadsData';
 import { LegalPagesView, LegalPageType } from './components/LegalPagesView';
 import { CustomerPortalView } from './components/CustomerPortalView';
+import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { CleanerPortalView } from './components/CleanerPortalView';
 import { ClientsDatabaseView } from './components/ClientsDatabaseView';
 import { ManagementHubView } from './components/ManagementHubView';
@@ -4203,6 +4204,14 @@ export function App() {
             </button>
           </div>
         )}
+
+        {/* Global Cookie Consent Banner (Google Ads Consent Mode v2 for AW-18533917803) */}
+        <CookieConsentBanner
+          onOpenPrivacyPolicy={() => {
+            setActiveLegalPage('PRIVACY_POLICY');
+            setActiveTopView('LEGAL_PAGES');
+          }}
+        />
       </div>
     </APIProvider>
   );

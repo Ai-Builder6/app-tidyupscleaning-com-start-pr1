@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { triggerGoogleAdsConversion } from './CookieConsentBanner';
 import {
   Sparkles,
   CheckCircle2,
@@ -1051,6 +1052,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
       const data = await res.json();
       if (res.ok && data.success) {
+        triggerGoogleAdsConversion(priceCalculation.total || 1.0, 'CAD');
         setConfirmedBookingId(data.jobberJobId || `JOB-${Math.floor(10000 + Math.random() * 90000)}`);
         setConfirmedQuoteNumber(data.quoteNumber || 'QT-4390');
         setFormSubmitted(true);
