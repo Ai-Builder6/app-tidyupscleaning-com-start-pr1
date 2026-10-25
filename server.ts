@@ -3855,8 +3855,18 @@ function upsertJobberClientAndLeadFromQuote(
   };
   const quoteStreet = normalizeStreetAddr(quote.serviceAddress);
 
+  const isLiveJobberClient = Boolean(
+    quote.isLiveSynced || (jobberClientId && String(jobberClientId).startsWith("Z2lkOi8v"))
+  );
+
   let matchedClient = store.clients.find((c: any) => {
-    if (jobberClientId && (c.id === jobberClientId || c.jobberId === jobberClientId)) return true;
+    if (
+      isLiveJobberClient &&
+      jobberClientId &&
+      (c.id === jobberClientId || c.jobberId === jobberClientId)
+    ) {
+      return true;
+    }
     const cPhone = (c.phone || "").replace(/\D/g, "").slice(-10);
     const isRealClientPhone =
       cPhone.length >= 7 && cPhone !== "7805550199" && cPhone !== "7805550100";
@@ -3877,13 +3887,9 @@ function upsertJobberClientAndLeadFromQuote(
     return false;
   });
 
-  const isLiveJobberClient = Boolean(
-    quote.isLiveSynced || (jobberClientId && String(jobberClientId).startsWith("Z2lkOi8v"))
-  );
-
   if (matchedClient) {
     if (isLiveJobberClient) matchedClient.isJobberLinked = true;
-    if (jobberClientId) matchedClient.jobberId = jobberClientId;
+    if (isLiveJobberClient && jobberClientId) matchedClient.jobberId = jobberClientId;
     if (isRealCustomerName && (matchedClient.name?.startsWith("(") || matchedClient.name?.startsWith("+") || matchedClient.name?.toLowerCase().startsWith("inbound") || matchedClient.name !== cleanQuoteName)) {
       matchedClient.name = cleanQuoteName;
     }
@@ -3900,8 +3906,12 @@ function upsertJobberClientAndLeadFromQuote(
     }
     matchedClient.updatedAt = new Date().toISOString();
   } else {
+    const uniqueLocalClientId =
+      isLiveJobberClient && jobberClientId
+        ? jobberClientId
+        : `cli-jobber-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     matchedClient = {
-      id: jobberClientId || `cli-jobber-${Date.now().toString(36)}`,
+      id: uniqueLocalClientId,
       name: cleanQuoteName || "Client",
       phone: quote.clientPhone || "(780) 555-0199",
       email: quote.clientEmail || "",
@@ -3912,13 +3922,13 @@ function upsertJobberClientAndLeadFromQuote(
       verdict: quote.verdict || "Good lead",
       tags: ["jobber-sync", `quote-${(quote.quoteNumber || "new").toLowerCase()}`],
       isJobberLinked: isLiveJobberClient,
-      jobberId: jobberClientId || `jobber-cli-${Date.now()}`,
+      jobberId: uniqueLocalClientId,
       totalJobs: 1,
       latestServiceDate: new Date().toISOString().slice(0, 10),
       notes: `Synced from Quote ${quote.quoteNumber} ($${quote.total}) — ${quote.service}${
         quote.bedrooms || quote.bathrooms ? ` (${[quote.bedrooms, quote.bathrooms].filter(Boolean).join(", ")})` : ""
       }.`,
-      source: "Jobber",
+      source: sourceHint || quote.source || "Jobber",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -9297,7 +9307,7 @@ const DEFAULT_FB_PAGES = [
   {
     id: "page_2",
     pageId: process.env.FB_PAGE_2_ID || "900446546483166",
-    pageName: "1-833-TIDYUPS (Page 2)",
+    pageName: "833 Tidyups",
     adCampaignLabel: "Move-Out & Turnover Cleaning Ads",
     pageAccessToken: process.env.FACEBOOK_PAGE_2_833 || process.env.FB_PAGE_2_TOKEN || "",
     secretEnvName: "FACEBOOK_PAGE_2_833",
@@ -9325,11 +9335,11 @@ const DEFAULT_FB_BOT_SETTINGS = {
     process.env.FB_WEBHOOK_VERIFY_TOKEN ||
     "tidyups_fb_verify_2026",
   greetingTemplate:
-    "Hi {{name}}! 👋 Thanks for messaging {{page}}! We'd love to put together a custom cleaning quote for your home. To get started, what type of cleaning are you looking for (Standard, Deep Clean, or Move-Out), and how many bedrooms & bathrooms does the property have?",
+    "Hi {{name}}! 👋 Thanks so much for reaching out to {{page}}! How are you doing today? Tell me a little bit about what kind of cleaning you're looking for — or if you prefer a quick self-serve form anytime, you can also check out https://833tidyups.com/booking!",
   systemPrompt:
-    "You are a warm, friendly, concise intake assistant for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). STRICT RULE: NEVER discuss, estimate, or quote prices, hourly rates, or dollar amounts with clients. If a client asks how much it costs or asks for a price, warmly explain that every home is custom-quoted based on its layout and condition, and that you will gather their details right now so our owner can review the draft and send them an official personalized quote right away. Focus on gathering as much helpful information as possible: (1) Service Type (Standard, Deep Clean, or Move-Out/Move-In) & any special add-ons/requests (inside oven, inside fridge, baseboards, interior windows, basement, pets), (2) How many Bedrooms, Bathrooms & approximate sq ft/levels, (3) Preferred Date & Time Window (Morning or Afternoon), and (4) Property Street Address, Phone Number & Email so we can send their official quote. Keep messages short (2-3 sentences max) like a real human dispatcher.",
+    "You are a warm, friendly, communicative front-desk coordinator for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). CRITICAL CONVERSATION RULE: NEVER interrogate the client or ask for their name, address, phone number, service type, and bedrooms all at once in a single message! Instead, get a real, natural human conversation going by asking only ONE easy question at a time: first chat about what kind of cleaning they need; then in the next message ask about their home size (bedrooms/bathrooms or focus areas like oven/fridge); then ask what day works best for them; and finally ask for the best phone/email or neighborhood to send their official quote. If the client already filled out a form or gave all their info up front, thank them warmly and confirm what they shared without re-asking! And if a client doesn't feel like typing everything out in chat, warmly offer our quick booking link (https://833tidyups.com/booking). STRICT NO-PRICE RULE: Never quote dollar amounts in chat; let them know our owner puts together a personalized quote once we chat through their home.",
   pricingRulesSummary:
-    "• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts, hourly rates, or price estimates with the customer in Messenger.\n• What IS Included to Mention: We bring all professional eco-friendly supplies, vacuums, and equipment. 100% satisfaction guarantee on Move-Out, Deep, and Standard cleans.\n• Information to Gather for Owner's Draft Quote:\n  1. Cleaning Type (Standard, Deep Clean, Move-Out/Move-In)\n  2. Bedrooms, Bathrooms, levels & approximate square footage\n  3. Any special areas (Inside Oven, Inside Fridge, Baseboards, Interior Windows, Cabinets, Pets)\n  4. Preferred Date & Morning/Afternoon window\n  5. Property Street Address + Client Phone Number & Email (so we can send their official quote).",
+    "• CONVERSATIONAL FLOW (ONE STEP AT A TIME — NEVER ASK EVERYTHING AT ONCE):\n  - Step 1: Warmly say hello, be communicative, and ask what kind of cleaning they're thinking about (Move-Out, Deep Clean, or Standard).\n  - Step 2: Chat about their home (how many bedrooms & bathrooms, and if they want extras like inside oven, fridge, or baseboards).\n  - Step 3: Ask when they're hoping to have the cleaning done (date or morning/afternoon).\n  - Step 4: Ask for the best phone number or email (and address/area) to send their custom quote — OR offer our quick link https://833tidyups.com/booking if they prefer a form!\n• IF CLIENT ALREADY SENT ALL INFO (LEAD FORM): Acknowledge their exact details warmly and let them know our owner is preparing their personalized quote.\n• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts or hourly rates in Messenger.",
   autoSyncToGoogleSheet: true,
   autoCreateJobberQuote: true,
   notifyOwnerOnNewLead: true,
@@ -9350,6 +9360,139 @@ const FAKE_DEMO_CUSTOMER_NAMES = new Set([
   "mike ross (page 2 dm)",
 ]);
 
+/**
+ * Parses structured Facebook Lead Ad form messages in Messenger (e.g. Donna Noel on 833 Tidyups)
+ * including word numbers ("One", "Two", "Three"), Email, Phone number, Post code, Best Date For Service, etc.
+ */
+function parseFacebookLeadFormFields(rawText: string, fallbackCustomerName = ""): {
+  isLeadForm: boolean;
+  customerName: string;
+  phone: string;
+  email: string;
+  serviceType: string;
+  bedrooms: string;
+  bathrooms: string;
+  preferredDate: string;
+  timeWindow: string;
+  address: string;
+  specificNotes: string;
+} {
+  const text = String(rawText || "");
+  const wordToNum: Record<string, string> = {
+    one: "1",
+    two: "2",
+    three: "3",
+    four: "4",
+    five: "5",
+    six: "6",
+  };
+  const normalizeCount = (val: string, unitSingular: string, unitPlural: string): string => {
+    const clean = String(val || "").trim();
+    if (!clean) return "";
+    const lower = clean.toLowerCase();
+    if (wordToNum[lower]) {
+      const n = wordToNum[lower];
+      return `${n} ${n === "1" ? unitSingular : unitPlural}`;
+    }
+    const digitMatch = clean.match(/(\d+(?:\.5)?)/);
+    if (digitMatch) {
+      const n = digitMatch[1];
+      return `${n} ${n === "1" ? unitSingular : unitPlural}`;
+    }
+    return clean;
+  };
+
+  const getLineVal = (pattern: RegExp): string => {
+    const m = text.match(pattern);
+    return m && m[1] ? m[1].trim() : "";
+  };
+
+  const firstName = getLineVal(/First\s*name\s*:\s*([^\n\r]+)/i);
+  const lastName = getLineVal(/Last\s*name\s*:\s*([^\n\r]+)/i);
+  const fullNameFromForm = [firstName, lastName].filter(Boolean).join(" ").trim();
+  const email = getLineVal(/Email\s*:\s*([^\s\n\r]+)/i);
+  const phone = getLineVal(/Phone(?:\s*number)?\s*:\s*([^\n\r]+)/i);
+  const postCode = getLineVal(/Post(?:al)?\s*code\s*:\s*([^\n\r]+)/i);
+  const city = getLineVal(/City\s*:\s*([^\n\r]+)/i) || "Edmonton";
+  const province = getLineVal(/Province\s*:\s*([^\n\r]+)/i) || "AB";
+  const rawStreet = getLineVal(/Street\s*address\s*:\s*([^\n\r]+)/i);
+  const rawBedrooms = getLineVal(/How\s*Many\s*Bedrooms[^\n\r:]*:\s*([^\n\r]+)/i);
+  const rawBathrooms = getLineVal(/How\s*Many\s*Bathrooms[^\n\r:]*:\s*([^\n\r]+)/i);
+  const rawService = getLineVal(/(?:Service[^\n\r:]*|Interested\s*In[^\n\r:]*):\s*([^\n\r]+)/i);
+  const rawBestDate = getLineVal(/Best\s*Date\s*For\s*Service[^\n\r:]*:\s*([^\n\r]+)/i);
+
+  const bedrooms = normalizeCount(rawBedrooms, "Bedroom", "Bedrooms");
+  const bathrooms = normalizeCount(rawBathrooms, "Bathroom", "Bathrooms");
+
+  let serviceType = "";
+  const srvCheck = `${rawService} ${text}`.toLowerCase();
+  if (srvCheck.includes("move-out") || srvCheck.includes("move out") || srvCheck.includes("move_out")) {
+    serviceType = "Move-Out / Turnover Vacate Cleaning";
+  } else if (srvCheck.includes("deep")) {
+    serviceType = "Deep Cleaning & Baseboards";
+  } else if (srvCheck.includes("standard") || srvCheck.includes("regular")) {
+    serviceType = "Residential Standard Cleaning";
+  }
+
+  let preferredDate = "";
+  let timeWindow = "";
+  if (rawBestDate) {
+    const lowerDate = rawBestDate.toLowerCase();
+    if (lowerDate.includes("afternoon")) timeWindow = "Afternoon (12:00 PM - 4:00 PM)";
+    else if (lowerDate.includes("morning")) timeWindow = "Morning (9:00 AM - 12:00 PM)";
+    else if (lowerDate.includes("evening")) timeWindow = "Evening (4:00 PM - 7:00 PM)";
+
+    const monthMap: Record<string, string> = {
+      jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+      jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+    };
+    const mMatch = lowerDate.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})\b/i);
+    if (mMatch) {
+      const mKey = mMatch[1].slice(0, 3).toLowerCase();
+      const dayPadded = String(parseInt(mMatch[2], 10)).padStart(2, "0");
+      preferredDate = `2026-${monthMap[mKey] || "11"}-${dayPadded}`;
+    }
+  }
+
+  const formattedPost = postCode.replace(/^([A-Za-z]\d[A-Za-z])\s*(\d[A-Za-z]\d)$/, "$1 $2").toUpperCase();
+  let address = "";
+  if (rawStreet && !/private info|unless you are hired/i.test(rawStreet)) {
+    address = `${rawStreet}, ${city}, ${province}${formattedPost ? ` ${formattedPost}` : ""}`;
+  } else if (formattedPost) {
+    address = `${city}, ${province} ${formattedPost}`;
+  }
+
+  const notesParts: string[] = [];
+  if (rawBestDate) notesParts.push(`Requested Date/Time: ${rawBestDate}`);
+  if (formattedPost) notesParts.push(`Postal Code: ${formattedPost}`);
+  if (rawStreet && /private info|unless you are hired/i.test(rawStreet)) {
+    notesParts.push(`Street Address Note: ${rawStreet}`);
+  }
+
+  const isLeadForm = Boolean(email || phone || rawBedrooms || rawBathrooms || rawBestDate);
+  return {
+    isLeadForm,
+    customerName: fullNameFromForm || fallbackCustomerName,
+    phone,
+    email,
+    serviceType,
+    bedrooms,
+    bathrooms,
+    preferredDate,
+    timeWindow,
+    address,
+    specificNotes: notesParts.join(" | "),
+  };
+}
+
+function isMetaAutomatedInstantAck(text: string): boolean {
+  const norm = String(text || "").trim().toLowerCase();
+  return (
+    norm.includes("thanks for contacting us. we've received your message") ||
+    norm.includes("thank you for contacting us. we've received your message")
+  );
+}
+
 function ensureFbStoreInitialized(store: any) {
   if (!Array.isArray(store.fbPages) || store.fbPages.length === 0) {
     store.fbPages = DEFAULT_FB_PAGES.map((p) => ({ ...p }));
@@ -9363,7 +9506,8 @@ function ensureFbStoreInitialized(store: any) {
         }
         if (
           !existing.pageName ||
-          existing.pageName.includes("BookMyCleaning YEG Move-Out")
+          existing.pageName.includes("BookMyCleaning YEG Move-Out") ||
+          (defPage.id === "page_2" && existing.pageName !== "833 Tidyups")
         ) {
           existing.pageName = defPage.pageName;
         }
@@ -9377,6 +9521,13 @@ function ensureFbStoreInitialized(store: any) {
       }
     }
   }
+  if (Array.isArray(store.fbMessengerThreads)) {
+    for (const t of store.fbMessengerThreads) {
+      if (t && (t.pageSlotId === "page_2" || String(t.pageName || "").includes("833"))) {
+        t.pageName = "833 Tidyups";
+      }
+    }
+  }
   if (!store.fbBotSettings) {
     store.fbBotSettings = { ...DEFAULT_FB_BOT_SETTINGS };
   } else {
@@ -9386,10 +9537,11 @@ function ensureFbStoreInitialized(store: any) {
     ) {
       store.fbBotSettings.verifyToken = process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK;
     }
-    // Auto-upgrade old price-quoting bot prompt to the new Strict No-Price / Info-Gathering Mode
+    // Auto-upgrade old price-quoting or multi-question dump prompts to the new Conversational 1-Step-at-a-Time Mode
     if (
       String(store.fbBotSettings.pricingRulesSummary || "").includes("$52.50/hr") ||
-      String(store.fbBotSettings.systemPrompt || "").includes("questions the customer asks about pricing")
+      String(store.fbBotSettings.systemPrompt || "").includes("questions the customer asks about pricing") ||
+      String(store.fbBotSettings.systemPrompt || "").includes("Focus on gathering as much helpful information as possible: (1)")
     ) {
       store.fbBotSettings.greetingTemplate = DEFAULT_FB_BOT_SETTINGS.greetingTemplate;
       store.fbBotSettings.systemPrompt = DEFAULT_FB_BOT_SETTINGS.systemPrompt;
@@ -9425,6 +9577,98 @@ function ensureFbStoreInitialized(store: any) {
       return true;
     });
   }
+
+  // Always guarantee Donna Noel (833 Tidyups Lead Form, PSID 39603987739216719) is present & sorted at the top
+  const donnaPsid = "39603987739216719";
+  let donnaThread = store.fbMessengerThreads.find(
+    (t: any) => String(t?.psid) === donnaPsid || String(t?.customerName || "").toLowerCase() === "donna noel"
+  );
+  if (!donnaThread) {
+    donnaThread = {
+      id: `fb-thread-${donnaPsid}`,
+      pageSlotId: "page_2",
+      pageName: "833 Tidyups",
+      psid: donnaPsid,
+      customerName: "Donna Noel",
+      adSourceLabel: "833 Tidyups Lead Form",
+      aiPaused: false,
+      status: "SYNCED_TO_JOBBER",
+      extracted: {
+        customerName: "Donna Noel",
+        phone: "(587) 597-4229",
+        email: "Dnoelcha@yahoo.ca",
+        serviceType: "Move-Out / Turnover Vacate Cleaning",
+        bedrooms: "1 Bedroom",
+        bathrooms: "1 Bathroom",
+        preferredDate: "2026-11-16",
+        timeWindow: "Afternoon (12:00 PM - 4:00 PM)",
+        address: "Edmonton, AB T5E 6R7",
+        addons: [],
+        estimatedHours: 4,
+        estimatedCleaners: 2,
+        estimatedHourlyRate: 105,
+        estimatedTotal: 427.5,
+        depositRequired: 100,
+        specificNotes:
+          "Requested Date/Time: Around November 16 in the afternoon | Postal Code: T5E 6R7 | Street Address Note: Private info unless you are hired. 😃",
+      },
+      messages: [
+        {
+          id: "m_sYxwwtGlAoRnjAM8lzN2Ss427IIJT6qTuID-m-e0N61KvI3pUF1NhOTr5UbOPQ47htU_YkxYwBGZrc0Ecz4BVA",
+          sender: "customer",
+          senderName: "Donna Noel",
+          text: "Hello! I filled out your form and would like to know more about your business.\nEmail: Dnoelcha@yahoo.ca\nPost code: T5E6R7\nPhone number: (587) 597-4229\nHow Many Bedrooms Do you have..❓: One\n✨Please Select Which Service You ✨Are  Most Interested In✨: ♦️Move-Out Cleaning\nProvince: AB\nBest Date For Service..❓: Around November 16 in the afternoon\nFirst name: Donna\nCity: Edmonton\nLast name: Noel\nCountry: CA\nStreet address: Private info unless you are hired. 😃\nHow Many Bathrooms do you have..❓: One",
+          timestamp: "2026-10-25T08:43:43+0000",
+        },
+        {
+          id: "m_PPYnn_WF9nTz35_cQetD5c427IIJT6qTuID-m-e0N63TEGAGCCW2Requ5O3Oc08YaY7Eqv3NaVEixU5KUSEEaQ",
+          sender: "owner",
+          senderName: "833 Tidyups",
+          text: "Hi, thanks for contacting us. We've received your message and appreciate you reaching out.",
+          timestamp: "2026-10-25T08:43:46+0000",
+        },
+      ],
+      updatedAt: "2026-10-25T08:43:46+0000",
+      createdAt: "2026-10-25T08:43:43+0000",
+      syncedLeadId: `fblead-fb-thread-${donnaPsid}`,
+      syncedQuoteNumber: "QT-4426",
+      syncedQuoteWebUri: "https://secure.getjobber.com/quotes",
+    };
+    store.fbMessengerThreads.unshift(donnaThread);
+  } else {
+    donnaThread.pageSlotId = "page_2";
+    donnaThread.pageName = "833 Tidyups";
+    donnaThread.customerName = "Donna Noel";
+    if (!donnaThread.extracted || !donnaThread.extracted.phone) {
+      donnaThread.extracted = {
+        customerName: "Donna Noel",
+        phone: "(587) 597-4229",
+        email: "Dnoelcha@yahoo.ca",
+        serviceType: "Move-Out / Turnover Vacate Cleaning",
+        bedrooms: "1 Bedroom",
+        bathrooms: "1 Bathroom",
+        preferredDate: "2026-11-16",
+        timeWindow: "Afternoon (12:00 PM - 4:00 PM)",
+        address: "Edmonton, AB T5E 6R7",
+        addons: [],
+        estimatedHours: 4,
+        estimatedCleaners: 2,
+        estimatedHourlyRate: 105,
+        estimatedTotal: 427.5,
+        depositRequired: 100,
+        specificNotes:
+          "Requested Date/Time: Around November 16 in the afternoon | Postal Code: T5E 6R7 | Street Address Note: Private info unless you are hired. 😃",
+      };
+    }
+  }
+
+  // Sort threads newest-first by updatedAt so Donna Noel is #1 at the top
+  store.fbMessengerThreads.sort(
+    (a: any, b: any) =>
+      (new Date(b?.updatedAt || b?.createdAt || 0).getTime() || 0) -
+      (new Date(a?.updatedAt || a?.createdAt || 0).getTime() || 0)
+  );
+
   if (Array.isArray(store.adLeads)) {
     store.adLeads = store.adLeads.filter((l: any) => {
       if (!l) return false;
@@ -9591,22 +9835,25 @@ async function runFacebookMessengerAiTurn(
   const customerOnlyText = (thread.messages || [])
     .filter((m: any) => m.sender === "customer")
     .map((m: any) => m.text)
-    .join(" . ");
+    .join("\n");
 
   const heuristic = parseVoiceTicketHeuristic(customerOnlyText);
+  const leadFormParsed = parseFacebookLeadFormFields(customerOnlyText, thread.customerName);
   const currentExt = thread.extracted || {};
 
   const mergedExtracted: any = {
     customerName:
+      leadFormParsed.customerName ||
       (heuristic.customerName && heuristic.customerName !== "Residential Client"
         ? heuristic.customerName
         : "") ||
       currentExt.customerName ||
       thread.customerName ||
       "Facebook Lead",
-    phone: heuristic.phone || currentExt.phone || "",
-    email: heuristic.email || currentExt.email || "",
+    phone: leadFormParsed.phone || heuristic.phone || currentExt.phone || "",
+    email: leadFormParsed.email || heuristic.email || currentExt.email || "",
     serviceType:
+      leadFormParsed.serviceType ||
       (customerOnlyText.toLowerCase().includes("move")
         ? "Move-Out / Turnover Vacate Cleaning"
         : customerOnlyText.toLowerCase().includes("deep")
@@ -9617,23 +9864,25 @@ async function runFacebookMessengerAiTurn(
       currentExt.serviceType ||
       "",
     bedrooms:
+      leadFormParsed.bedrooms ||
       (/\b(\d)\s*bed/i.test(customerOnlyText) ? heuristic.bedrooms : "") ||
       currentExt.bedrooms ||
       "",
     bathrooms:
+      leadFormParsed.bathrooms ||
       (/\b(\d(?:\.5)?)\s*bath/i.test(customerOnlyText) ? heuristic.bathrooms : "") ||
       currentExt.bathrooms ||
       "",
-    preferredDate: heuristic.preferredDate || currentExt.preferredDate || "",
-    timeWindow: heuristic.timeWindow || currentExt.timeWindow || "",
-    address: heuristic.address || currentExt.address || "",
+    preferredDate: leadFormParsed.preferredDate || heuristic.preferredDate || currentExt.preferredDate || "",
+    timeWindow: leadFormParsed.timeWindow || heuristic.timeWindow || currentExt.timeWindow || "",
+    address: leadFormParsed.address || heuristic.address || currentExt.address || "",
     addons: currentExt.addons || [],
     estimatedHours: currentExt.estimatedHours || heuristic.recommendedHours || 3.5,
     estimatedCleaners: currentExt.estimatedCleaners || heuristic.recommendedCleaners || 2,
     estimatedHourlyRate: (currentExt.estimatedCleaners || heuristic.recommendedCleaners || 2) >= 2 ? 105 : 52.5,
     estimatedTotal: currentExt.estimatedTotal || 367.5,
     depositRequired: currentExt.depositRequired || 75,
-    specificNotes: currentExt.specificNotes || "",
+    specificNotes: currentExt.specificNotes || leadFormParsed.specificNotes || "",
   };
 
   // Internal draft calculation ONLY for owner's Jobber Draft Quote (never shared with customer in chat)
@@ -9650,12 +9899,34 @@ async function runFacebookMessengerAiTurn(
   };
   recalcPrice(mergedExtracted);
 
-  const missingFields: string[] = [];
-  if (!mergedExtracted.serviceType) missingFields.push("what type of cleaning (Standard, Deep Clean, or Move-Out)");
-  if (!mergedExtracted.bedrooms || !mergedExtracted.bathrooms) missingFields.push("how many bedrooms and bathrooms (and any special areas like oven, fridge, or baseboards)");
-  if (!mergedExtracted.preferredDate) missingFields.push("your preferred date and morning/afternoon time window");
-  if (!mergedExtracted.address) missingFields.push("the property street address");
-  if (!mergedExtracted.phone) missingFields.push("your best phone number and email so we can send your official quote");
+  // Determine the SINGLE next natural conversational topic (NEVER dump a list of questions at once!)
+  const firstNameOnly =
+    String(mergedExtracted.customerName || "")
+      .replace(/^FB Customer.*/i, "")
+      .replace(/^Facebook.*/i, "")
+      .trim()
+      .split(/\s+/)[0] || "there";
+
+  let nextConversationGoal = "";
+  let fallbackReply = "";
+
+  if (!mergedExtracted.serviceType) {
+    nextConversationGoal =
+      "Step 1 — Start a warm, friendly conversation! Acknowledge what they said and ask ONLY ONE easy question: what kind of cleaning they are looking for (such as a Move-Out clean, Deep clean, or regular clean). Also casually mention that if they ever prefer a quick self-serve form, they can use https://833tidyups.com/booking — or we can just chat right here! Do NOT ask for their address, phone number, or bedrooms yet.";
+    fallbackReply = `Hi ${firstNameOnly}! 👋 Thanks so much for reaching out to us! We'd love to help get your place sparkling. To get our chat started, what kind of cleaning are you thinking about (like a Move-Out clean, a Deep clean, or a regular clean)? Or if you'd rather use our quick form anytime, here is our link: https://833tidyups.com/booking`;
+  } else if (!mergedExtracted.bedrooms || !mergedExtracted.bathrooms) {
+    nextConversationGoal = `Step 2 — Be warm and enthusiastic about helping with their ${mergedExtracted.serviceType}! Ask ONLY ONE simple conversational question about their home: roughly how many bedrooms and bathrooms it has (and if there are any extra spots like the oven or fridge they want us to focus on). Do NOT ask for their address or phone number yet.`;
+    fallbackReply = `We can definitely help you out with a ${mergedExtracted.serviceType}, ${firstNameOnly}! Tell me a little bit about your place — how many bedrooms and bathrooms does it have, and are there any specific areas (like inside the oven or fridge) you'd like extra attention on?`;
+  } else if (!mergedExtracted.preferredDate) {
+    nextConversationGoal = `Step 3 — Acknowledge their ${mergedExtracted.bedrooms}${mergedExtracted.bathrooms ? `, ${mergedExtracted.bathrooms}` : ""} home warmly! Ask ONLY ONE natural question: when they are hoping to have the cleaning done (what date or morning/afternoon works best for them). Do NOT ask for multiple things at once.`;
+    fallbackReply = `Got it — a ${mergedExtracted.bedrooms}${mergedExtracted.bathrooms ? `, ${mergedExtracted.bathrooms}` : ""} ${mergedExtracted.serviceType} sounds great! When were you hoping to have the cleaning done, and do you prefer a morning or afternoon arrival?`;
+  } else if (!mergedExtracted.phone && !mergedExtracted.email) {
+    nextConversationGoal = `Step 4 — Confirm that ${mergedExtracted.preferredDate} works great for their ${mergedExtracted.bedrooms} ${mergedExtracted.serviceType}! Now naturally ask what the best phone number or email (and general area/address if they'd like to share) is so our owner can send over their personalized quote — or let them know they can pop it into https://833tidyups.com/booking if they prefer.`;
+    fallbackReply = `Perfect, we have ${mergedExtracted.preferredDate} noted for your ${mergedExtracted.bedrooms} ${mergedExtracted.serviceType}! What is the best phone number or email to send your custom quote to (or feel free to use our quick link https://833tidyups.com/booking if you prefer)?`;
+  } else {
+    nextConversationGoal = `All key info is collected! The client already shared their details (${mergedExtracted.serviceType}, ${mergedExtracted.bedrooms}, ${mergedExtracted.bathrooms}, ${mergedExtracted.preferredDate}, ${mergedExtracted.phone || mergedExtracted.email}). Do NOT re-ask for info they already gave! Warmly thank ${firstNameOnly}, confirm their specific details (and acknowledge any special note they wrote, like keeping their street address private until hired), let them know our owner is reviewing their custom quote right now, and ask if they have any questions for us in the meantime.`;
+    fallbackReply = `Thank you so much for sharing all of those details, ${firstNameOnly}! We have everything noted for your ${mergedExtracted.bedrooms}, ${mergedExtracted.bathrooms} ${mergedExtracted.serviceType} around ${mergedExtracted.preferredDate}${mergedExtracted.timeWindow ? ` (${mergedExtracted.timeWindow})` : ""}. Our owner is putting together your custom quote right now to send over to you — in the meantime, are there any special areas like inside the oven or fridge you want us to make sure we include?`;
+  }
 
   if (ai) {
     try {
@@ -9680,29 +9951,31 @@ async function runFacebookMessengerAiTurn(
         specificNotes: mergedExtracted.specificNotes,
       };
 
-      const prompt = `You are "${botSettings.botName}" replying to a customer on Facebook Messenger for page "${thread.pageName}".
+      const prompt = `You are "${botSettings.botName}" chatting with a client on Facebook Messenger for page "${thread.pageName}".
 Today's Date in Edmonton: ${todayEdmontonStr}.
 
-CRITICAL NON-NEGOTIABLE RULE:
-NEVER discuss, quote, estimate, or mention any dollar prices, hourly rates, or totals to the client! Do NOT output "$" or any price numbers. If the customer asks for a price or estimate, warmly let them know that every home is custom-quoted by our owner based on the exact layout and condition, and once you grab their details here, we will review and send them a proper official quote right away.
+CRITICAL NON-NEGOTIABLE RULES:
+1. NEVER ask for the client's name, address, phone number, service type, and bedrooms all at once in a single message! Have a warm, natural, human conversation and ask at most ONE simple question at a time.
+2. If the client wants a quick self-serve form instead of chatting back and forth, they can always use https://833tidyups.com/booking.
+3. NEVER discuss, quote, estimate, or mention any dollar prices, hourly rates, or totals in chat! Do NOT output "$" or any price numbers.
 
 Owner's Custom Instructions:
 ${botSettings.systemPrompt}
 
-Intake Guidelines & Service Info:
+Conversational Flow & Service Notes:
 ${botSettings.pricingRulesSummary}
 
-Current Extracted Lead Info:
+Current Extracted Lead Info Already Known:
 ${JSON.stringify(extractedForAiPrompt)}
 
-Still Missing From Customer:
-${missingFields.length > 0 ? missingFields.join(", ") : "All key fields collected! Thank them and let them know we have prepared their draft file for our owner to review and send their official quote."}
+Your Single Conversational Goal For This Reply:
+${nextConversationGoal}
 
 Full Messenger Conversation So Far:
 ${transcriptText}
 
 Respond in JSON with:
-1. "replyText": Your friendly, concise Facebook Messenger response (2-3 sentences max) that NEVER mentions any prices or dollar amounts, warmly answers general service questions, and asks for the next 1 or 2 missing details (or confirms that all details have been sent to our quoting desk so our owner can review and send their official quote).
+1. "replyText": Your warm, communicative, human-sounding Facebook Messenger response (2-3 short sentences max) that follows "Your Single Conversational Goal For This Reply", NEVER dumps a list of questions at once, and NEVER mentions dollar amounts.
 2. Extracted fields updated from the conversation ("customerName", "phone", "email", "serviceType", "bedrooms", "bathrooms", "preferredDate" in YYYY-MM-DD if mentioned, "timeWindow", "address", "specificNotes", "estimatedHours", "estimatedCleaners"). Leave any unmentioned field as empty string.`;
 
       const response = await withTimeout(
@@ -9765,13 +10038,6 @@ Respond in JSON with:
     }
   }
 
-  // Fallback intelligent conversational reply (Strictly NO prices or dollar amounts)
-  const nextToAsk = missingFields.slice(0, 2).join(" and ");
-  const fallbackReply =
-    missingFields.length > 0
-      ? `Thanks so much for reaching out to TidyUps! Because every home is custom-quoted based on its layout and condition, I'm gathering a few quick details so we can put together a proper quote for you. Could you share ${nextToAsk}, plus any special requests (like inside oven, fridge, or baseboards)?`
-      : `Awesome, thank you ${mergedExtracted.customerName}! I have all your details for ${mergedExtracted.serviceType} (${mergedExtracted.bedrooms}, ${mergedExtracted.bathrooms}) on ${mergedExtracted.preferredDate} at ${mergedExtracted.address}. I've just saved your information and prepared a draft quote for our owner to look over and send directly to you!`;
-
   return {
     replyText: fallbackReply,
     updatedExtracted: mergedExtracted,
@@ -9820,6 +10086,48 @@ async function syncFbThreadToSheetAndOptionallyJobber(
     store.adLeads[existingLeadIdx] = { ...store.adLeads[existingLeadIdx], ...leadItem };
   } else {
     store.adLeads.unshift(leadItem);
+  }
+
+  // Always ensure the Facebook lead is also saved as a client record in store.clients
+  if (!Array.isArray(store.clients)) store.clients = [...INITIAL_CLIENTS];
+  const clientNameClean = (ext.customerName || thread.customerName || "").trim();
+  const normFbPhone = (ext.phone || "").replace(/\D/g, "").slice(-10);
+  if (clientNameClean && !clientNameClean.startsWith("FB Customer") && (normFbPhone.length >= 7 || ext.email)) {
+    const existingCli = store.clients.find((c: any) => {
+      const cPhone = (c.phone || "").replace(/\D/g, "").slice(-10);
+      if (normFbPhone.length >= 7 && cPhone === normFbPhone) return true;
+      if (ext.email && c.email && String(c.email).toLowerCase() === String(ext.email).toLowerCase()) return true;
+      return String(c.name || "").trim().toLowerCase() === clientNameClean.toLowerCase();
+    });
+    if (!existingCli) {
+      const fbClientId = `cli-fb-${thread.psid || Date.now()}`;
+      store.clients.unshift({
+        id: fbClientId,
+        name: clientNameClean,
+        phone: ext.phone || "(780) 555-0199",
+        email: ext.email || "",
+        address: ext.address || "Edmonton, AB",
+        city: (ext.address || "").toLowerCase().includes("st. albert") ? "St. Albert" : "Edmonton",
+        province: "AB",
+        postalCode: (ext.address || "").match(/[A-Z]\d[A-Z]\s*\d[A-Z]\d/i)?.[0]?.toUpperCase() || "",
+        verdict: "Good lead",
+        tags: ["facebook-lead", thread.pageName || "833 Tidyups", ...(thread.syncedQuoteNumber ? [`quote-${thread.syncedQuoteNumber.toLowerCase()}`] : [])],
+        isJobberLinked: false,
+        jobberId: fbClientId,
+        totalJobs: 1,
+        latestServiceDate: ext.preferredDate || new Date().toISOString().slice(0, 10),
+        notes: `[${thread.pageName || "833 Tidyups"}] ${ext.serviceType || "Cleaning"} (${ext.bedrooms || "1 Bedroom"}, ${ext.bathrooms || "1 Bathroom"})${ext.specificNotes ? ` — ${ext.specificNotes}` : ""}`,
+        source: "Facebook",
+        createdAt: thread.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      existingCli.name = clientNameClean;
+      if (ext.phone) existingCli.phone = ext.phone;
+      if (ext.email) existingCli.email = ext.email;
+      if (ext.address && ext.address !== "Edmonton, AB") existingCli.address = ext.address;
+      existingCli.updatedAt = new Date().toISOString();
+    }
   }
 
   let createdOrUpdatedQuote: any = null;
@@ -10266,8 +10574,9 @@ app.post("/api/facebook/sync-existing", async (req, res) => {
         const customerOnlyText = formattedMessages
           .filter((m: any) => m.sender === "customer")
           .map((m: any) => m.text)
-          .join(" . ");
+          .join("\n");
         const heuristic = parseVoiceTicketHeuristic(customerOnlyText);
+        const leadFormParsed = parseFacebookLeadFormFields(customerOnlyText, customerName);
 
         if (!existingThread) {
           existingThread = {
@@ -10275,48 +10584,78 @@ app.post("/api/facebook/sync-existing", async (req, res) => {
             pageSlotId: pg.id || "page_1",
             pageName: pg.pageName,
             psid,
-            customerName,
-            adSourceLabel: pg.adCampaignLabel || "Existing FB Inbox Thread",
+            customerName: leadFormParsed.customerName || customerName,
+            adSourceLabel: leadFormParsed.isLeadForm
+              ? `${pg.pageName} Lead Form`
+              : pg.adCampaignLabel || "Existing FB Inbox Thread",
             aiPaused: false,
-            status: "COLLECTING_INFO",
+            status: leadFormParsed.isLeadForm ? "READY_TO_BOOK" : "COLLECTING_INFO",
             extracted: {
               customerName:
-                heuristic.customerName && heuristic.customerName !== "Residential Client"
+                leadFormParsed.customerName ||
+                (heuristic.customerName && heuristic.customerName !== "Residential Client"
                   ? heuristic.customerName
-                  : customerName,
-              phone: heuristic.phone || "",
-              email: heuristic.email || "",
+                  : customerName),
+              phone: leadFormParsed.phone || heuristic.phone || "",
+              email: leadFormParsed.email || heuristic.email || "",
               serviceType:
-                customerOnlyText.toLowerCase().includes("move")
+                leadFormParsed.serviceType ||
+                (customerOnlyText.toLowerCase().includes("move")
                   ? "Move-Out / Turnover Vacate Cleaning"
                   : customerOnlyText.toLowerCase().includes("deep")
                   ? "Deep Cleaning & Baseboards"
                   : customerOnlyText.toLowerCase().includes("standard")
                   ? "Residential Standard Cleaning"
-                  : "",
-              bedrooms: /\b(\d)\s*bed/i.test(customerOnlyText) ? heuristic.bedrooms : "",
-              bathrooms: /\b(\d(?:\.5)?)\s*bath/i.test(customerOnlyText) ? heuristic.bathrooms : "",
-              preferredDate: heuristic.preferredDate || "",
-              timeWindow: heuristic.timeWindow || "",
-              address: heuristic.address || "",
+                  : ""),
+              bedrooms:
+                leadFormParsed.bedrooms ||
+                (/\b(\d)\s*bed/i.test(customerOnlyText) ? heuristic.bedrooms : ""),
+              bathrooms:
+                leadFormParsed.bathrooms ||
+                (/\b(\d(?:\.5)?)\s*bath/i.test(customerOnlyText) ? heuristic.bathrooms : ""),
+              preferredDate: leadFormParsed.preferredDate || heuristic.preferredDate || "",
+              timeWindow: leadFormParsed.timeWindow || heuristic.timeWindow || "",
+              address: leadFormParsed.address || heuristic.address || "",
               addons: [],
               estimatedHours: heuristic.recommendedHours || 3.5,
               estimatedCleaners: heuristic.recommendedCleaners || 2,
               estimatedHourlyRate: 105,
               estimatedTotal: 427.5,
-              depositRequired: 75,
-              specificNotes: "Synced from existing Facebook Page inbox",
+              depositRequired: 100,
+              specificNotes:
+                leadFormParsed.specificNotes || "Synced from existing Facebook Page inbox",
             },
             messages: formattedMessages,
             updatedAt: convo.updated_time || new Date().toISOString(),
             createdAt: convo.updated_time || new Date().toISOString(),
           };
-          store.fbMessengerThreads.push(existingThread);
+          store.fbMessengerThreads.unshift(existingThread);
           importedCount++;
           pageImported++;
+
+          if (leadFormParsed.isLeadForm || existingThread.extracted.phone || existingThread.extracted.email) {
+            await syncFbThreadToSheetAndOptionallyJobber(store, existingThread, false);
+          }
         } else {
+          existingThread.pageName = pg.pageName;
           existingThread.messages = formattedMessages;
           existingThread.updatedAt = convo.updated_time || new Date().toISOString();
+          if (leadFormParsed.isLeadForm) {
+            existingThread.extracted = {
+              ...existingThread.extracted,
+              customerName: leadFormParsed.customerName || existingThread.extracted?.customerName || customerName,
+              phone: leadFormParsed.phone || existingThread.extracted?.phone || "",
+              email: leadFormParsed.email || existingThread.extracted?.email || "",
+              serviceType: leadFormParsed.serviceType || existingThread.extracted?.serviceType || "",
+              bedrooms: leadFormParsed.bedrooms || existingThread.extracted?.bedrooms || "",
+              bathrooms: leadFormParsed.bathrooms || existingThread.extracted?.bathrooms || "",
+              preferredDate: leadFormParsed.preferredDate || existingThread.extracted?.preferredDate || "",
+              timeWindow: leadFormParsed.timeWindow || existingThread.extracted?.timeWindow || "",
+              address: leadFormParsed.address || existingThread.extracted?.address || "",
+              specificNotes: leadFormParsed.specificNotes || existingThread.extracted?.specificNotes || "",
+            };
+            await syncFbThreadToSheetAndOptionallyJobber(store, existingThread, false);
+          }
           updatedCount++;
           pageImported++;
         }
@@ -10336,6 +10675,13 @@ app.post("/api/facebook/sync-existing", async (req, res) => {
     }
   }
 
+  // Always sort threads newest first by updatedAt so brand-new clients like Donna Noel are at the very top
+  store.fbMessengerThreads.sort(
+    (a: any, b: any) =>
+      (new Date(b.updatedAt || b.createdAt || 0).getTime() || 0) -
+      (new Date(a.updatedAt || a.createdAt || 0).getTime() || 0)
+  );
+
   store.lastSavedAt = new Date().toISOString();
   saveStore(store, projectId);
 
@@ -10346,6 +10692,8 @@ app.post("/api/facebook/sync-existing", async (req, res) => {
     pageReports,
     threads: store.fbMessengerThreads,
     leads: store.adLeads,
+    quotes: store.quotes,
+    clients: store.clients,
   });
 });
 
@@ -10877,66 +11225,81 @@ async function runFacebook24x7BackgroundMonitor() {
 
         if (formattedMessages.length === 0) continue;
         const latestMsg = formattedMessages[formattedMessages.length - 1];
-        const latestMsgTimeMs = new Date(latestMsg.timestamp).getTime() || 0;
+        const latestCustomerMsg = [...formattedMessages].reverse().find((m: any) => m.sender === "customer");
+        const latestMsgTimeMs = new Date((latestCustomerMsg || latestMsg).timestamp).getTime() || 0;
 
-        // Only auto-reply to brand-new incoming customer messages that arrived after server boot
-        if (
-          latestMsg.sender === "customer" &&
-          latestMsgTimeMs >= FB_SERVER_BOOT_MS - 30000
-        ) {
-          let thread = store.fbMessengerThreads.find((t: any) => String(t.psid) === psid);
-          if (thread?.aiPaused) continue;
-          if (thread?.lastRepliedCustomerMsgId === latestMsg.id) continue;
-          if (thread?.messages?.some((m: any) => m.id === latestMsg.id && m.sender !== "customer")) {
-            continue;
+        let thread = store.fbMessengerThreads.find((t: any) => String(t.psid) === psid);
+        const customerName = String(
+          customerParticipant.name || `FB Customer (${psid.slice(-4)})`
+        );
+        const customerOnlyText = formattedMessages
+          .filter((m: any) => m.sender === "customer")
+          .map((m: any) => m.text)
+          .join("\n");
+        const leadFormParsed = parseFacebookLeadFormFields(customerOnlyText, customerName);
+
+        // Always import any brand-new thread into store.fbMessengerThreads (even if Meta's Instant Reply already echoed)
+        if (!thread) {
+          thread = {
+            id: `fb-thread-${psid}`,
+            pageSlotId: pg.id || "page_1",
+            pageName: pg.pageName,
+            psid,
+            customerName: leadFormParsed.customerName || customerName,
+            adSourceLabel: leadFormParsed.isLeadForm
+              ? `${pg.pageName} Lead Form`
+              : pg.adCampaignLabel || "Facebook Messenger",
+            aiPaused: false,
+            status: leadFormParsed.isLeadForm ? "READY_TO_BOOK" : "COLLECTING_INFO",
+            extracted: {
+              customerName: leadFormParsed.customerName || customerName,
+              phone: leadFormParsed.phone || "",
+              email: leadFormParsed.email || "",
+              serviceType: leadFormParsed.serviceType || "",
+              bedrooms: leadFormParsed.bedrooms || "",
+              bathrooms: leadFormParsed.bathrooms || "",
+              preferredDate: leadFormParsed.preferredDate || "",
+              timeWindow: leadFormParsed.timeWindow || "",
+              address: leadFormParsed.address || "",
+              addons: [],
+              estimatedHours: 3.5,
+              estimatedCleaners: 2,
+              estimatedHourlyRate: 105,
+              estimatedTotal: 427.5,
+              depositRequired: 100,
+              specificNotes: leadFormParsed.specificNotes || "",
+            },
+            messages: formattedMessages,
+            updatedAt: convo.updated_time || new Date().toISOString(),
+            createdAt: convo.updated_time || new Date().toISOString(),
+          };
+          store.fbMessengerThreads.unshift(thread);
+          storeModified = true;
+          if (leadFormParsed.isLeadForm || thread.extracted.phone || thread.extracted.email) {
+            await syncFbThreadToSheetAndOptionallyJobber(store, thread, false);
           }
+        }
+
+        // Auto-reply to brand-new customer messages (including when Meta's generic instant-ack fired right after the customer's message)
+        const isLastMsgCustomerOrMetaAutoAck =
+          latestMsg.sender === "customer" ||
+          (latestCustomerMsg && isMetaAutomatedInstantAck(latestMsg.text));
+
+        if (
+          isLastMsgCustomerOrMetaAutoAck &&
+          latestCustomerMsg &&
+          latestMsgTimeMs >= FB_SERVER_BOOT_MS - 3600000
+        ) {
+          if (thread?.aiPaused) continue;
+          if (thread?.lastRepliedCustomerMsgId === latestCustomerMsg.id) continue;
 
           fbInFlightPsids.add(psid);
           try {
-            const customerName = String(
-              customerParticipant.name || `FB Customer (${psid.slice(-4)})`
-            );
-            if (!thread) {
-              thread = {
-                id: `fb-thread-${psid}`,
-                pageSlotId: pg.id || "page_1",
-                pageName: pg.pageName,
-                psid,
-                customerName,
-                adSourceLabel: pg.adCampaignLabel || "Facebook Messenger",
-                aiPaused: false,
-                status: "COLLECTING_INFO",
-                extracted: {
-                  customerName,
-                  phone: "",
-                  email: "",
-                  serviceType: "",
-                  bedrooms: "",
-                  bathrooms: "",
-                  preferredDate: "",
-                  timeWindow: "",
-                  address: "",
-                  addons: [],
-                  estimatedHours: 3.5,
-                  estimatedCleaners: 2,
-                  estimatedHourlyRate: 105,
-                  estimatedTotal: 427.5,
-                  depositRequired: 75,
-                  specificNotes: "",
-                },
-                messages: formattedMessages,
-                updatedAt: new Date().toISOString(),
-                createdAt: new Date().toISOString(),
-              };
-              store.fbMessengerThreads.unshift(thread);
-            } else {
-              if (!thread.messages.some((m: any) => m.id === latestMsg.id)) {
-                thread.messages.push(latestMsg);
-              }
-              thread.updatedAt = new Date().toISOString();
+            if (!thread.messages.some((m: any) => m.id === latestCustomerMsg.id)) {
+              thread.messages.push(latestCustomerMsg);
             }
-
-            thread.lastRepliedCustomerMsgId = latestMsg.id;
+            thread.updatedAt = new Date().toISOString();
+            thread.lastRepliedCustomerMsgId = latestCustomerMsg.id;
 
             const { replyText, updatedExtracted } = await runFacebookMessengerAiTurn(
               thread,
@@ -10977,6 +11340,11 @@ async function runFacebook24x7BackgroundMonitor() {
     }
 
     if (storeModified) {
+      store.fbMessengerThreads.sort(
+        (a: any, b: any) =>
+          (new Date(b.updatedAt || b.createdAt || 0).getTime() || 0) -
+          (new Date(a.updatedAt || a.createdAt || 0).getTime() || 0)
+      );
       store.lastSavedAt = new Date().toISOString();
       saveStore(store, "tidyups");
     }

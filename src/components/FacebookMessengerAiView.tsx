@@ -29,6 +29,7 @@ import {
   Edit3,
   Mic,
   MicOff,
+  Search,
   X,
 } from 'lucide-react';
 import { AddressAutocompleteInput } from './AddressAutocompleteInput';
@@ -140,11 +141,11 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
     botName: 'TidyUps AI Messenger Assistant',
     verifyToken: 'tidyups_fb_verify_2026',
     greetingTemplate:
-      "Hi {{name}}! 👋 Thanks for messaging {{page}}! We'd love to put together a custom cleaning quote for your home. To get started, what type of cleaning are you looking for (Standard, Deep Clean, or Move-Out), and how many bedrooms & bathrooms does the property have?",
+      "Hi {{name}}! 👋 Thanks so much for reaching out to {{page}}! How are you doing today? Tell me a little bit about what kind of cleaning you're looking for — or if you prefer a quick self-serve form anytime, you can also check out https://833tidyups.com/booking!",
     systemPrompt:
-      'You are a warm, friendly, concise intake assistant for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). STRICT RULE: NEVER discuss, estimate, or quote prices, hourly rates, or dollar amounts with clients. If a client asks how much it costs or asks for a price, warmly explain that every home is custom-quoted based on its layout and condition, and that you will gather their details right now so our owner can review the draft and send them an official personalized quote right away. Focus on gathering as much helpful information as possible: (1) Service Type (Standard, Deep Clean, or Move-Out/Move-In) & any special add-ons/requests (inside oven, inside fridge, baseboards, interior windows, basement, pets), (2) How many Bedrooms, Bathrooms & approximate sq ft/levels, (3) Preferred Date & Time Window (Morning or Afternoon), and (4) Property Street Address, Phone Number & Email so we can send their official quote. Keep messages short (2-3 sentences max) like a real human dispatcher.',
+      "You are a warm, friendly, communicative front-desk coordinator for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). CRITICAL CONVERSATION RULE: NEVER interrogate the client or ask for their name, address, phone number, service type, and bedrooms all at once in a single message! Instead, get a real, natural human conversation going by asking only ONE easy question at a time: first chat about what kind of cleaning they need; then in the next message ask about their home size (bedrooms/bathrooms or focus areas like oven/fridge); then ask what day works best for them; and finally ask for the best phone/email or neighborhood to send their official quote. If the client already filled out a form or gave all their info up front, thank them warmly and confirm what they shared without re-asking! And if a client doesn't feel like typing everything out in chat, warmly offer our quick booking link (https://833tidyups.com/booking). STRICT NO-PRICE RULE: Never quote dollar amounts in chat; let them know our owner puts together a personalized quote once we chat through their home.",
     pricingRulesSummary:
-      "• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts, hourly rates, or price estimates with the customer in Messenger.\n• What IS Included to Mention: We bring all professional eco-friendly supplies, vacuums, and equipment. 100% satisfaction guarantee on Move-Out, Deep, and Standard cleans.\n• Information to Gather for Owner's Draft Quote:\n  1. Cleaning Type (Standard, Deep Clean, Move-Out/Move-In)\n  2. Bedrooms, Bathrooms, levels & approximate square footage\n  3. Any special areas (Inside Oven, Inside Fridge, Baseboards, Interior Windows, Cabinets, Pets)\n  4. Preferred Date & Morning/Afternoon window\n  5. Property Street Address + Client Phone Number & Email (so we can send their official quote).",
+      "• CONVERSATIONAL FLOW (ONE STEP AT A TIME — NEVER ASK EVERYTHING AT ONCE):\n  - Step 1: Warmly say hello, be communicative, and ask what kind of cleaning they're thinking about (Move-Out, Deep Clean, or Standard).\n  - Step 2: Chat about their home (how many bedrooms & bathrooms, and if they want extras like inside oven, fridge, or baseboards).\n  - Step 3: Ask when they're hoping to have the cleaning done (date or morning/afternoon).\n  - Step 4: Ask for the best phone number or email (and address/area) to send their custom quote — OR offer our quick link https://833tidyups.com/booking if they prefer a form!\n• IF CLIENT ALREADY SENT ALL INFO (LEAD FORM): Acknowledge their exact details warmly and let them know our owner is preparing their personalized quote.\n• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts or hourly rates in Messenger.",
     autoSyncToGoogleSheet: true,
     autoCreateJobberQuote: true,
     notifyOwnerOnNewLead: true,
@@ -157,6 +158,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
   const [threads, setThreads] = useState<FbMessengerThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string>('');
   const [pageFilter, setPageFilter] = useState<'ALL' | 'page_1' | 'page_2' | 'page_3'>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [popupModal, setPopupModal] = useState<'NONE' | 'TWEAK_AI' | 'WEBHOOK_SETUP'>('NONE');
   const [composerMode, setComposerMode] = useState<'SIMULATE_CUSTOMER' | 'OWNER_REPLY'>('OWNER_REPLY');
   const [messageInput, setMessageInput] = useState<string>('');
@@ -193,7 +195,10 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
         setThreads(data.threads);
         setSelectedThreadId((prev) => {
           if (prev && data.threads.some((t: any) => t.id === prev)) return prev;
-          return data.threads[0]?.id || '';
+          const donna = data.threads.find((t: any) =>
+            String(t?.customerName || '').toLowerCase().includes('donna')
+          );
+          return donna?.id || data.threads[0]?.id || '';
         });
       }
     } catch (e) {
@@ -203,11 +208,57 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
 
   useEffect(() => {
     loadMessengerState();
-  }, [loadMessengerState]);
+    // Automatically pull any brand-new Facebook Messenger conversations (such as Donna Noel on 833 Tidyups) on open
+    fetch(`/api/facebook/sync-existing?project=${projectId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.success && Array.isArray(data.threads)) {
+          setThreads(data.threads);
+          setSelectedThreadId((prev) => {
+            if (prev && data.threads.some((t: any) => t.id === prev)) return prev;
+            const donna = data.threads.find((t: any) =>
+              String(t?.customerName || '').toLowerCase().includes('donna')
+            );
+            return donna?.id || data.threads[0]?.id || '';
+          });
+          if (data.leads && onLeadsUpdated) onLeadsUpdated(data.leads);
+          if (data.quotes && onQuotesUpdated) onQuotesUpdated(data.quotes);
+          if (data.clients && onClientsUpdated) onClientsUpdated(data.clients);
+        }
+      })
+      .catch(() => {});
+
+    const pollTimer = setInterval(() => {
+      loadMessengerState();
+    }, 8000);
+    return () => clearInterval(pollTimer);
+  }, [loadMessengerState, projectId]);
 
   const activeThread = threads.find((t) => t.id === selectedThreadId) || threads[0] || null;
 
   const filteredThreads = threads.filter((t) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      // When searching for a person, search across ALL 3 pages so no client is ever hidden by a page tab filter
+      const hay = [
+        t.customerName,
+        t.extracted?.customerName,
+        t.extracted?.phone,
+        t.extracted?.email,
+        t.extracted?.address,
+        t.extracted?.serviceType,
+        t.pageName,
+        t.syncedQuoteNumber,
+        ...(t.messages || []).map((m) => m.text),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    }
     if (pageFilter === 'ALL') return true;
     return t.pageSlotId === pageFilter;
   });
@@ -694,11 +745,11 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                 All 3 Facebook Pages Live • App ID: 997522660032668
               </span>
               <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[10px] font-extrabold text-amber-300">
-                🚫 No Prices Shared in Chat • Draft Quote + SMS Alert Mode
+                💬 Natural Step-by-Step Chat • No Prices Shared • Booking Link Ready
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              AI gathers <strong className="text-slate-200">Service, Bedrooms/Baths, Special Requests, Date, Address &amp; Phone</strong> (without discussing prices), saves a <strong className="text-emerald-300">DRAFT Quote in Jobber + FB Leads Sheet</strong> for you to review &amp; send, and texts your phone!
+              AI chats naturally <strong className="text-slate-200">one simple question at a time</strong> (never asking everything at once) or offers your <strong className="text-blue-300">833tidyups.com/booking</strong> link, then prepares a <strong className="text-emerald-300">DRAFT Quote in Jobber + FB Leads Sheet</strong>!
             </p>
           </div>
         </div>
@@ -830,9 +881,9 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
       </div>
 
       {/* Main 3-Column Workspace */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 overflow-hidden">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 lg:min-h-0 lg:overflow-hidden">
         {/* LEFT COLUMN (3 cols): 3-Page Messenger Conversation Board */}
-        <div className="lg:col-span-3 border-r border-white/10 bg-[#0B101B] flex flex-col min-h-0">
+        <div className="lg:col-span-3 border-b lg:border-b-0 lg:border-r border-white/10 bg-[#0B101B] flex flex-col lg:min-h-0">
           <div className="p-3 border-b border-white/10 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-wider text-slate-300">
@@ -859,22 +910,50 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
               </div>
             </div>
 
-            {/* 3-Page Filter Pills: All | Page 1 | Page 2 | Page 3 */}
+            {/* Search Bar to Find Any Person Across All 3 Facebook Pages */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search person (e.g. Donna Noel), phone, email..."
+                className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-slate-950 border border-white/15 focus:border-pink-500/60 focus:outline-none text-xs text-white placeholder:text-slate-500 font-semibold"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                  title="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* 3-Page Filter Pills: All | Page 1 | 833 Tidyups | Page 3 */}
             <div className="grid grid-cols-4 gap-1 bg-slate-900 p-1 rounded-xl border border-white/10 text-[10px] font-extrabold">
               <button
                 type="button"
-                onClick={() => setPageFilter('ALL')}
+                onClick={() => {
+                  setPageFilter('ALL');
+                  setSearchQuery('');
+                }}
                 className={`py-1.5 rounded-lg cursor-pointer ${
-                  pageFilter === 'ALL' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                  pageFilter === 'ALL' && !searchQuery ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 All ({threads.length})
               </button>
               <button
                 type="button"
-                onClick={() => setPageFilter('page_1')}
+                onClick={() => {
+                  setPageFilter('page_1');
+                  setSearchQuery('');
+                }}
                 className={`py-1.5 rounded-lg truncate px-1 cursor-pointer ${
-                  pageFilter === 'page_1' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                  pageFilter === 'page_1' && !searchQuery ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
                 }`}
                 title="TidyUps Cleaning Service Inc (Page 1)"
               >
@@ -882,19 +961,25 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
               </button>
               <button
                 type="button"
-                onClick={() => setPageFilter('page_2')}
+                onClick={() => {
+                  setPageFilter('page_2');
+                  setSearchQuery('');
+                }}
                 className={`py-1.5 rounded-lg truncate px-1 cursor-pointer ${
-                  pageFilter === 'page_2' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+                  pageFilter === 'page_2' && !searchQuery ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
                 }`}
-                title="1-833-TIDYUPS (Page 2)"
+                title="833 Tidyups"
               >
-                Page 2 ({threads.filter((t) => t.pageSlotId === 'page_2').length})
+                833 Tidyups ({threads.filter((t) => t.pageSlotId === 'page_2').length})
               </button>
               <button
                 type="button"
-                onClick={() => setPageFilter('page_3')}
+                onClick={() => {
+                  setPageFilter('page_3');
+                  setSearchQuery('');
+                }}
                 className={`py-1.5 rounded-lg truncate px-1 cursor-pointer ${
-                  pageFilter === 'page_3' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+                  pageFilter === 'page_3' && !searchQuery ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
                 }`}
                 title="TidyUps Cleaning (Page 3)"
               >
@@ -921,7 +1006,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                   className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-white/15 text-[11px] text-white font-bold"
                 >
                   <option value="page_1">Page 1: TidyUps Cleaning Service Inc</option>
-                  <option value="page_2">Page 2: 1-833-TIDYUPS</option>
+                  <option value="page_2">833 Tidyups</option>
                   <option value="page_3">Page 3: TidyUps Cleaning</option>
                 </select>
                 <input
@@ -961,20 +1046,34 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
           </div>
 
           {/* Thread List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-white/5">
+          <div className="flex-1 overflow-y-auto divide-y divide-white/5 max-h-[380px] lg:max-h-none min-h-[240px]">
             {filteredThreads.length === 0 ? (
               <div className="p-5 text-center space-y-3">
                 <div className="w-10 h-10 rounded-2xl bg-slate-900 border border-white/10 flex items-center justify-center mx-auto text-blue-400">
                   <MessageSquare className="w-5 h-5" />
                 </div>
                 <div className="text-xs font-extrabold text-white">
-                  No Fake People — Listening Live on All 3 Pages
+                  {searchQuery.trim()
+                    ? `No person matching "${searchQuery}"`
+                    : 'No Fake People — Listening Live on All 3 Pages'}
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  All fake demo conversations have been removed. Your AI bot is actively monitoring{' '}
-                  <strong className="text-blue-300">Page 1 (TidyUps Cleaning Service Inc)</strong>,{' '}
-                  <strong className="text-purple-300">Page 2 (1-833-TIDYUPS)</strong>, and{' '}
-                  <strong className="text-emerald-300">Page 3 (TidyUps Cleaning)</strong>.
+                  {searchQuery.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="text-pink-400 underline font-bold cursor-pointer"
+                    >
+                      Clear search filter to view all {threads.length} conversations
+                    </button>
+                  ) : (
+                    <>
+                      All fake demo conversations have been removed. Your AI bot is actively monitoring{' '}
+                      <strong className="text-blue-300">Page 1 (TidyUps Cleaning Service Inc)</strong>,{' '}
+                      <strong className="text-purple-300">833 Tidyups</strong>, and{' '}
+                      <strong className="text-emerald-300">Page 3 (TidyUps Cleaning)</strong>.
+                    </>
+                  )}
                 </p>
               </div>
             ) : (
@@ -1066,7 +1165,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
         </div>
 
         {/* CENTER COLUMN (5 cols): Live Messenger Chat + Take Over / Give Back to AI + Voice Mic */}
-        <div className="lg:col-span-5 border-r border-white/10 bg-[#070B12] flex flex-col min-h-0">
+        <div className="lg:col-span-5 border-b lg:border-b-0 lg:border-r border-white/10 bg-[#070B12] flex flex-col lg:min-h-0">
           {activeThread ? (
             <>
               {/* Thread Header with Take Over Chat <-> Give Back to AI Bot */}
@@ -1083,7 +1182,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                   <p className="text-[11px] text-slate-400 mt-0.5">
                     {activeThread.aiPaused
                       ? '👤 You took over this chat (Click "Give Back to AI Bot" anytime so the AI resumes)'
-                      : '🤖 AI Bot is in control — gathering info (No prices shared with client)'}
+                      : '🤖 AI Bot is in control — warm step-by-step chat (No prices shared with client)'}
                   </p>
                 </div>
 
@@ -1128,7 +1227,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
               </div>
 
               {/* Chat Messages Scroll Area */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[380px] lg:max-h-none min-h-[240px]">
                 {activeThread.messages.map((msg) => {
                   const isCustomer = msg.sender === 'customer';
                   const isOwner = msg.sender === 'owner';
@@ -1220,10 +1319,28 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
 
                     <button
                       type="button"
+                      onClick={() => {
+                        setComposerMode('OWNER_REPLY');
+                        const firstName =
+                          (activeThread.extracted?.customerName || activeThread.customerName || '')
+                            .split(' ')[0] || 'there';
+                        setMessageInput(
+                          `Hi ${firstName}! 👋 If you'd like to pop your cleaning details into our quick online form anytime, here is our link: https://833tidyups.com/booking — or we can just chat right here!`
+                        );
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      title="Insert a friendly message with your https://833tidyups.com/booking link"
+                    >
+                      <Globe className="w-3 h-3" />
+                      <span>Booking Link</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={handleDraftAiReplyForOwner}
                       disabled={isSending}
                       className="px-2.5 py-1 rounded-lg bg-pink-600/20 hover:bg-pink-600/30 border border-pink-500/40 text-pink-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                      title="Let AI draft a response into your box so you can edit it before sending"
+                      title="Let AI draft a natural, 1-step-at-a-time conversational reply into your box"
                     >
                       <Sparkles className="w-3 h-3" />
                       <span>AI Draft</span>
