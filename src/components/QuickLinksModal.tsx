@@ -109,7 +109,7 @@ export const QuickLinksModal: React.FC<QuickLinksModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           owner: 'Ai-Builder6',
-          repo: 'APP.TIDYUPSCLEANING.COM-START-PR1',
+          repo: opts?.prNumber ? `APP.TIDYUPSCLEANING.COM-START-PR${opts.prNumber}` : 'APP.TIDYUPSCLEANING.COM-START-PR6',
           createNewCopy: Boolean(opts?.createNewCopy),
           prNumber: opts?.prNumber,
         }),
@@ -467,9 +467,9 @@ export const QuickLinksModal: React.FC<QuickLinksModalProps> = ({
               <button
                 type="button"
                 disabled={isPushingGithub}
-                onClick={() => handleSyncToGithub({ createNewCopy: false, prNumber: 1 })}
+                onClick={() => handleSyncToGithub({ createNewCopy: false, prNumber: 6 })}
                 className="p-3 rounded-2xl border border-slate-900 bg-slate-900 hover:bg-slate-800 text-white transition-all text-left flex items-center gap-2.5 cursor-pointer shadow-xs group disabled:opacity-60"
-                title="1-Click GitHub Sync: Pushes all 100+ project files directly to Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR1 using GITHUB_PAT_Ai-Builder6"
+                title="1-Click GitHub Sync: Pushes all 100+ project files directly to Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR6 using GITHUB_PAT_Ai-Builder6"
               >
                 <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-pink-500 to-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
                   <GitBranch className={`w-4 h-4 ${isPushingGithub ? 'animate-spin' : ''}`} />
@@ -479,18 +479,18 @@ export const QuickLinksModal: React.FC<QuickLinksModalProps> = ({
                     {isPushingGithub ? 'Syncing GitHub...' : 'GitHub Sync (1-Click)'}
                   </h5>
                   <p className="text-[10px] text-emerald-300 font-mono font-bold truncate">
-                    Push Copy to PR1
+                    Push Copy to PR6
                   </p>
                 </div>
               </button>
 
-              {/* 1-Click Create New Numbered Repo Copy on GitHub (PR2, PR3...) */}
+              {/* 1-Click Create New Numbered Repo Copy on GitHub (PR6, PR7...) */}
               <button
                 type="button"
                 disabled={isPushingGithub}
                 onClick={() => handleSyncToGithub({ createNewCopy: true })}
                 className="p-3 rounded-2xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100/80 transition-all text-left flex items-center gap-2.5 cursor-pointer shadow-2xs group disabled:opacity-60"
-                title="Creates a brand-new numbered repository copy on GitHub (e.g. APP.TIDYUPSCLEANING.COM-START-PR2, PR3...) and pushes all files"
+                title="Creates a brand-new numbered repository copy on GitHub (e.g. APP.TIDYUPSCLEANING.COM-START-PR6, PR7...) and pushes all files"
               >
                 <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
                   <CloudUpload className="w-4 h-4" />
@@ -523,7 +523,7 @@ export const QuickLinksModal: React.FC<QuickLinksModalProps> = ({
                       GitHub Repos &amp; Drive Backup Manager
                     </h5>
                     <p className="text-[10px] text-emerald-700 font-semibold truncate">
-                      Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR1 • Choose PR1–PR5
+                      Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR6 • Choose PR6–PR11
                     </p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-emerald-500 shrink-0" />
@@ -692,12 +692,12 @@ export const QuickLinksModal: React.FC<QuickLinksModalProps> = ({
               </button>
             </div>
 
-            {/* Explicit PR1, PR2, PR3, PR4 Checkpoint Buttons */}
+            {/* Explicit PR6, PR7, PR8, PR9, PR10 Checkpoint Buttons */}
             <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-indigo-200/60">
               <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">
                 Save Specific PR# to Drive:
               </span>
-              {['PR1', 'PR2', 'PR3', 'PR4', 'PR5'].map((pr) => (
+              {['PR6', 'PR7', 'PR8', 'PR9', 'PR10'].map((pr) => (
                 <button
                   key={pr}
                   type="button"

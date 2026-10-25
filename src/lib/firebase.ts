@@ -67,29 +67,28 @@ let cachedAccessToken: string | null = null;
 let cachedFallbackUser: User | null = null;
 const authSuccessListeners = new Set<(user: User, token: string) => void>();
 
-async function finalizeAccessTokenSession(accessToken: string, emailHint?: string, nameHint?: string): Promise<{ user: User; accessToken: string }> {
+async function finalizeAccessTokenSession(
+  accessToken: string,
+  emailHint?: string,
+  nameHint?: string
+): Promise<{ user: User; accessToken: string }> {
   cachedAccessToken = accessToken;
   let resolvedUser: User | null = null;
+
   try {
-    const cred = GoogleAuthProvider.credential(null, accessToken);
-    const credResult = await signInWithCredential(auth, cred);
-    resolvedUser = credResult.user;
-  } catch {
-    try {
-      const infoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (infoRes.ok) {
-        const info = await infoRes.json();
-        resolvedUser = {
-          uid: info.sub || 'google-drive-user',
-          email: info.email || emailHint || 'cleaningserviceyeg@gmail.com',
-          displayName: info.name || info.email || nameHint || 'TidyUps Admin',
-          photoURL: info.picture || null,
-        } as unknown as User;
-      }
-    } catch {}
-  }
+    const infoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (infoRes.ok) {
+      const info = await infoRes.json();
+      resolvedUser = {
+        uid: info.sub || 'google-drive-user',
+        email: info.email || emailHint || 'cleaningserviceyeg@gmail.com',
+        displayName: info.name || info.email || nameHint || 'TidyUps Admin',
+        photoURL: info.picture || null,
+      } as unknown as User;
+    }
+  } catch {}
 
   if (!resolvedUser) {
     resolvedUser = {
@@ -106,6 +105,17 @@ async function finalizeAccessTokenSession(accessToken: string, emailHint?: strin
     } catch {}
   });
 
+  // Also cache the active token on our backend for 55 minutes so any tab/view can reuse it seamlessly
+  fetch('/api/google-drive/session-token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      accessToken,
+      email: resolvedUser.email || 'cleaningserviceyeg@gmail.com',
+      displayName: resolvedUser.displayName || 'TidyUps Admin',
+    }),
+  }).catch(() => {});
+
   return { user: resolvedUser, accessToken };
 }
 
@@ -116,21 +126,28 @@ export const initAuth = (
   if (onAuthSuccess) {
     authSuccessListeners.add(onAuthSuccess);
   }
+
+  // Check if backend already has an active Google Drive session token cached from this session
+  if (!cachedAccessToken && typeof window !== 'undefined') {
+    fetch('/api/google-drive/session-token')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.accessToken && !cachedAccessToken) {
+          finalizeAccessTokenSession(data.accessToken, data.email, data.displayName).catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }
+
   try {
     const unsub = onAuthStateChanged(
       auth,
       async (user: User | null) => {
-        if (user) {
-          if (cachedAccessToken) {
-            if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-          } else if (!isSigningIn) {
-            cachedAccessToken = null;
-            if (onAuthFailure) onAuthFailure();
-          }
+        if (user && cachedAccessToken) {
+          if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
         } else if (cachedAccessToken && cachedFallbackUser) {
           if (onAuthSuccess) onAuthSuccess(cachedFallbackUser, cachedAccessToken);
-        } else {
-          cachedAccessToken = null;
+        } else if (!isSigningIn) {
           if (onAuthFailure) onAuthFailure();
         }
       },
@@ -157,27 +174,19 @@ export const initAuth = (
 };
 
 /**
- * Synchronous Google OAuth Sign-In using Google Identity Services (initTokenClient)
- * with Firebase signInWithPopup fallback so `Error 400: origin_mismatch` on dynamic preview URLs is handled gracefully.
+ * Direct Google Identity Services (initTokenClient) OAuth Sign-In.
+ * NEVER calls Firebase signInWithPopup (`gtm-kvj5cp62-zty5m.firebaseapp.com/__/auth/handler`),
+ * avoiding the "The requested action is invalid" popup completely.
  */
 export const googleSignIn = (): Promise<{ user: User; accessToken: string } | null> => {
   isSigningIn = true;
-  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const gsi = typeof window !== 'undefined' ? (window as any).google?.accounts?.oauth2 : null;
 
-  // Prefer Firebase signInWithPopup (which routes via the Firebase authDomain handler) when on an ephemeral preview origin
-  // so Google Cloud Console `origin_mismatch` does not block `cleaningserviceyeg@gmail.com`.
-  const isKnownDirectGsiOrigin =
-    currentOrigin === 'https://app.tidyupscleaning.com' ||
-    currentOrigin === 'https://book.tidyupscleaning.com' ||
-    currentOrigin === 'https://cleaning-service-dispatch-board-230358145142.us-east1.run.app';
-
-  if (gsi && typeof gsi.initTokenClient === 'function' && isKnownDirectGsiOrigin) {
+  if (gsi && typeof gsi.initTokenClient === 'function') {
     return new Promise((resolve, reject) => {
       try {
         const tokenClient = gsi.initTokenClient({
           client_id: OAUTH_CLIENT_ID,
-          hint: 'cleaningserviceyeg@gmail.com',
           scope: [...SCOPES, 'openid', 'email', 'profile'].join(' '),
           callback: async (tokenResponse: any) => {
             try {
@@ -211,12 +220,13 @@ export const googleSignIn = (): Promise<{ user: User; accessToken: string } | nu
             reject(
               new Error(
                 err?.message ||
-                  'Google Sign-In popup was closed or blocked. Please click the button again to approve Google Drive.'
+                  'Google Sign-In popup was closed before completing selection. Click the button again and select cleaningserviceyeg@gmail.com.'
               )
             );
           },
         });
 
+        // Synchronous call on user click tick opens ONLY the clean accounts.google.com chooser
         tokenClient.requestAccessToken({ prompt: '' });
       } catch (err) {
         isSigningIn = false;
@@ -225,65 +235,10 @@ export const googleSignIn = (): Promise<{ user: User; accessToken: string } | nu
     });
   }
 
-  // Fallback to Firebase signInWithPopup (uses Firebase Auth handler domain, avoiding direct GIS origin_mismatch)
-  return (async () => {
-    try {
-      googleAuthProvider.setCustomParameters({
-        login_hint: 'cleaningserviceyeg@gmail.com',
-        prompt: 'select_account',
-      });
-      const result = await signInWithPopup(auth, googleAuthProvider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (!credential?.accessToken) {
-        throw new Error('Failed to get Google Drive OAuth access token from Firebase Auth');
-      }
-      const session = await finalizeAccessTokenSession(
-        credential.accessToken,
-        result.user.email || 'cleaningserviceyeg@gmail.com',
-        result.user.displayName || 'TidyUps Admin'
-      );
-      return session;
-    } catch (error: any) {
-      // If GIS is present and Firebase popup failed, try GIS tokenClient as secondary attempt
-      if (gsi && typeof gsi.initTokenClient === 'function') {
-        return await new Promise<{ user: User; accessToken: string } | null>((resolve, reject) => {
-          try {
-            const tokenClient = gsi.initTokenClient({
-              client_id: OAUTH_CLIENT_ID,
-              hint: 'cleaningserviceyeg@gmail.com',
-              scope: [...SCOPES, 'openid', 'email', 'profile'].join(' '),
-              callback: async (tokenResponse: any) => {
-                if (tokenResponse?.access_token) {
-                  const session = await finalizeAccessTokenSession(tokenResponse.access_token);
-                  resolve(session);
-                } else {
-                  reject(
-                    new Error(
-                      `Origin "${currentOrigin}" needs to be added to Authorized JavaScript origins in Google Cloud Console for client ${OAUTH_CLIENT_ID}.`
-                    )
-                  );
-                }
-              },
-              error_callback: () => {
-                reject(
-                  new Error(
-                    `Origin "${currentOrigin}" needs to be added to Authorized JavaScript origins in Google Cloud Console for client ${OAUTH_CLIENT_ID}.`
-                  )
-                );
-              },
-            });
-            tokenClient.requestAccessToken({ prompt: 'select_account' });
-          } catch (innerErr) {
-            reject(innerErr);
-          }
-        });
-      }
-      console.warn('Google Drive OAuth Sign-in notice:', error?.code || error?.message || error);
-      throw error;
-    } finally {
-      isSigningIn = false;
-    }
-  })();
+  isSigningIn = false;
+  return Promise.reject(
+    new Error('Google Identity Services is still loading. Please wait 1 second and click again.')
+  );
 };
 
 export const getAccessTokenSync = (): string | null => {

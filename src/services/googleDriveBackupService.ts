@@ -322,8 +322,8 @@ export async function uploadWholeProjectZipToDriveFolder(options?: {
     }
   }
 
-  // Inspect existing PR numbers in Google Drive so we never collide with an earlier morning/afternoon save
-  let highestDrivePr = 0;
+  // Inspect existing PR numbers in Google Drive so we never collide with an earlier morning/afternoon save (minimum floor PR6 since PR1-PR5 are retired)
+  let highestDrivePr = 5;
   for (const f of existingDriveFiles) {
     const m = (f.name || '').match(/PR(\d+)/i);
     if (m) {
@@ -335,8 +335,8 @@ export async function uploadWholeProjectZipToDriveFolder(options?: {
   let prParam = '';
   if (options?.requestedPr !== undefined && options?.requestedPr !== '') {
     const m = String(options.requestedPr).match(/(\d+)/);
-    if (m) prParam = `&pr=${m[1]}`;
-  } else if (highestDrivePr > 0) {
+    if (m) prParam = `&pr=${Math.max(6, parseInt(m[1], 10))}`;
+  } else {
     prParam = `&pr=${highestDrivePr + 1}`;
   }
 
@@ -349,8 +349,8 @@ export async function uploadWholeProjectZipToDriveFolder(options?: {
 
   const reusedServerZip = zipRes.headers.get('X-Zip-Cache-Status') === 'REUSED_EXISTING';
   const serverSuggestedName = zipRes.headers.get('X-Zip-Filename');
-  const prLabel = zipRes.headers.get('X-Zip-PR-Label') || 'PR1';
-  const prNumber = Number(zipRes.headers.get('X-Zip-PR-Number') || 1);
+  const prLabel = zipRes.headers.get('X-Zip-PR-Label') || 'PR6';
+  const prNumber = Number(zipRes.headers.get('X-Zip-PR-Number') || 6);
   const zipBlob = await zipRes.blob();
 
   const dateStr = new Date().toISOString().slice(0, 10);

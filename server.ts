@@ -217,6 +217,40 @@ app.get("/api/oauth/origin-status", (req, res) => {
   });
 });
 
+// Active in-memory Google Drive session token cache (expires after 55 minutes)
+let activeGoogleDriveSession: {
+  accessToken: string;
+  email: string;
+  displayName: string;
+  expiresAt: number;
+} | null = null;
+
+app.get("/api/google-drive/session-token", (_req, res) => {
+  if (activeGoogleDriveSession && Date.now() < activeGoogleDriveSession.expiresAt) {
+    return res.json({
+      active: true,
+      accessToken: activeGoogleDriveSession.accessToken,
+      email: activeGoogleDriveSession.email,
+      displayName: activeGoogleDriveSession.displayName,
+    });
+  }
+  res.json({ active: false, accessToken: null });
+});
+
+app.post("/api/google-drive/session-token", (req, res) => {
+  const { accessToken, email, displayName } = req.body || {};
+  if (accessToken && typeof accessToken === "string") {
+    activeGoogleDriveSession = {
+      accessToken,
+      email: email || "cleaningserviceyeg@gmail.com",
+      displayName: displayName || "TidyUps Admin",
+      expiresAt: Date.now() + 55 * 60 * 1000,
+    };
+    return res.json({ success: true });
+  }
+  res.status(400).json({ error: "Missing accessToken" });
+});
+
 // Serves a lightweight Google Identity Services OAuth popup bridge on the already-authorized
 // Cloud Run origin (https://cleaning-service-dispatch-board-230358145142.us-east1.run.app/oauth-bridge)
 // and posts the access_token back to window.opener via postMessage!
@@ -8407,18 +8441,18 @@ async function getOrCreateWholeProjectZip(options?: {
   prLabel: string;
 }> {
   const store = loadStore();
-  const existingBackups = listLocalNumberedBackups();
-  const highestExistingPr = existingBackups.reduce((max, b) => Math.max(max, b.prNumber), 0);
-  const storedCounter = Math.max(Number(store?.zipPrCounter || 0), highestExistingPr);
+  const existingBackups = listLocalNumberedBackups().filter((b) => b.prNumber >= 6);
+  const highestExistingPr = existingBackups.reduce((max, b) => Math.max(max, b.prNumber), 5);
+  const storedCounter = Math.max(Number(store?.zipPrCounter || 0), highestExistingPr, 5);
 
-  let targetPr = storedCounter > 0 ? storedCounter : 1;
+  let targetPr = Math.max(6, storedCounter);
   if (options?.requestedPr !== undefined && options?.requestedPr !== "") {
     const m = String(options.requestedPr).match(/(\d+)/);
     if (m) {
-      targetPr = Math.max(1, parseInt(m[1], 10));
+      targetPr = Math.max(6, parseInt(m[1], 10));
     }
-  } else if (options?.incrementPr || (options?.forceRebuild && storedCounter > 0)) {
-    targetPr = storedCounter + 1;
+  } else if (options?.incrementPr || (options?.forceRebuild && storedCounter >= 5)) {
+    targetPr = Math.max(6, storedCounter + 1);
   }
 
   // Only reuse if explicitly allowed and an exact matching PR archive already exists on disk
@@ -8553,14 +8587,14 @@ app.get("/api/project/export-metadata", (_req, res) => {
       : "";
 
     const store = loadStore();
-    const localBackups = listLocalNumberedBackups();
+    const localBackups = listLocalNumberedBackups().filter((b) => b.prNumber >= 6);
     const latestBackup = localBackups[0] || null;
     const currentPrNumber = Math.max(
       Number(store?.zipPrCounter || 0),
       latestBackup?.prNumber || 0,
-      1
+      6
     );
-    const nextPrNumber = latestBackup ? currentPrNumber + 1 : currentPrNumber;
+    const nextPrNumber = latestBackup ? Math.max(6, currentPrNumber + 1) : Math.max(6, currentPrNumber);
     const nextSuggestedZipFilename = buildTidyUpsZipFilename(nextPrNumber);
 
     res.json({
@@ -8916,7 +8950,10 @@ app.get("/api/project/github-status", async (_req, res) => {
     const store = loadStore();
     const ghCfg = store?.githubConfig || {};
     const owner = ghCfg.owner || "Ai-Builder6";
-    const repo = ghCfg.repo || "APP.TIDYUPSCLEANING.COM-START-PR1";
+    const rawSavedRepo = ghCfg.repo || "APP.TIDYUPSCLEANING.COM-START-PR6";
+    const repo = /PR[1-5]$/i.test(rawSavedRepo)
+      ? rawSavedRepo.replace(/PR[1-5]$/i, "PR6")
+      : rawSavedRepo;
     const token = resolveServerGithubToken(undefined, ghCfg.token);
 
     if (token && (!ghCfg.token || ghCfg.token !== token)) {
@@ -8964,7 +9001,7 @@ app.get("/api/project/github-status", async (_req, res) => {
       owner,
       repo,
       fullRepoName: `${owner}/${repo}`,
-      aiStudioSafeRepoName: `app-tidyupscleaning-com-start-pr${Math.max(1, Number(store?.zipPrCounter || 1))}`,
+      aiStudioSafeRepoName: `app-tidyupscleaning-com-start-pr${Math.max(6, Number(store?.zipPrCounter || 6))}`,
       lastPushedAt: ghCfg.lastPushedAt || null,
       lastPushedPr: ghCfg.lastPushedPr || null,
       lastPushedUrl: ghCfg.lastPushedUrl || `https://github.com/${owner}/${repo}`,
@@ -8980,11 +9017,14 @@ app.post("/api/project/github-push", async (req, res) => {
     const store = loadStore() || ({} as any);
     const body = req.body || {};
     const owner = String(body.owner || store.githubConfig?.owner || "Ai-Builder6").trim();
-    let rawRepo = String(body.repo || store.githubConfig?.repo || "APP.TIDYUPSCLEANING.COM-START-PR1").trim();
-    // Strip leading "Ai-Builder6/" if user pasted "Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR1"
+    let rawRepo = String(body.repo || store.githubConfig?.repo || "APP.TIDYUPSCLEANING.COM-START-PR6").trim();
+    // Strip leading "Ai-Builder6/" if user pasted "Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR6"
     if (rawRepo.includes("/")) {
       const parts = rawRepo.split("/").filter(Boolean);
       rawRepo = parts[parts.length - 1];
+    }
+    if (/PR[1-5]$/i.test(rawRepo)) {
+      rawRepo = rawRepo.replace(/PR[1-5]$/i, "PR6");
     }
     const token = resolveServerGithubToken(body.token, store.githubConfig?.token);
     if (!token) {
@@ -8994,8 +9034,8 @@ app.post("/api/project/github-push", async (req, res) => {
       });
     }
 
-    const nextCounter = Math.max(1, Number(store.zipPrCounter || 0) + 1);
-    const currentPr = Math.max(1, Number(body.prNumber || nextCounter));
+    const nextCounter = Math.max(6, Number(store.zipPrCounter || 5) + 1);
+    const currentPr = Math.max(6, Number(body.prNumber || nextCounter));
     const prLabel = `PR${currentPr}`;
     const targetRepo =
       body.createNewCopy || body.usePrInRepoName

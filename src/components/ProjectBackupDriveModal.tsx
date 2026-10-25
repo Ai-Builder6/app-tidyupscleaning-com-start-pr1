@@ -58,10 +58,10 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
   const [zipReadyOnServer, setZipReadyOnServer] = useState<boolean>(false);
   const [zipSizeBytes, setZipSizeBytes] = useState<number>(0);
   const [zipCreatedAt, setZipCreatedAt] = useState<string | null>(null);
-  const [nextPrLabel, setNextPrLabel] = useState<string>('PR1');
+  const [nextPrLabel, setNextPrLabel] = useState<string>('PR6');
   const [selectedPrOverride, setSelectedPrOverride] = useState<string>('');
   const [nextSuggestedZipFilename, setNextSuggestedZipFilename] = useState<string>(
-    'app.tidyups.cleaning-PR1.zip'
+    'app.tidyups.cleaning-PR6.zip'
   );
   const [savedLocalBackups, setSavedLocalBackups] = useState<
     Array<{ filename: string; prLabel: string; prNumber: number; sizeBytes: number; createdAt: string }>
@@ -95,9 +95,9 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
   const [copiedGitCmd, setCopiedGitCmd] = useState<boolean>(false);
   const [copiedSafeRepoName, setCopiedSafeRepoName] = useState<boolean>(false);
 
-  // Direct GitHub Push State (Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR1)
+  // Direct GitHub Push State (Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR6)
   const [githubOwner, setGithubOwner] = useState<string>('Ai-Builder6');
-  const [githubRepo, setGithubRepo] = useState<string>('APP.TIDYUPSCLEANING.COM-START-PR1');
+  const [githubRepo, setGithubRepo] = useState<string>('APP.TIDYUPSCLEANING.COM-START-PR6');
   const [githubTokenInput, setGithubTokenInput] = useState<string>('');
   const [hasSavedGithubToken, setHasSavedGithubToken] = useState<boolean>(false);
   const [isPushingGithub, setIsPushingGithub] = useState<boolean>(false);
@@ -356,8 +356,8 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                Automatically numbers every morning &amp; afternoon save (<code className="text-emerald-300">PR1</code>,{' '}
-                <code className="text-emerald-300">PR2</code>, <code className="text-emerald-300">PR3</code>...) so you always know which copy is which.
+                Automatically numbers every morning &amp; afternoon save (<code className="text-emerald-300">PR6</code>,{' '}
+                <code className="text-emerald-300">PR7</code>, <code className="text-emerald-300">PR8</code>...) so you always know which copy is which.
               </p>
             </div>
           </div>
@@ -461,8 +461,8 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                       Save Numbered Copy ({activePrLabel}) — Morning &amp; Afternoon Distinguished
                     </h3>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Every save increments the PR number (<code className="text-emerald-300">PR1</code>,{' '}
-                      <code className="text-emerald-300">PR2</code>, <code className="text-emerald-300">PR3</code>...) and stamps the file with the Edmonton date,{' '}
+                      Every save increments the PR number (<code className="text-emerald-300">PR6</code>,{' '}
+                      <code className="text-emerald-300">PR7</code>, <code className="text-emerald-300">PR8</code>...) and stamps the file with the Edmonton date,{' '}
                       <code className="text-emerald-300">Morning / Afternoon / Evening</code>, and clock time so multiple updates on the same day never overwrite each other.
                     </p>
                   </div>
@@ -481,12 +481,12 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                   )}
                 </div>
 
-                {/* PR Version Selector (Auto PR#, or pick PR1, PR2, PR3, PR4, PR5...) */}
+                {/* PR Version Selector (Auto PR#, or pick PR6, PR7, PR8, PR9, PR10, PR11...) */}
                 <div className="p-3.5 rounded-2xl bg-[#11141f] border border-slate-800 space-y-2.5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                        Next ZIP File Name &amp; PR Number
+                        Next ZIP File Name &amp; PR Number (PR1–PR5 Retired)
                       </span>
                       <code className="text-xs sm:text-sm font-mono font-black text-emerald-300 break-all">
                         {selectedPrOverride
@@ -506,7 +506,7 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                       >
                         Auto ({nextPrLabel})
                       </button>
-                      {['PR1', 'PR2', 'PR3', 'PR4', 'PR5', 'PR6'].map((pr) => (
+                      {['PR6', 'PR7', 'PR8', 'PR9', 'PR10', 'PR11'].map((pr) => (
                         <button
                           key={pr}
                           type="button"
@@ -887,10 +887,10 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                   </div>
                 </div>
 
-                {/* Quick PR1, PR2, PR3, PR4, PR5 Repo Name Switcher */}
+                {/* Quick PR6, PR7, PR8, PR9, PR10 Repo Name Switcher */}
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[11px] font-bold text-slate-400">Quick Select PR Repo:</span>
-                  {['PR1', 'PR2', 'PR3', 'PR4', 'PR5'].map((pr) => {
+                  <span className="text-[11px] font-bold text-slate-400">Quick Select PR Repo (PR6+):</span>
+                  {['PR6', 'PR7', 'PR8', 'PR9', 'PR10', 'PR11'].map((pr) => {
                     const candidate = `APP.TIDYUPSCLEANING.COM-START-${pr}`;
                     const active = githubRepo.toUpperCase().endsWith(`-${pr}`);
                     return (
@@ -936,7 +936,7 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                           setIsPushingGithub(true);
                           setGithubPushNotice(null);
                           try {
-                            const prNum = parseInt((selectedPrOverride || nextPrLabel || 'PR1').replace(/\D+/g, ''), 10) || 1;
+                            const prNum = Math.max(6, parseInt((selectedPrOverride || nextPrLabel || 'PR6').replace(/\D+/g, ''), 10) || 6);
                             const res = await fetch('/api/project/github-push', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
