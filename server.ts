@@ -62,7 +62,10 @@ import {
   ticketToSheetRow,
   generateTsvRows,
 } from "./src/services/leadSheetSync";
-import { generateStyledLeadsWorkbookBuffer } from "./src/services/styledLeadsWorkbookBuilder";
+import {
+  generateStyledLeadsWorkbookBuffer,
+  isFalseOrCatalogLeadRow,
+} from "./src/services/styledLeadsWorkbookBuilder";
 import { loadStore, saveStore, AppPersistentStore } from "./src/services/storeService";
 import { db } from "./src/db";
 import * as dbSchema from "./src/db/schema";
@@ -174,6 +177,161 @@ app.get("/api/cloud-sync/status", (req, res) => {
     twilioProtectedLinesCount: Object.keys(store?.spamShieldConfig?.lineMappings || {}).length,
     quoLinesCount: store?.quoConfig?.phoneNumbers?.length || 5,
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Google OAuth 2.0 Origin-Mismatch Bridge & Status Endpoints
+// Fixes Error 400: origin_mismatch for cleaningserviceyeg@gmail.com when signing
+// in on custom domains (app.tidyupscleaning.com / book.tidyupscleaning.com)
+// ─────────────────────────────────────────────────────────────────────────────
+const REGISTERED_GOOGLE_OAUTH_ORIGINS = [
+  "https://ais-dev-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app",
+  "https://ais-pre-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app",
+  "https://cleaning-service-dispatch-board-230358145142.us-east1.run.app",
+  "https://tidyups-cleaning-v1-103019601279.us-east1.run.app",
+  "https://gtm-kvj5cp62-zty5m.firebaseapp.com",
+];
+
+const CUSTOM_DOMAINS_TO_ADD_IN_GCP = [
+  "https://app.tidyupscleaning.com",
+  "https://book.tidyupscleaning.com",
+  "https://app.dispatchgeni.com",
+  "https://ais-dev-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app",
+  "https://ais-pre-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app",
+  "https://cleaning-service-dispatch-board-230358145142.us-east1.run.app",
+];
+
+app.get("/api/oauth/origin-status", (req, res) => {
+  const origin = String(req.query.origin || req.headers.origin || "").replace(/\/$/, "");
+  const isRegistered = REGISTERED_GOOGLE_OAUTH_ORIGINS.includes(origin);
+  res.json({
+    origin,
+    isRegistered,
+    oauthClientId: "230358145142-cs2b932r0uoc0fvm8kner4ipkr6qvng9.apps.googleusercontent.com",
+    projectId: "gtm-kvj5cp62-zty5m",
+    authorizedBridgeOrigin: "https://cleaning-service-dispatch-board-230358145142.us-east1.run.app",
+    registeredOrigins: REGISTERED_GOOGLE_OAUTH_ORIGINS,
+    originsToRegisterInCloudConsole: CUSTOM_DOMAINS_TO_ADD_IN_GCP,
+    cloudConsoleCredentialsUrl:
+      "https://console.cloud.google.com/apis/credentials?project=gtm-kvj5cp62-zty5m",
+  });
+});
+
+// Serves a lightweight Google Identity Services OAuth popup bridge on the already-authorized
+// Cloud Run origin (https://cleaning-service-dispatch-board-230358145142.us-east1.run.app/oauth-bridge)
+// and posts the access_token back to window.opener via postMessage!
+app.get("/oauth-bridge", (_req, res) => {
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TidyUps Google Workspace Sign-In Bridge</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0b0e17;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 20px;
+    }
+    .card {
+      max-width: 420px;
+      width: 100%;
+      background: #131826;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      border-radius: 20px;
+      padding: 28px 24px;
+      text-align: center;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    }
+    .btn {
+      margin-top: 16px;
+      width: 100%;
+      padding: 13px 18px;
+      border-radius: 12px;
+      border: none;
+      background: linear-gradient(90deg, #059669, #0d9488);
+      color: #fff;
+      font-weight: 800;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .sub {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 8px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="font-size: 28px; margin-bottom: 8px;">🔐</div>
+    <h2 style="margin: 0; font-size: 18px; font-weight: 900;">Connect Google Drive (TidyUps)</h2>
+    <p class="sub" id="status-text">
+      Authorized Cloud Run Origin Bridge for <strong>cleaningserviceyeg@gmail.com</strong>
+    </p>
+    <button id="auth-btn" class="btn">Continue with Google Account</button>
+  </div>
+  <script>
+    const CLIENT_ID = "230358145142-cs2b932r0uoc0fvm8kner4ipkr6qvng9.apps.googleusercontent.com";
+    const SCOPES = [
+      "https://www.googleapis.com/auth/drive",
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/drive.metadata",
+      "https://www.googleapis.com/auth/drive.readonly",
+      "openid",
+      "email",
+      "profile"
+    ].join(" ");
+
+    function startOAuth() {
+      const statusEl = document.getElementById("status-text");
+      if (!window.google || !window.google.accounts || !window.google.accounts.oauth2) {
+        statusEl.textContent = "Loading Google Identity Services...";
+        setTimeout(startOAuth, 250);
+        return;
+      }
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: async (resp) => {
+          if (resp && resp.access_token) {
+            statusEl.textContent = "Connected! Returning to TidyUps...";
+            let userInfo = {};
+            try {
+              const r = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+                headers: { Authorization: "Bearer " + resp.access_token }
+              });
+              if (r.ok) userInfo = await r.json();
+            } catch (e) {}
+            if (window.opener) {
+              window.opener.postMessage({
+                type: "TIDYUPS_GOOGLE_OAUTH_SUCCESS",
+                accessToken: resp.access_token,
+                user: userInfo
+              }, "*");
+            }
+            setTimeout(() => window.close(), 300);
+          } else {
+            statusEl.textContent = (resp && (resp.error_description || resp.error)) || "Sign-in was cancelled.";
+          }
+        }
+      });
+      client.requestAccessToken({ prompt: "select_account" });
+    }
+
+    document.getElementById("auth-btn").addEventListener("click", startOAuth);
+  </script>
+</body>
+</html>`);
 });
 
 // Quota & circuit-breaker state for Google Maps & Routes APIs
@@ -3558,11 +3716,16 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     }
   }
 
-  // Purge any unquoted voice/call leads from store.adLeads whose phone number matches a blocked number or blocked area code/prefix
+  // Purge any unquoted voice/call leads from store.adLeads whose phone number matches a blocked number or blocked area code/prefix,
+  // AND purge any false Price List / Service Catalog / Banner / Ad-Sheet test rows
   if (Array.isArray(store.adLeads)) {
     const beforeLeadCount = store.adLeads.length;
     store.adLeads = store.adLeads.filter((l: any) => {
       if (!l) return false;
+      if (String(l.id || "").startsWith("lead-sheet-mvmwt")) return false;
+      if (isFalseOrCatalogLeadRow(l.customerName)) return false;
+      const qNum = parseInt(String(l.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
+      if (qNum === 4418 || (qNum >= 4426 && qNum <= 4575)) return false;
       if (l.quoteId || l.quoteNumber || l.isJobberSynced) return true;
       const lDigits = normalizePhoneDigits(l.phone);
       if (!lDigits) return true;
@@ -3574,6 +3737,33 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       return true;
     });
     if (store.adLeads.length !== beforeLeadCount) {
+      mutated = true;
+    }
+  }
+
+  if (Array.isArray(store.clients)) {
+    const beforeClientsCount = store.clients.length;
+    store.clients = store.clients.filter((c: any) => {
+      if (!c) return false;
+      if (String(c.id || "").startsWith("cli-sheet-mvmwt")) return false;
+      if (isFalseOrCatalogLeadRow(c.name)) return false;
+      return true;
+    });
+    if (store.clients.length !== beforeClientsCount) {
+      mutated = true;
+    }
+  }
+
+  if (Array.isArray(store.quotes)) {
+    const beforeQuotesCount = store.quotes.length;
+    store.quotes = store.quotes.filter((q: any) => {
+      if (!q) return false;
+      const qNum = parseInt(String(q.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
+      if (qNum === 4418 || (qNum >= 4426 && qNum <= 4575)) return false;
+      if (isFalseOrCatalogLeadRow(q.clientName)) return false;
+      return true;
+    });
+    if (store.quotes.length !== beforeQuotesCount) {
       mutated = true;
     }
   }
@@ -6355,8 +6545,10 @@ function extractLeadsFromSheetMatrix(params: {
       ""
     ).trim();
 
-    if (!rawName && !rawPhone && !rawEmail && !isMetaDummyTest) continue;
+    if (!rawName && !rawPhone && !rawEmail) continue;
     if (
+      isMetaDummyTest ||
+      isFalseOrCatalogLeadRow(rawName) ||
       rawName.toLowerCase().includes("devon clark") ||
       rawName.toLowerCase() === "client name" ||
       rawName.toLowerCase() === "full_name"
@@ -6384,7 +6576,7 @@ function extractLeadsFromSheetMatrix(params: {
 
     // If this row came from the "Facebook Leads" tab, or a Facebook Form tab, or has Meta columns (ad_name/form_name/platform=fb/ig), classify as FB Leads
     const inferredSourceInput =
-      /facebook|fb|meta|instagram|\big\b|form/i.test(`${tabName} ${rawSourceCell} ${platformCol}`) || isMetaDummyTest
+      /facebook|fb|meta|instagram|\big\b|form/i.test(`${tabName} ${rawSourceCell} ${platformCol}`)
         ? "FB Leads"
         : rawSourceCell;
 
@@ -6410,9 +6602,6 @@ function extractLeadsFromSheetMatrix(params: {
     const normNameLower = (rawName || "").trim().toLowerCase();
 
     // Smart deduplication:
-    // 1. If the sheet row has an existing Jobber Quote # (e.g. QT-4379) or internal lead ID (lead-clean-...) that is already in store.adLeads, skip it.
-    // 2. Otherwise, only skip if an existing lead in the SAME sourceTab (or with the same external ID) already matches both name & phone.
-    // This ensures that if the owner tests a Facebook Lead Ad using their own phone/name (which might exist on an old Voice quote), the new Facebook Lead still imports into FB Leads!
     const alreadyExists = (store.adLeads || []).some((l: any) => {
       if (rowExternalId && (l.id === rowExternalId || l.externalLeadId === rowExternalId)) {
         return true;
@@ -6441,11 +6630,11 @@ function extractLeadsFromSheetMatrix(params: {
     if (!alreadyExists) {
       const importedLead = {
         id:
-          rowExternalId && String(rowExternalId).startsWith("lead-")
+          rowExternalId && String(rowExternalId).startsWith("lead-") && !String(rowExternalId).startsWith("lead-sheet-mvmwt")
             ? rowExternalId
             : `lead-sheet-${Date.now().toString(36)}-${newlyImportedLeads.length + 1}`,
         externalLeadId: rowExternalId || undefined,
-        customerName: rawName || (isMetaDummyTest ? "Facebook Ad Test Lead" : "Facebook / Sheet Lead"),
+        customerName: rawName,
         phone: rawPhone,
         email: rawEmail,
         address: rawAddr,
@@ -6461,7 +6650,7 @@ function extractLeadsFromSheetMatrix(params: {
         dateReceived: rawCreatedDate.includes("T") ? rawCreatedDate : new Date().toISOString(),
         status: getByHeader("status") || "New",
         verdict: (getByHeader("verdict") || "Good lead") as any,
-        isJobberSynced: Boolean(rowQuoteNumber && rowQuoteNumber.startsWith("QT-")),
+        isJobberSynced: true,
         quoteNumber: rowQuoteNumber || undefined,
         quotedAmount,
         notes: rawNotes,
@@ -6506,7 +6695,7 @@ function extractLeadsFromSheetMatrix(params: {
   return addedFromTab;
 }
 
-// Helper: Parse an entire .xlsx workbook buffer across ALL worksheet tabs
+// Helper: Parse an entire .xlsx workbook buffer across lead worksheet tabs (skipping Price List / Catalog tabs)
 function extractLeadsFromXlsxBuffer(
   buffer: Buffer,
   spreadsheetId: string,
@@ -6517,12 +6706,13 @@ function extractLeadsFromXlsxBuffer(
   let pulledCount = 0;
   try {
     const wb = XLSX.read(buffer, { type: "buffer" });
-    // Prioritize Facebook Leads / ScrubbyBuilder Leads / Form tabs first so newly added FB rows get their specific tab attribution before Master Leads
-    const orderedSheetNames = [...(wb.SheetNames || [])].sort((a, b) => {
-      const aScore = /facebook|fb|form|scrubby|google/i.test(a) ? 0 : 1;
-      const bScore = /facebook|fb|form|scrubby|google/i.test(b) ? 0 : 1;
-      return aScore - bScore;
-    });
+    const orderedSheetNames = [...(wb.SheetNames || [])]
+      .filter((sheetName) => !/price|catalog|service|rate|summary|kpi|guide|instruction|jobber\s*master/i.test(sheetName))
+      .sort((a, b) => {
+        const aScore = /facebook|fb|form|scrubby|google/i.test(a) ? 0 : 1;
+        const bScore = /facebook|fb|form|scrubby|google/i.test(b) ? 0 : 1;
+        return aScore - bScore;
+      });
 
     for (const sheetName of orderedSheetNames) {
       const ws = wb.Sheets[sheetName];

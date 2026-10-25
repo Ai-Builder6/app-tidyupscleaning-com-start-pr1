@@ -20,6 +20,17 @@ export const OAUTH_CLIENT_ID =
   (firebaseConfig as any).oAuthClientId ||
   '230358145142-cs2b932r0uoc0fvm8kner4ipkr6qvng9.apps.googleusercontent.com';
 
+export const OAUTH_REGISTERED_ORIGINS = [
+  'https://app.tidyupscleaning.com',
+  'https://book.tidyupscleaning.com',
+  'https://cleaning-service-dispatch-board-230358145142.us-east1.run.app',
+  'https://ais-dev-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app',
+  'https://ais-pre-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app',
+];
+
+export const OAUTH_BRIDGE_PRIMARY_ORIGIN =
+  'https://cleaning-service-dispatch-board-230358145142.us-east1.run.app';
+
 // Google Workspace Drive Scopes
 export const SCOPES = [
   'https://www.googleapis.com/auth/drive',
@@ -55,6 +66,48 @@ let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 let cachedFallbackUser: User | null = null;
 const authSuccessListeners = new Set<(user: User, token: string) => void>();
+
+async function finalizeAccessTokenSession(accessToken: string, emailHint?: string, nameHint?: string): Promise<{ user: User; accessToken: string }> {
+  cachedAccessToken = accessToken;
+  let resolvedUser: User | null = null;
+  try {
+    const cred = GoogleAuthProvider.credential(null, accessToken);
+    const credResult = await signInWithCredential(auth, cred);
+    resolvedUser = credResult.user;
+  } catch {
+    try {
+      const infoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (infoRes.ok) {
+        const info = await infoRes.json();
+        resolvedUser = {
+          uid: info.sub || 'google-drive-user',
+          email: info.email || emailHint || 'cleaningserviceyeg@gmail.com',
+          displayName: info.name || info.email || nameHint || 'TidyUps Admin',
+          photoURL: info.picture || null,
+        } as unknown as User;
+      }
+    } catch {}
+  }
+
+  if (!resolvedUser) {
+    resolvedUser = {
+      uid: 'google-drive-user',
+      email: emailHint || 'cleaningserviceyeg@gmail.com',
+      displayName: nameHint || 'TidyUps Admin',
+    } as unknown as User;
+  }
+
+  cachedFallbackUser = resolvedUser;
+  authSuccessListeners.forEach((cb) => {
+    try {
+      cb(resolvedUser!, accessToken);
+    } catch {}
+  });
+
+  return { user: resolvedUser, accessToken };
+}
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
@@ -105,17 +158,26 @@ export const initAuth = (
 
 /**
  * Synchronous Google OAuth Sign-In using Google Identity Services (initTokenClient)
- * with Firebase signInWithCredential fallback so popup is never blocked by Referer restrictions or async delays.
+ * with Firebase signInWithPopup fallback so `Error 400: origin_mismatch` on dynamic preview URLs is handled gracefully.
  */
 export const googleSignIn = (): Promise<{ user: User; accessToken: string } | null> => {
   isSigningIn = true;
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const gsi = typeof window !== 'undefined' ? (window as any).google?.accounts?.oauth2 : null;
 
-  if (gsi && typeof gsi.initTokenClient === 'function') {
+  // Prefer Firebase signInWithPopup (which routes via the Firebase authDomain handler) when on an ephemeral preview origin
+  // so Google Cloud Console `origin_mismatch` does not block `cleaningserviceyeg@gmail.com`.
+  const isKnownDirectGsiOrigin =
+    currentOrigin === 'https://app.tidyupscleaning.com' ||
+    currentOrigin === 'https://book.tidyupscleaning.com' ||
+    currentOrigin === 'https://cleaning-service-dispatch-board-230358145142.us-east1.run.app';
+
+  if (gsi && typeof gsi.initTokenClient === 'function' && isKnownDirectGsiOrigin) {
     return new Promise((resolve, reject) => {
       try {
         const tokenClient = gsi.initTokenClient({
           client_id: OAUTH_CLIENT_ID,
+          hint: 'cleaningserviceyeg@gmail.com',
           scope: [...SCOPES, 'openid', 'email', 'profile'].join(' '),
           callback: async (tokenResponse: any) => {
             try {
@@ -136,50 +198,9 @@ export const googleSignIn = (): Promise<{ user: User; accessToken: string } | nu
                 reject(new Error('No access token returned from Google OAuth.'));
                 return;
               }
-
-              cachedAccessToken = accessToken;
-
-              // 1. Try signing into Firebase Auth with the Google OAuth access token (proxied via /api/firebase-auth-proxy)
-              let resolvedUser: User | null = null;
-              try {
-                const cred = GoogleAuthProvider.credential(null, accessToken);
-                const credResult = await signInWithCredential(auth, cred);
-                resolvedUser = credResult.user;
-              } catch (firebaseErr) {
-                // 2. If Firebase Auth is unavailable, fetch Google userinfo directly so Drive upload still succeeds 100%
-                try {
-                  const infoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                    headers: { Authorization: `Bearer ${accessToken}` },
-                  });
-                  if (infoRes.ok) {
-                    const info = await infoRes.json();
-                    resolvedUser = {
-                      uid: info.sub || 'google-drive-user',
-                      email: info.email || 'booking@tidyupscleaning.com',
-                      displayName: info.name || info.email || 'TidyUps Admin',
-                      photoURL: info.picture || null,
-                    } as unknown as User;
-                  }
-                } catch {}
-              }
-
-              if (!resolvedUser) {
-                resolvedUser = {
-                  uid: 'google-drive-user',
-                  email: 'booking@tidyupscleaning.com',
-                  displayName: 'TidyUps Admin',
-                } as unknown as User;
-              }
-
-              cachedFallbackUser = resolvedUser;
-              authSuccessListeners.forEach((cb) => {
-                try {
-                  cb(resolvedUser!, accessToken);
-                } catch {}
-              });
-
+              const session = await finalizeAccessTokenSession(accessToken);
               isSigningIn = false;
-              resolve({ user: resolvedUser, accessToken });
+              resolve(session);
             } catch (innerErr) {
               isSigningIn = false;
               reject(innerErr);
@@ -196,7 +217,6 @@ export const googleSignIn = (): Promise<{ user: User; accessToken: string } | nu
           },
         });
 
-        // Must be called synchronously inside the user click handler tick!
         tokenClient.requestAccessToken({ prompt: '' });
       } catch (err) {
         isSigningIn = false;
@@ -205,23 +225,59 @@ export const googleSignIn = (): Promise<{ user: User; accessToken: string } | nu
     });
   }
 
-  // Fallback to Firebase signInWithPopup (routed via /api/firebase-auth-proxy)
+  // Fallback to Firebase signInWithPopup (uses Firebase Auth handler domain, avoiding direct GIS origin_mismatch)
   return (async () => {
     try {
+      googleAuthProvider.setCustomParameters({
+        login_hint: 'cleaningserviceyeg@gmail.com',
+        prompt: 'select_account',
+      });
       const result = await signInWithPopup(auth, googleAuthProvider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (!credential?.accessToken) {
         throw new Error('Failed to get Google Drive OAuth access token from Firebase Auth');
       }
-      cachedAccessToken = credential.accessToken;
-      cachedFallbackUser = result.user;
-      authSuccessListeners.forEach((cb) => {
-        try {
-          cb(result.user, cachedAccessToken!);
-        } catch {}
-      });
-      return { user: result.user, accessToken: cachedAccessToken };
+      const session = await finalizeAccessTokenSession(
+        credential.accessToken,
+        result.user.email || 'cleaningserviceyeg@gmail.com',
+        result.user.displayName || 'TidyUps Admin'
+      );
+      return session;
     } catch (error: any) {
+      // If GIS is present and Firebase popup failed, try GIS tokenClient as secondary attempt
+      if (gsi && typeof gsi.initTokenClient === 'function') {
+        return await new Promise<{ user: User; accessToken: string } | null>((resolve, reject) => {
+          try {
+            const tokenClient = gsi.initTokenClient({
+              client_id: OAUTH_CLIENT_ID,
+              hint: 'cleaningserviceyeg@gmail.com',
+              scope: [...SCOPES, 'openid', 'email', 'profile'].join(' '),
+              callback: async (tokenResponse: any) => {
+                if (tokenResponse?.access_token) {
+                  const session = await finalizeAccessTokenSession(tokenResponse.access_token);
+                  resolve(session);
+                } else {
+                  reject(
+                    new Error(
+                      `Origin "${currentOrigin}" needs to be added to Authorized JavaScript origins in Google Cloud Console for client ${OAUTH_CLIENT_ID}.`
+                    )
+                  );
+                }
+              },
+              error_callback: () => {
+                reject(
+                  new Error(
+                    `Origin "${currentOrigin}" needs to be added to Authorized JavaScript origins in Google Cloud Console for client ${OAUTH_CLIENT_ID}.`
+                  )
+                );
+              },
+            });
+            tokenClient.requestAccessToken({ prompt: 'select_account' });
+          } catch (innerErr) {
+            reject(innerErr);
+          }
+        });
+      }
       console.warn('Google Drive OAuth Sign-in notice:', error?.code || error?.message || error);
       throw error;
     } finally {

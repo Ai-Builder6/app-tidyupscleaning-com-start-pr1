@@ -5,6 +5,7 @@
  */
 
 import { mergeWithBaseScheduledVisits } from "../data/jobberCalendarData";
+import { isFalseOrCatalogLeadRow } from "./styledLeadsWorkbookBuilder";
 
 export const JOBBER_GRAPHQL_URL = "https://api.getjobber.com/api/graphql";
 export const JOBBER_GRAPHQL_VERSION = "2025-04-16";
@@ -104,65 +105,9 @@ export async function refreshJobberAccessToken(
         }
       }
 
-      // Fallback: Check if app.tidyupscleaning.com has a newer rotated token or refresh token
-      try {
-        const prodRes = await fetch("https://app.tidyupscleaning.com/api/store", {
-          signal: AbortSignal.timeout(6_000),
-        });
-        if (prodRes.ok) {
-          const prodData: any = await prodRes.json();
-          const prodJc = (prodData?.store || prodData)?.jobberConfig;
-          const prodAccess = String(prodJc?.accessToken || "").replace(/^Bearer\s+/i, "").trim();
-          const prodRefresh = String(prodJc?.refreshToken || "").trim();
-
-          if (prodAccess && prodAccess.length > 20 && !prodAccess.includes("...") && !expiredTokensSet.has(prodAccess)) {
-            const testRes = await fetch(JOBBER_GRAPHQL_URL, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${prodAccess}`,
-                "X-JOBBER-GRAPHQL-VERSION": JOBBER_GRAPHQL_VERSION,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ query: "query { account { name } }" }),
-              signal: AbortSignal.timeout(6_000),
-            });
-            if (testRes.ok) {
-              latestKnownAccessToken = prodAccess;
-              if (prodRefresh) latestKnownRefreshToken = prodRefresh;
-              lastFailedRefreshAt = 0;
-              if (onTokenRefreshedCallback) {
-                onTokenRefreshedCallback({
-                  accessToken: prodAccess,
-                  refreshToken: prodRefresh || candidateRefresh,
-                });
-              }
-              return prodAccess;
-            } else if (testRes.status === 401) {
-              expiredTokensSet.add(prodAccess);
-            }
-          }
-
-          if (prodRefresh && prodRefresh !== candidateRefresh) {
-            const prodRefreshRes = await exchangeRefreshTokenWithJobber(
-              prodJc?.clientId || clientId,
-              prodJc?.clientSecret || clientSecret,
-              prodRefresh
-            );
-            if (prodRefreshRes?.accessToken) {
-              latestKnownAccessToken = prodRefreshRes.accessToken;
-              latestKnownRefreshToken = prodRefreshRes.refreshToken;
-              expiredTokensSet.delete(prodRefreshRes.accessToken);
-              lastFailedRefreshAt = 0;
-              if (onTokenRefreshedCallback) {
-                onTokenRefreshedCallback(prodRefreshRes);
-              }
-              return prodRefreshRes.accessToken;
-            }
-          }
-        }
-      } catch {
-        // Ignore network fallback error
-      }
+      // Keep token strictly isolated to this server's rotated refresh token
+      lastFailedRefreshAt = Date.now();
+      return null;
 
       lastFailedRefreshAt = Date.now();
       return null;
@@ -880,6 +825,9 @@ export async function syncJobberQuotes(
       const quotesMap = new Map<string, JobberQuote>();
       for (const q of existingQuotes) {
         if (q.id === "qt_4331" || q.quoteNumber === "QT-4331") continue;
+        const qNumExisting = parseInt(String(q.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
+        if (qNumExisting === 4418 || (qNumExisting >= 4426 && qNumExisting <= 4575)) continue;
+        if (isFalseOrCatalogLeadRow(q.clientName)) continue;
         quotesMap.set(q.id || q.quoteNumber, { ...q });
       }
 
@@ -888,6 +836,19 @@ export async function syncJobberQuotes(
       let unchangedCount = 0;
 
       for (const node of nodes) {
+        const rawQNum = Number(node.quoteNumber || 0);
+        const clientName = node.client?.name || "Customer";
+        const lineNodes = node.lineItems?.nodes || [];
+        // Skip emptied/false ad-sheet quotes (QT-4418 and QT-4426..4575) or catalog/test client names
+        if (
+          rawQNum === 4418 ||
+          (rawQNum >= 4426 && rawQNum <= 4575) ||
+          isFalseOrCatalogLeadRow(clientName) ||
+          (lineNodes.length === 0 && Number(node.amounts?.total || 0) === 0)
+        ) {
+          continue;
+        }
+
         let status: JobberQuote["quoteStatus"] = "APPROVED";
         const rawStatus = (node.quoteStatus || "").toLowerCase();
         if (rawStatus.includes("await") || rawStatus.includes("sent") || rawStatus.includes("pend")) {
@@ -907,7 +868,6 @@ export async function syncJobberQuotes(
         const key = node.id || quoteNumber;
         const total = node.amounts?.total || 380;
         const depositRequired = node.amounts?.depositAmount || 0;
-        const clientName = node.client?.name || "Customer";
         const rawPhone = Array.isArray(node.client?.defaultPhones)
           ? node.client.defaultPhones[0]
           : node.client?.defaultPhones || "";
@@ -921,7 +881,6 @@ export async function syncJobberQuotes(
               .join(", ")
           : undefined;
         const rawTitle = node.title || "";
-        const lineNodes = node.lineItems?.nodes || [];
         const firstLineText = `${rawTitle} ${lineNodes[0]?.name || ""} ${lineNodes[0]?.description || ""}`;
         const bedMatch = firstLineText.match(/(\d+)\s*(?:bed|br|bedroom)/i);
         const bathMatch = firstLineText.match(/(\d+(?:\.\d+)?)\s*(?:bath|ba|bathroom)/i);

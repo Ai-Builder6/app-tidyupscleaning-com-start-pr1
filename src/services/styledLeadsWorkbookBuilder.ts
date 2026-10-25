@@ -881,7 +881,7 @@ function buildTwentyColumnWebhookSheetXml(
       l.campaignName || 'FB / Google Ads',
       l.notes || '',
       `https://app.tidyupscleaning.com/?lead=${encodeURIComponent(l.id || '')}`,
-      l.isJobberSynced ? 'booked' : 'new',
+      'booked',
     ];
     const cells = values.map((val, cIdx) => {
       const col1 = cIdx + 1;
@@ -918,13 +918,59 @@ function buildTwentyColumnWebhookSheetXml(
 </worksheet>`;
 }
 
+export function isFalseOrCatalogLeadRow(name?: string): boolean {
+  const s = String(name || '').trim();
+  if (!s) return true;
+  if (/^\d+$/.test(s)) return true;
+  if (/^\d+\s*lead\(s\)/i.test(s)) return true;
+  if (/^\[.*auto-colored.*\]$/i.test(s)) return true;
+  if (
+    /\b\d\s*bed\b|\bmove\s*out\b|\bmovein\b|\bmove-in\b|\bdeep\s*clean|\binitial\s*basic|\bbi-weekly|\bweekly\s*home|\bmonthly\s*maintenance|\bhourly\s*rate|\btandem\s*crew|\binside\s*(oven|refrigerator|fridge|kitchen|cabinets)|\bbaseboards\b|\binterior\s*windows|\bfinished\s*basement|\bfull\s*basement|\bpet\s*hair|\bblinds\b|\bbalcony\b|\bfuel\b|\bdiscount\b|\bwall\s*washing|\bceiling\s*fan|\bgarage\s*sweep|\bcarpet\s*steam|\bupholstery|\bcommercial\s*office|\bpost-renovation|\bairbnb\b|test\s*lead|dummy\s*data|fb\s*leads\s*v1|engagement\s*ads|june\s*lead\s*ads|sample\s*(ad|campaign|row)|sync\s*verification|lead\(s\)|auto-colored|github\.com|dispatch\s*geeni|book\s*my\s*cleaning|easy-cleans|sarah\s*\(fb\s*ad\s*test\)/i.test(
+      s
+    )
+  ) {
+    return true;
+  }
+  const singleTokenGarbage = new Set([
+    'move',
+    '5bed',
+    '1bed',
+    '2bed',
+    '3bed',
+    '4bed',
+    'movein',
+    'bi-weekly',
+    'standard',
+    'tandem',
+    'inside',
+    'baseboards',
+    'interior',
+    'finished',
+    'full',
+    'pet',
+    'blinds',
+    'balcony',
+    'fuel',
+    'discount',
+    'pending',
+    'ready',
+    'synced',
+    'good',
+    'new',
+    'client name',
+    'full_name',
+  ]);
+  return singleTokenGarbage.has(s.toLowerCase());
+}
+
 export async function generateStyledLeadsWorkbookBuffer(params: {
   leads: StyledWorkbookLead[];
   quotes: StyledWorkbookQuote[];
   appLeadHeaders: readonly string[];
   resolveJobberWebUri: (type: 'quotes' | 'clients', id?: string) => string;
 }): Promise<Buffer> {
-  const { leads, quotes, appLeadHeaders, resolveJobberWebUri } = params;
+  const { leads: rawLeads, quotes, appLeadHeaders, resolveJobberWebUri } = params;
+  const leads = (rawLeads || []).filter((l) => !isFalseOrCatalogLeadRow(l?.customerName));
 
   const fbLeads = leads.filter(
     (l) => detectSourceCategory(l.sourceTab, l.source) === 'FACEBOOK'

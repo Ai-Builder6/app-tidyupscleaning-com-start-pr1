@@ -655,6 +655,25 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                       </button>
                     </div>
                   )}
+
+                  {/* OAuth Error 400: origin_mismatch Helper for cleaningserviceyeg@gmail.com */}
+                  <details className="pt-2 text-xs text-slate-400">
+                    <summary className="cursor-pointer font-bold text-amber-300 hover:text-amber-200 select-none">
+                      Seeing &ldquo;Error 400: origin_mismatch&rdquo; with cleaningserviceyeg@gmail.com? Click here for 1-click origin fix
+                    </summary>
+                    <div className="mt-2 p-3 rounded-2xl bg-slate-950/90 border border-amber-500/30 space-y-2">
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        Google Sign-In now automatically uses Firebase Auth popup routing on preview URLs. To also authorize direct Google Identity Services on every domain for <code className="text-amber-300">cleaningserviceyeg@gmail.com</code>, add these <strong>Authorized JavaScript origins</strong> in Google Cloud Console &rarr; APIs &amp; Services &rarr; Credentials (Client ID <code className="text-emerald-300">230358145142-cs2b932r0uoc0fvm8kner4ipkr6qvng9</code>):
+                      </p>
+                      <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 font-mono text-[11px] text-emerald-300 space-y-0.5 select-all">
+                        <div>https://app.tidyupscleaning.com</div>
+                        <div>https://book.tidyupscleaning.com</div>
+                        <div>https://cleaning-service-dispatch-board-230358145142.us-east1.run.app</div>
+                        <div>https://ais-dev-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app</div>
+                        <div>https://ais-pre-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app</div>
+                      </div>
+                    </div>
+                  </details>
                 </div>
               </div>
 
