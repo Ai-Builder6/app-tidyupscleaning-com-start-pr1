@@ -93,6 +93,7 @@ interface QuickQuoteViewProps {
   onNavigateToMasterHub?: () => void;
   onNavigateToFbMessengerAi?: () => void;
   onNavigateToManagement?: () => void;
+  onNavigateToQuotes?: () => void;
   onNavigateToAddressRadar?: () => void;
   onNavigateToClients?: () => void;
   calls?: any[];
@@ -182,6 +183,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
   onNavigateToMasterHub,
   onNavigateToFbMessengerAi,
   onNavigateToManagement,
+  onNavigateToQuotes,
   onNavigateToAddressRadar,
   onNavigateToClients,
   calls = [],
@@ -2122,6 +2124,16 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
       {/* Top Quick-Jump Button Bar on Voice Dictation & Intake */}
       <div className="rounded-2xl bg-slate-950/90 border border-slate-800 px-3 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md">
         <div className="flex flex-wrap items-center gap-1.5">
+          {onNavigateToQuotes && (
+            <button
+              type="button"
+              onClick={onNavigateToQuotes}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+            >
+              <span>📋</span>
+              <span>Quotes ({quotes.length})</span>
+            </button>
+          )}
           {onNavigateToMasterHub && (
             <button
               type="button"
@@ -2363,6 +2375,19 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                 {(initialLead as any)?.originalDialedNumber || '+1 (587) 900-7223'} (
                 {(initialLead as any)?.campaignLabel || 'GMB Direct'})
               </span>
+            )}
+            {/* Called Before vs First-Time Caller Indicator */}
+            {(customerPhone || customerName) && (
+              intelligence.calledBefore ? (
+                <span className="px-2.5 py-0.5 rounded-md bg-amber-400 text-slate-950 font-black text-xs shadow-xs">
+                  🔁 Called Before ({Math.max(intelligence.callCount, 1)}x
+                  {intelligence.lastQuoteNumber ? ` • Quote #${intelligence.lastQuoteNumber}` : ''})
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-md bg-sky-500/20 border border-sky-400/50 text-sky-200 font-bold text-xs">
+                  🆕 1st-Time Caller
+                </span>
+              )
             )}
             {Object.keys(voiceCapturedFields).length > 0 && (
               <span className="px-2.5 py-0.5 rounded-lg bg-[#00ff66]/20 border border-[#00ff66] text-[#5cff9d] text-[11px] font-black shadow-[0_0_15px_rgba(0,255,102,0.35)]">

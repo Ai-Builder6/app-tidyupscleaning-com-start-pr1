@@ -14981,27 +14981,70 @@ function findCallerCrmMatch(callerNumber: string, store: any): {
   lastQuoteNumber?: string;
   lastQuoteTotal?: number;
   isRepeatClient?: boolean;
+  calledBefore?: boolean;
+  priorCallsCount?: number;
+  lastCalledAt?: string;
 } {
   const callerDigits = normalizePhoneDigits(callerNumber);
   if (!callerDigits || callerDigits.length < 7 || !store) return {};
 
   const clients = Array.isArray(store.clients) ? store.clients : [];
   const quotes = Array.isArray(store.quotes) ? store.quotes : [];
-  const leads = Array.isArray(store.leads) ? store.leads : [];
+  const leads = Array.isArray(store.adLeads)
+    ? store.adLeads
+    : Array.isArray(store.leads)
+    ? store.leads
+    : [];
+  const quoCalls = Array.isArray(store.quoCallLogs) ? store.quoCallLogs : [];
+  const recentInbound = Array.isArray(store.recentInboundCalls) ? store.recentInboundCalls : [];
 
   const matchedClient = clients.find((c: any) => normalizePhoneDigits(c.phone || "") === callerDigits);
   const matchedQuote = quotes.find((q: any) => normalizePhoneDigits(q.clientPhone || q.phone || "") === callerDigits);
   const matchedLead = leads.find((l: any) => normalizePhoneDigits(l.phone || "") === callerDigits);
 
-  if (!matchedClient && !matchedQuote && !matchedLead) return {};
+  const matchingQuoCalls = quoCalls.filter(
+    (q: any) => normalizePhoneDigits(q.callerPhone || q.from || "") === callerDigits
+  );
+  const matchingRecentInbound = recentInbound.filter(
+    (r: any) => normalizePhoneDigits(r.callerNumber || "") === callerDigits
+  );
+
+  // Deduplicate call timestamps by 90-second buckets
+  const callTimeBuckets = new Set<number>();
+  let latestCallIso: string | undefined;
+  for (const c of [...matchingQuoCalls, ...matchingRecentInbound]) {
+    const ts = c.timestamp || c.createdAt;
+    if (ts) {
+      const ms = new Date(ts).getTime();
+      if (!isNaN(ms)) {
+        callTimeBuckets.add(Math.floor(ms / 90000));
+        if (!latestCallIso || ms > new Date(latestCallIso).getTime()) {
+          latestCallIso = new Date(ms).toISOString();
+        }
+      }
+    }
+  }
+
+  const priorCallsCount = Math.max(
+    callTimeBuckets.size,
+    matchedClient || matchedQuote || matchedLead ? 1 : 0
+  );
+  const calledBefore = Boolean(
+    priorCallsCount > 1 || matchedClient || matchedQuote || matchedLead
+  );
+
+  if (!matchedClient && !matchedQuote && !matchedLead && priorCallsCount === 0) return {};
 
   return {
     matchedClientName: matchedClient?.name || matchedQuote?.clientName || matchedLead?.customerName || undefined,
-    matchedAddress: matchedClient?.address || matchedQuote?.propertyAddress || matchedLead?.address || undefined,
+    matchedAddress: matchedClient?.address || matchedQuote?.propertyAddress || matchedQuote?.serviceAddress || matchedLead?.address || undefined,
     matchedEmail: matchedClient?.email || matchedQuote?.clientEmail || matchedLead?.email || undefined,
     lastQuoteNumber: matchedQuote?.quoteNumber || undefined,
     lastQuoteTotal: typeof matchedQuote?.total === "number" ? matchedQuote.total : undefined,
-    isRepeatClient: Boolean(matchedClient || matchedQuote),
+    isRepeatClient: Boolean(matchedClient || matchedQuote || priorCallsCount > 1),
+    calledBefore,
+    priorCallsCount,
+    lastCalledAt: latestCallIso || matchedQuote?.createdAt || matchedLead?.createdAt || undefined,
   };
 }
 
@@ -15224,6 +15267,9 @@ function quoLogToScreenerRecord(q: any, store: any): any {
     lastQuoteNumber: crm.lastQuoteNumber || "",
     lastQuoteTotal: crm.lastQuoteTotal,
     isRepeatClient: Boolean(crm.isRepeatClient),
+    calledBefore: Boolean(crm.calledBefore),
+    priorCallsCount: crm.priorCallsCount || 1,
+    lastCalledAt: crm.lastCalledAt || q.timestamp || q.createdAt,
     transcriptText: q.transcriptText || "",
     summary: q.summary || "",
     countryCode: "+1",
@@ -15302,11 +15348,22 @@ app.get("/api/twilio/live-calls", async (req, res) => {
   const rawRecent = Array.isArray(store?.recentInboundCalls) ? store.recentInboundCalls : [];
   const enrichedRecent = rawRecent.map((c: any) => {
     const isDismissed = Boolean(c.dismissedInHud || dismissedHudCallIds.has(c.id) || dismissedHudCallIds.has(c.callSid));
+    const crm = findCallerCrmMatch(c.callerNumber || "", store);
     if (c.originalDialedNumber && c.campaignLabel) {
-      return { ...c, dismissedInHud: isDismissed };
+      return {
+        ...c,
+        callerName: crm.matchedClientName || c.callerName || "Inbound Caller",
+        matchedAddress: crm.matchedAddress || c.matchedAddress || "",
+        lastQuoteNumber: crm.lastQuoteNumber || c.lastQuoteNumber || "",
+        lastQuoteTotal: crm.lastQuoteTotal ?? c.lastQuoteTotal,
+        isRepeatClient: Boolean(crm.isRepeatClient || c.isRepeatClient),
+        calledBefore: Boolean(crm.calledBefore || c.calledBefore),
+        priorCallsCount: crm.priorCallsCount || c.priorCallsCount || 1,
+        lastCalledAt: crm.lastCalledAt || c.lastCalledAt,
+        dismissedInHud: isDismissed,
+      };
     }
     const attr = resolveOriginalDialedLineInfo(c.dialedNumber || "+18255334317", c.forwardedFrom);
-    const crm = findCallerCrmMatch(c.callerNumber || "", store);
     const dest = c.destinationNumber || store?.spamShieldConfig?.forwardDestinationNumber || "+15875708005";
     return {
       ...c,
@@ -15320,6 +15377,9 @@ app.get("/api/twilio/live-calls", async (req, res) => {
       lastQuoteNumber: crm.lastQuoteNumber || c.lastQuoteNumber || "",
       lastQuoteTotal: crm.lastQuoteTotal ?? c.lastQuoteTotal,
       isRepeatClient: Boolean(crm.isRepeatClient || c.isRepeatClient),
+      calledBefore: Boolean(crm.calledBefore || c.calledBefore),
+      priorCallsCount: crm.priorCallsCount || c.priorCallsCount || 1,
+      lastCalledAt: crm.lastCalledAt || c.lastCalledAt,
       dismissedInHud: isDismissed,
     };
   });

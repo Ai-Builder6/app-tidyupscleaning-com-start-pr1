@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   MoveHorizontal,
+  FileCheck,
 } from 'lucide-react';
 
 export interface MobileBottomNavProps {
@@ -254,6 +255,12 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       badge: '3 Pages',
     },
     {
+      id: 'QUOTES',
+      label: 'Quotes',
+      icon: FileCheck,
+      activeColor: 'text-amber-300 bg-amber-500/20 border-amber-400/50',
+    },
+    {
       id: 'MASTER_HUB',
       label: 'Master Hub',
       icon: FileSpreadsheet,
@@ -307,7 +314,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           const isActive =
             activeTopView === item.id ||
             (item.id === 'MANAGEMENT' &&
-              ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL', 'INTAKES', 'LEADS', 'SPAM_SHIELD', 'ADDRESS_SEARCH'].includes(
+              ['MANAGEMENT', 'INVOICES', 'LEGAL', 'INTAKES', 'LEADS', 'SPAM_SHIELD', 'ADDRESS_SEARCH'].includes(
                 activeTopView
               ));
 

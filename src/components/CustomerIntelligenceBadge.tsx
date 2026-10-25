@@ -18,6 +18,8 @@ export const CustomerIntelligenceBadge: React.FC<CustomerIntelligenceBadgeProps>
   const {
     callCount,
     cleansCount,
+    calledBefore,
+    lastQuoteNumber,
     isExistingClient,
     isRepeatCaller,
     loyaltyTier,
@@ -28,20 +30,26 @@ export const CustomerIntelligenceBadge: React.FC<CustomerIntelligenceBadgeProps>
   if (compact) {
     return (
       <span className="inline-flex items-center gap-1.5 flex-wrap">
-        {/* Caller Badge */}
-        {callCount > 0 ? (
+        {/* Called Before vs First-Time Caller Badge */}
+        {calledBefore || callCount > 0 ? (
           <span
             className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold font-mono ${
-              callCount > 1
-                ? 'bg-purple-100 text-purple-900 border border-purple-200'
+              calledBefore || callCount > 1
+                ? 'bg-amber-100 text-amber-950 border border-amber-300'
                 : 'bg-slate-100 text-slate-700 border border-slate-200'
             }`}
-            title={`Customer has called ${callCount} time${callCount === 1 ? '' : 's'}`}
+            title={`Called Before (${Math.max(callCount, 1)} call${callCount === 1 ? '' : 's'}${lastQuoteNumber ? ` • Quote #${lastQuoteNumber}` : ''})`}
           >
-            <PhoneCall className="w-2.5 h-2.5 text-purple-600 shrink-0" />
-            <span>{callCount}x call{callCount > 1 ? 's' : ''}</span>
+            <PhoneCall className="w-2.5 h-2.5 text-amber-700 shrink-0" />
+            <span>
+              🔁 Called Before ({Math.max(callCount, 1)}x{lastQuoteNumber ? ` • Q#${lastQuoteNumber}` : ''})
+            </span>
           </span>
-        ) : null}
+        ) : (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-50 text-sky-800 border border-sky-200">
+            <span>🆕 1st-Time Caller</span>
+          </span>
+        )}
 
         {/* Cleans / Client Status Badge */}
         {cleansCount > 0 ? (
@@ -64,16 +72,12 @@ export const CustomerIntelligenceBadge: React.FC<CustomerIntelligenceBadgeProps>
             <UserCheck className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
             <span>Client</span>
           </span>
-        ) : (
-          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
-            <span>New Lead</span>
-          </span>
-        )}
+        ) : null}
 
         {/* Loyalty Discount Badge if eligible */}
         {loyaltyDiscountEligible && (
           <span
-            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-black bg-pink-100 text-pink-900 border border-pink-300 animate-pulse"
+            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-black bg-pink-100 text-pink-900 border border-pink-300"
             title={`Eligible for ${loyaltyDiscountPercent}% Repeat Client Loyalty Discount!`}
           >
             <Tag className="w-2.5 h-2.5 text-pink-600 shrink-0" />
@@ -91,19 +95,25 @@ export const CustomerIntelligenceBadge: React.FC<CustomerIntelligenceBadgeProps>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-extrabold text-slate-900 flex items-center gap-1">
             <ShieldCheck className="w-4 h-4 text-purple-600" />
-            <span>Caller &amp; Client Intelligence</span>
+            <span>Caller &amp; Client History</span>
           </span>
 
-          {/* Call Count */}
+          {/* Called Before vs First-Time Caller */}
           <span
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
-              isRepeatCaller
-                ? 'bg-purple-100 text-purple-900 border border-purple-300'
-                : 'bg-slate-100 text-slate-700 border border-slate-200'
+            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${
+              calledBefore || isRepeatCaller
+                ? 'bg-amber-200 text-amber-950 border border-amber-400'
+                : 'bg-sky-100 text-sky-900 border border-sky-300'
             }`}
           >
-            <PhoneCall className="w-3 h-3 text-purple-600" />
-            <span>{callCount} Phone Call{callCount === 1 ? '' : 's'} Logged</span>
+            <PhoneCall className="w-3 h-3 text-amber-800" />
+            <span>
+              {calledBefore || isRepeatCaller
+                ? `🔁 Called Before (${Math.max(callCount, 1)} call${callCount === 1 ? '' : 's'}${
+                    lastQuoteNumber ? ` • Quote #${lastQuoteNumber}` : ''
+                  })`
+                : '🆕 First-Time Caller'}
+            </span>
           </span>
 
           {/* Cleans Count */}
@@ -121,7 +131,7 @@ export const CustomerIntelligenceBadge: React.FC<CustomerIntelligenceBadgeProps>
               {cleansCount > 0
                 ? `${cleansCount} Previous Clean${cleansCount === 1 ? '' : 's'} (${loyaltyTier === 'VIP' ? 'VIP Tier' : 'Returning'})`
                 : isExistingClient
-                ? 'Existing Registered Client'
+                ? 'Existing Client / Quoted'
                 : 'New Customer Intake'}
             </span>
           </span>

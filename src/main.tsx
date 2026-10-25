@@ -78,14 +78,7 @@ class RootErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error) {
-    console.warn('RootErrorBoundary caught error, clearing stale local cache:', error);
-    try {
-      localStorage.removeItem('tidyups_dispatch_data');
-      localStorage.removeItem('dispatchgeeni_dispatch_data');
-      localStorage.removeItem('easycleans_dispatch_data');
-    } catch {
-      // ignore storage errors
-    }
+    console.warn('RootErrorBoundary caught error:', error);
     if (!this.state.retried) {
       this.setState({ hasError: false, retried: true });
     }
@@ -96,20 +89,18 @@ class RootErrorBoundary extends React.Component<
       return (
         <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
           <div className="max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
-            <h2 className="text-lg font-extrabold text-white mb-2">Refreshing Application Cache</h2>
+            <h2 className="text-lg font-extrabold text-white mb-2">Refreshing Application View</h2>
             <p className="text-xs text-slate-300 mb-4">
-              A new update was published. Click below to reload with the latest live version.
+              Click below to reload the page while keeping all your saved settings and approvals intact.
             </p>
             <button
               onClick={() => {
-                try {
-                  localStorage.clear();
-                } catch {}
+                this.setState({ hasError: false, retried: false });
                 window.location.reload();
               }}
               className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs cursor-pointer shadow-lg"
             >
-              Reload Live Website Now
+              Reload Page Now
             </button>
           </div>
         </div>

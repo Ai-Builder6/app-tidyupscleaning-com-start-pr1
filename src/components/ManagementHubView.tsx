@@ -40,6 +40,8 @@ import {
   Flame,
   CheckCircle2,
   HardDrive,
+  ClipboardPaste,
+  Map as MapIcon,
 } from 'lucide-react';
 import { Technician } from '../types/dispatch';
 import {
@@ -194,6 +196,22 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
+            onClick={onNavigateToQuotes}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-md transition-all"
+          >
+            <FileCheck className="w-3.5 h-3.5 text-slate-950 shrink-0" />
+            <span>📋 Quotes ({quotesCount})</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateToInvoices}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <Receipt className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Invoices ({invoicesCount})</span>
+          </button>
+          <button
+            type="button"
             onClick={onNavigateToMasterHub}
             className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
           >
@@ -239,7 +257,7 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
             onClick={onNavigateToAddressRadar}
             className="px-3 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
           >
-            <Map className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <MapIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
             <span>Quick Map Radar</span>
           </button>
           <button
