@@ -65,6 +65,8 @@ import {
 import {
   generateStyledLeadsWorkbookBuffer,
   isFalseOrCatalogLeadRow,
+  isOutOfEdmontonOrFakeOrOutdatedLead,
+  isAddressInGreaterEdmonton,
 } from "./src/services/styledLeadsWorkbookBuilder";
 import { loadStore, saveStore, AppPersistentStore } from "./src/services/storeService";
 import { db } from "./src/db";
@@ -3758,23 +3760,36 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     }
   }
 
-  // Purge any unquoted voice/call leads from store.adLeads whose phone number matches a blocked number or blocked area code/prefix,
-  // AND purge any false Price List / Service Catalog / Banner / Ad-Sheet test rows
+  // Purge any fake, outdated, out-of-province, outside-Greater-Edmonton, or blocked spam leads/quotes/clients/threads/notifications
   if (Array.isArray(store.adLeads)) {
     const beforeLeadCount = store.adLeads.length;
+    const seenPersonPhoneKey = new Set<string>();
     store.adLeads = store.adLeads.filter((l: any) => {
       if (!l) return false;
-      if (String(l.id || "").startsWith("lead-sheet-mvmwt")) return false;
-      if (isFalseOrCatalogLeadRow(l.customerName)) return false;
+      if (isOutOfEdmontonOrFakeOrOutdatedLead(l)) return false;
       const qNum = parseInt(String(l.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
-      if (qNum === 4418 || (qNum >= 4426 && qNum <= 4575)) return false;
-      if (l.quoteId || l.quoteNumber || l.isJobberSynced) return true;
+      if (qNum === 4239 || qNum === 4418 || (qNum >= 4426 && qNum <= 4575)) return false;
+
       const lDigits = normalizePhoneDigits(l.phone);
-      if (!lDigits) return true;
-      if (unblockedDigitsSet.has(lDigits)) return true;
-      const ruleCheck = evaluateSpamCallRule(l.phone, store.spamShieldConfig);
-      if (ruleCheck.isBlocked || blockedDigitsSet.has(lDigits)) {
+      if (lDigits && !unblockedDigitsSet.has(lDigits)) {
+        const ruleCheck = evaluateSpamCallRule(l.phone, store.spamShieldConfig);
+        if (ruleCheck.isBlocked || blockedDigitsSet.has(lDigits)) {
+          return false;
+        }
+      }
+
+      // Deduplicate by 10-digit phone number (or normalized customerName when phone is empty) so repeated sheet imports never stack duplicates
+      const normName = String(l.customerName || l.name || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+      if (normName === "blazephonelead") return false;
+      const dedupeKey = lDigits && lDigits.length === 10 ? `ph:${lDigits}` : `nm:${normName}`;
+      if (dedupeKey !== "nm:" && seenPersonPhoneKey.has(dedupeKey)) {
         return false;
+      }
+      if (dedupeKey !== "nm:") {
+        seenPersonPhoneKey.add(dedupeKey);
       }
       return true;
     });
@@ -3787,8 +3802,16 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     const beforeClientsCount = store.clients.length;
     store.clients = store.clients.filter((c: any) => {
       if (!c) return false;
-      if (String(c.id || "").startsWith("cli-sheet-mvmwt")) return false;
+      const cid = String(c.id || "");
+      if (cid.startsWith("cli-sheet-mvmwt") || cid.startsWith("cli-sheet-mvo") || cid.startsWith("cli-quo-")) {
+        return false;
+      }
       if (isFalseOrCatalogLeadRow(c.name)) return false;
+      if (!isAddressInGreaterEdmonton(`${c.address || ""} ${c.notes || ""}`, c.city, c.postalCode)) {
+        return false;
+      }
+      const pDigits = normalizePhoneDigits(c.phone);
+      if (pDigits.length === 10 && pDigits.slice(3, 6) === "555") return false;
       return true;
     });
     if (store.clients.length !== beforeClientsCount) {
@@ -3801,11 +3824,71 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     store.quotes = store.quotes.filter((q: any) => {
       if (!q) return false;
       const qNum = parseInt(String(q.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
-      if (qNum === 4418 || (qNum >= 4426 && qNum <= 4575)) return false;
+      if (qNum === 4239 || qNum === 4418 || (qNum >= 4426 && qNum <= 4575)) return false;
       if (isFalseOrCatalogLeadRow(q.clientName)) return false;
+      if (!isAddressInGreaterEdmonton(`${q.serviceAddress || ""} ${q.notes || ""}`, q.city, q.postalCode)) {
+        return false;
+      }
+      const pDigits = normalizePhoneDigits(q.clientPhone);
+      if (pDigits.length === 10 && pDigits.slice(3, 6) === "555") return false;
+      // Remove unbooked/draft quotes created before October 2026
+      const isBookedOrApproved =
+        q.quoteStatus === "CONVERTED" ||
+        q.quoteStatus === "APPROVED" ||
+        Boolean(q.convertedToJobId);
+      const createdDate = String(q.createdAt || "").slice(0, 10);
+      if (!isBookedOrApproved && createdDate && createdDate < "2026-10-01") {
+        return false;
+      }
       return true;
     });
     if (store.quotes.length !== beforeQuotesCount) {
+      mutated = true;
+    }
+  }
+
+  if (Array.isArray((store as any).ownerLeadNotifications)) {
+    const beforeNotifCount = (store as any).ownerLeadNotifications.length;
+    (store as any).ownerLeadNotifications = (store as any).ownerLeadNotifications.filter((n: any) => {
+      if (!n) return false;
+      if (isFalseOrCatalogLeadRow(n.customerName)) return false;
+      if (!isAddressInGreaterEdmonton(`${n.address || ""} ${n.summary || ""}`, n.city, n.postalCode)) {
+        return false;
+      }
+      const pDigits = normalizePhoneDigits(n.phone);
+      if (pDigits.length === 10 && pDigits.slice(3, 6) === "555") return false;
+      const ts = String(n.timestamp || n.createdAt || "").slice(0, 10);
+      if (ts && ts < "2026-10-01") return false;
+      return true;
+    });
+    if ((store as any).ownerLeadNotifications.length !== beforeNotifCount) {
+      mutated = true;
+    }
+  }
+
+  if (Array.isArray((store as any).fbMessengerThreads)) {
+    const beforeThreadsCount = (store as any).fbMessengerThreads.length;
+    (store as any).fbMessengerThreads = (store as any).fbMessengerThreads.filter((t: any) => {
+      if (!t) return false;
+      if (isFalseOrCatalogLeadRow(t.senderName)) return false;
+      const addrText = `${t.extractedLead?.address || ""} ${t.lastMessageText || ""}`;
+      if (!isAddressInGreaterEdmonton(addrText, t.extractedLead?.city, t.extractedLead?.postalCode)) {
+        return false;
+      }
+      const pDigits = normalizePhoneDigits(t.extractedLead?.phone);
+      if (pDigits && (pDigits === "7807185092" || (pDigits.length === 10 && pDigits.slice(3, 6) === "555"))) {
+        return false;
+      }
+      // If a phone number was extracted in Messenger and no Greater Edmonton street/postal is present, require a 780/587/825/368 area code
+      if (pDigits.length === 10 && !t.extractedLead?.address) {
+        const ac = pDigits.slice(0, 3);
+        if (!["780", "587", "825", "368"].includes(ac)) return false;
+      }
+      const lastTs = String(t.lastMessageAt || "").slice(0, 10);
+      if (lastTs && lastTs < "2026-09-25") return false;
+      return true;
+    });
+    if ((store as any).fbMessengerThreads.length !== beforeThreadsCount) {
       mutated = true;
     }
   }
@@ -5208,30 +5291,48 @@ async function mergeFromLiveProductionIfNeeded(store: AppPersistentStore, projec
       changed = true;
     }
 
-    // 2. Merge live clients by id
+    // 2. Merge live clients by id (excluding fake, outdated, or out-of-Edmonton records)
     if (Array.isArray(liveData.clients) && liveData.clients.length > 0) {
       const cliMap = new Map<string, any>();
       for (const c of store.clients || []) {
         if (c && c.id) cliMap.set(String(c.id), c);
       }
       for (const lc of liveData.clients) {
-        if (lc && lc.id) {
-          const prev = cliMap.get(String(lc.id));
-          cliMap.set(String(lc.id), prev ? { ...prev, ...lc } : lc);
+        if (!lc || !lc.id) continue;
+        const cid = String(lc.id || "");
+        if (cid.startsWith("cli-sheet-mvmwt") || cid.startsWith("cli-sheet-mvo") || cid.startsWith("cli-quo-")) continue;
+        if (isFalseOrCatalogLeadRow(lc.name)) continue;
+        if (!isAddressInGreaterEdmonton(`${lc.address || ""} ${lc.notes || ""}`, lc.city, lc.postalCode)) continue;
+        if (
+          isOutOfEdmontonOrFakeOrOutdatedLead({
+            customerName: lc.name,
+            phone: lc.phone,
+            address: lc.address,
+            city: lc.city,
+            postalCode: lc.postalCode,
+            status: lc.verdict === "Client" || (lc.totalJobs || 0) > 0 ? "Converted" : "New",
+            createdAt: lc.createdAt,
+          })
+        ) {
+          continue;
         }
+        const prev = cliMap.get(cid);
+        cliMap.set(cid, prev ? { ...prev, ...lc } : lc);
       }
       if (cliMap.size !== (store.clients || []).length) changed = true;
       store.clients = Array.from(cliMap.values());
     }
 
-    // 3. Merge live adLeads by id
+    // 3. Merge live adLeads by id (excluding fake, outdated, or out-of-Edmonton leads)
     if (Array.isArray(liveData.adLeads) && liveData.adLeads.length > 0) {
       const leadMap = new Map<string, any>();
       for (const l of store.adLeads || []) {
-        if (l && l.id) leadMap.set(String(l.id), l);
+        if (l && l.id && !isOutOfEdmontonOrFakeOrOutdatedLead(l)) {
+          leadMap.set(String(l.id), l);
+        }
       }
       for (const ll of liveData.adLeads) {
-        if (ll && ll.id) {
+        if (ll && ll.id && !isOutOfEdmontonOrFakeOrOutdatedLead(ll)) {
           const prev = leadMap.get(String(ll.id));
           leadMap.set(String(ll.id), prev ? { ...prev, ...ll } : ll);
         }
@@ -5240,17 +5341,30 @@ async function mergeFromLiveProductionIfNeeded(store: AppPersistentStore, projec
       store.adLeads = Array.from(leadMap.values());
     }
 
-    // 4. Merge live quotes by id
+    // 4. Merge live quotes by id (excluding fake, outdated, or out-of-Edmonton quotes)
     if (Array.isArray(liveData.quotes) && liveData.quotes.length > 0) {
       const qMap = new Map<string, any>();
       for (const q of store.quotes || []) {
         if (q && q.id) qMap.set(String(q.id), q);
       }
       for (const lq of liveData.quotes) {
-        if (lq && lq.id) {
-          const prev = qMap.get(String(lq.id));
-          qMap.set(String(lq.id), prev ? { ...prev, ...lq } : lq);
+        if (!lq || !lq.id) continue;
+        if (
+          isOutOfEdmontonOrFakeOrOutdatedLead({
+            customerName: lq.clientName,
+            phone: lq.clientPhone,
+            address: `${lq.serviceAddress || ""} ${lq.notes || ""}`,
+            city: lq.city,
+            postalCode: lq.postalCode,
+            quoteNumber: lq.quoteNumber,
+            status: lq.quoteStatus,
+            createdAt: lq.createdAt,
+          })
+        ) {
+          continue;
         }
+        const prev = qMap.get(String(lq.id));
+        qMap.set(String(lq.id), prev ? { ...prev, ...lq } : lq);
       }
       if (qMap.size !== (store.quotes || []).length) changed = true;
       store.quotes = Array.from(qMap.values());
@@ -5380,9 +5494,14 @@ const handleSaveStore = (req: any, res: any) => {
     invoices: [],
   };
 
-  // Merge adLeads incrementally by id so newly created leads from webhooks/calls/UI are never overwritten by an older client snapshot
+  const explicitReplaceLeads = Boolean((req.body as any)?.explicitReplaceLeads);
+  const ownerLeadNotifications = (req.body as any)?.ownerLeadNotifications;
+  const fbMessengerThreads = (req.body as any)?.fbMessengerThreads;
+
+  // Merge adLeads incrementally by id unless explicitReplaceLeads is set
   const mergedAdLeads = (() => {
     if (!Array.isArray(adLeads)) return current.adLeads;
+    if (explicitReplaceLeads) return adLeads;
     if (adLeads.length === 0 && (req.body as any)?.explicitClearLeads) return [];
     const byId = new Map<string, any>();
     for (const item of current.adLeads || []) {
@@ -5402,9 +5521,10 @@ const handleSaveStore = (req: any, res: any) => {
     return [...front, ...rest];
   })();
 
-  // Merge quotes incrementally by id so newly created quotes are never lost
+  // Merge quotes incrementally by id unless explicitReplaceLeads is set
   const mergedQuotes = (() => {
     if (!Array.isArray(quotes)) return current.quotes;
+    if (explicitReplaceLeads) return quotes;
     const byId = new Map<string, any>();
     for (const q of current.quotes || []) {
       if (q && q.id) byId.set(String(q.id), q);
@@ -5473,6 +5593,8 @@ const handleSaveStore = (req: any, res: any) => {
     quoCallLogs: quoCallLogs || current.quoCallLogs,
     spamShieldConfig: spamShieldConfig || current.spamShieldConfig,
     blockedCallsHistory: blockedCallsHistory || current.blockedCallsHistory,
+    ...(Array.isArray(ownerLeadNotifications) ? { ownerLeadNotifications } : {}),
+    ...(Array.isArray(fbMessengerThreads) ? { fbMessengerThreads } : {}),
     headerNavOrder:
       Array.isArray(headerNavOrder) && headerNavOrder.length > 0
         ? headerNavOrder
@@ -6848,8 +6970,18 @@ function extractLeadsFromSheetMatrix(params: {
           (h) => h === nLow || h.replace(/\s*\(.*?\)\s*/g, "").trim() === nLow
         );
         if (exactIdx >= 0 && cols[exactIdx]) return cols[exactIdx];
-        const partialIdx = headerCols.findIndex((h) => h.includes(nLow));
-        if (partialIdx >= 0 && cols[partialIdx]) return cols[partialIdx];
+        // Never allow generic "name" or "id" to partially match Meta columns like ad_name, campaign_name, form_name, ad_id, campaign_id
+        if (nLow !== "name" && nLow !== "id") {
+          const partialIdx = headerCols.findIndex(
+            (h) =>
+              h.includes(nLow) &&
+              !h.includes("ad_name") &&
+              !h.includes("campaign") &&
+              !h.includes("form_name") &&
+              !h.includes("adset")
+          );
+          if (partialIdx >= 0 && cols[partialIdx]) return cols[partialIdx];
+        }
       }
       return "";
     };
@@ -6863,18 +6995,23 @@ function extractLeadsFromSheetMatrix(params: {
       getByHeader("client name", "full_name", "full name", "customer_name", "customer name", "name", "what_is_your_name") ||
       `${firstName} ${lastName}`.trim();
 
-    // Clean up Meta dummy test lead syntax like "<test lead: dummy data for full_name>" so it looks clean & recognizable
     const isMetaDummyTest =
       rawName.toLowerCase().includes("test lead") ||
       cols.some((c) => c.toLowerCase().includes("<test lead"));
-    if (rawName.startsWith("<test lead")) {
-      rawName = "Facebook Ad Test Lead";
+    if (isMetaDummyTest) {
+      continue;
     }
 
     // Meta Lead Ads often prefixes phone numbers with "p:" (e.g. "p:+17805550199")
+    // Never match 10-digit substrings inside Meta ad_id / campaign_id / form_id / lead_id strings!
     const rawPhoneCandidate = (
       getByHeader("phone number", "phone_number", "phone", "mobile", "cell", "contact_phone") ||
-      cols.find((c) => /(?:p:)?\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i.test(c)) ||
+      cols.find(
+        (c) =>
+          !/^(ag:|as:|c:|f:|l:)/i.test(c.trim()) &&
+          !/\d{12,}/.test(c) &&
+          /(?:p:)?\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i.test(c)
+      ) ||
       ""
     )
       .replace(/^p:/i, "")
@@ -6944,6 +7081,43 @@ function extractLeadsFromSheetMatrix(params: {
     const normPhone10 = rawPhone.replace(/\D/g, "").slice(-10);
     const normNameLower = (rawName || "").trim().toLowerCase();
 
+    const candidateLead = {
+      id:
+        rowExternalId &&
+        String(rowExternalId).startsWith("lead-") &&
+        !String(rowExternalId).startsWith("lead-sheet-mvmwt") &&
+        !String(rowExternalId).startsWith("lead-sheet-mvo")
+          ? rowExternalId
+          : `lead-sheet-${Date.now().toString(36)}-${newlyImportedLeads.length + 1}`,
+      externalLeadId: rowExternalId || undefined,
+      customerName: rawName,
+      phone: rawPhone,
+      email: rawEmail,
+      address: rawAddr,
+      city: rawCity,
+      postalCode: rawPostal,
+      serviceRequested: rawService,
+      bedrooms: /^\d+$/.test(rawBed) ? `${rawBed} Bedrooms` : rawBed,
+      bathrooms: /^\d+(\.\d+)?$/.test(rawBath) ? `${rawBath} Bathrooms` : rawBath,
+      dateOfServiceRequested: requestedDate,
+      source: source as any,
+      sourceTab,
+      campaignName: `${sourceTab} — Google Sheet (${tabName || "Live Tab"})`,
+      dateReceived: rawCreatedDate.includes("T") ? rawCreatedDate : new Date().toISOString(),
+      status: getByHeader("status") || "New",
+      verdict: (getByHeader("verdict") || "Good lead") as any,
+      isJobberSynced: true,
+      quoteNumber: rowQuoteNumber || undefined,
+      quotedAmount,
+      notes: rawNotes,
+      googleSheetSynced: true,
+      googleSheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
+    };
+
+    if (isOutOfEdmontonOrFakeOrOutdatedLead(candidateLead)) {
+      continue;
+    }
+
     // Smart deduplication:
     const alreadyExists = (store.adLeads || []).some((l: any) => {
       if (rowExternalId && (l.id === rowExternalId || l.externalLeadId === rowExternalId)) {
@@ -6954,55 +7128,18 @@ function extractLeadsFromSheetMatrix(params: {
       }
       const lPhone10 = String(l.phone || "").replace(/\D/g, "").slice(-10);
       const lNameLower = String(l.customerName || "").trim().toLowerCase();
-      const sameTab = (l.sourceTab || "") === sourceTab;
-
-      if (rowQuoteNumber && lPhone10 && normPhone10 && lPhone10 === normPhone10 && lNameLower === normNameLower) {
+      if (normPhone10 && lPhone10 === normPhone10 && normNameLower && lNameLower === normNameLower) {
         return true;
       }
-      if (sameTab) {
-        if (normPhone10 && lPhone10 === normPhone10 && normNameLower && lNameLower === normNameLower) {
-          return true;
-        }
-        if (!normPhone10 && normNameLower && lNameLower === normNameLower && String(l.email || "").toLowerCase() === rawEmail.toLowerCase()) {
-          return true;
-        }
+      if (!normPhone10 && normNameLower && lNameLower === normNameLower && String(l.email || "").toLowerCase() === rawEmail.toLowerCase()) {
+        return true;
       }
       return false;
     });
 
     if (!alreadyExists) {
-      const importedLead = {
-        id:
-          rowExternalId && String(rowExternalId).startsWith("lead-") && !String(rowExternalId).startsWith("lead-sheet-mvmwt")
-            ? rowExternalId
-            : `lead-sheet-${Date.now().toString(36)}-${newlyImportedLeads.length + 1}`,
-        externalLeadId: rowExternalId || undefined,
-        customerName: rawName,
-        phone: rawPhone,
-        email: rawEmail,
-        address: rawAddr,
-        city: rawCity,
-        postalCode: rawPostal,
-        serviceRequested: rawService,
-        bedrooms: /^\d+$/.test(rawBed) ? `${rawBed} Bedrooms` : rawBed,
-        bathrooms: /^\d+(\.\d+)?$/.test(rawBath) ? `${rawBath} Bathrooms` : rawBath,
-        dateOfServiceRequested: requestedDate,
-        source: source as any,
-        sourceTab,
-        campaignName: `${sourceTab} — Google Sheet (${tabName || "Live Tab"})`,
-        dateReceived: rawCreatedDate.includes("T") ? rawCreatedDate : new Date().toISOString(),
-        status: getByHeader("status") || "New",
-        verdict: (getByHeader("verdict") || "Good lead") as any,
-        isJobberSynced: true,
-        quoteNumber: rowQuoteNumber || undefined,
-        quotedAmount,
-        notes: rawNotes,
-        googleSheetSynced: true,
-        googleSheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
-      };
-
-      store.adLeads.unshift(importedLead as any);
-      newlyImportedLeads.push(importedLead);
+      store.adLeads.unshift(candidateLead as any);
+      newlyImportedLeads.push(candidateLead);
       addedFromTab++;
 
       // Also ensure client record exists in store.clients

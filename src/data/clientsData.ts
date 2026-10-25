@@ -404,27 +404,6 @@ export const INITIAL_CLIENTS: ClientRecord[] = [
     createdAt: '2026-08-01T16:00:00Z',
     updatedAt: '2026-09-18T10:00:00Z',
   },
-  {
-    id: 'cli-spam-telemarket',
-    name: 'Automated Solar Lead (Spam)',
-    phone: '(800) 555-0199',
-    secondaryPhone: '(800) 555-0100',
-    email: 'spam@leads-marketing-bot.com',
-    address: '100 Non-Existent Way, Edmonton, AB',
-    city: 'Edmonton',
-    province: 'AB',
-    postalCode: 'T5J 1A1',
-    verdict: 'Spam',
-    tags: ['block', 'telemarketer', 'spam-calls'],
-    isJobberLinked: false,
-    jobberId: undefined,
-    totalJobs: 0,
-    latestServiceDate: undefined,
-    notes: 'Robo-caller pitch for third-party marketing services. Marked as spam.',
-    source: 'Lead',
-    createdAt: '2026-09-02T12:00:00Z',
-    updatedAt: '2026-09-02T12:00:00Z',
-  },
 ];
 
 /**

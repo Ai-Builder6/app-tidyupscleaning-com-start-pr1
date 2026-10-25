@@ -478,9 +478,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   const [mapType, setMapType] = useState<'roadmap' | 'hybrid' | 'terrain'>('roadmap');
   const [localMapError, setLocalMapError] = useState(false);
   const [showMobileSummary, setShowMobileSummary] = useState(false);
-  const [isFilterBarCollapsed, setIsFilterBarCollapsed] = useState(
-    typeof window !== 'undefined' ? window.innerWidth < 640 : false
-  );
+  const [isFilterBarCollapsed, setIsFilterBarCollapsed] = useState(false);
+  const [isDateToolbarCollapsed, setIsDateToolbarCollapsed] = useState(false);
   const [isSummaryMinimized, setIsSummaryMinimized] = useState(true);
 
   // Van & Hub Editor modal state
@@ -504,7 +503,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   const [selectedInspectDate, setSelectedInspectDate] = useState<string>(
     () => initialInspectDate || getEdmontonToday().dateString
   );
-  const [showDayOfWeekBar, setShowDayOfWeekBar] = useState<boolean>(true);
+  const [showDayOfWeekBar, setShowDayOfWeekBar] = useState<boolean>(false);
   const [showScheduleDrawer, setShowScheduleDrawer] = useState<boolean>(false);
 
   // Sync if parent passes a new initialInspectDate
@@ -514,6 +513,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
       setScheduleHorizon('SPECIFIC_DATE');
       setShowScheduledJobs(true);
       setShowScheduleDrawer(true);
+      setIsDateToolbarCollapsed(false);
     }
   }, [initialInspectDate]);
 
@@ -1075,24 +1075,40 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
       </div>
 
       {/* Top Floating Map Controls Bar with Collapsible Mode */}
-      <div id="map-control-bar" className="absolute top-3 left-3 right-3 z-20 flex flex-col gap-2 pointer-events-none">
+      <div id="map-control-bar" className="absolute top-2.5 left-2.5 right-2.5 z-20 flex flex-col gap-1.5 pointer-events-none">
         {isFilterBarCollapsed ? (
-          /* Minimized Filter Pill */
-          <div className="flex items-center gap-1.5 p-1 bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 shadow-md pointer-events-auto self-start">
+          /* Minimized Filter Pill ("Just Map" Mode) */
+          <div className="flex items-center gap-1 p-1 bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 shadow-md pointer-events-auto self-start flex-wrap">
             <button
-              onClick={() => setIsFilterBarCollapsed(false)}
-              className="min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-bold text-slate-800 hover:bg-slate-100 flex items-center gap-1.5 cursor-pointer"
-              title="Expand filter bar"
-              aria-label="Expand filter bar"
+              onClick={() => {
+                setIsFilterBarCollapsed(false);
+                setIsDateToolbarCollapsed(false);
+              }}
+              className="min-h-[32px] px-2.5 py-1 rounded-lg text-xs font-black bg-slate-900 text-white hover:bg-slate-800 flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Expand map toolbar & options"
+              aria-label="Expand map toolbar"
             >
-              <span className="w-2 h-2 rounded-full bg-blue-600" />
-              <span>Filter: {urgencyFilter === 'ALL' ? 'All Tickets' : urgencyFilter} ({filteredTickets.length})</span>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span>Show Toolbar ({filteredTickets.length})</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-300" />
+            </button>
+
+            <button
+              onClick={() => setIsDateToolbarCollapsed(!isDateToolbarCollapsed)}
+              className={`min-h-[32px] px-2 py-1 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer border ${
+                !isDateToolbarCollapsed
+                  ? 'bg-purple-600 text-white border-purple-700'
+                  : 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100'
+              }`}
+              title="Toggle Date Picker & Caller Pin Drop Bar"
+            >
+              <CalendarDays className="w-3.5 h-3.5" />
+              <span>{!isDateToolbarCollapsed ? 'Hide Date/Pin' : 'Date & Pin'}</span>
             </button>
 
             <button
               onClick={() => setShowScheduledJobs(!showScheduledJobs)}
-              className={`min-h-[38px] px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
+              className={`min-h-[32px] px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
                 showScheduledJobs ? 'bg-purple-50 text-purple-700 font-bold' : 'text-slate-600 hover:text-slate-900'
               }`}
               title="Toggle Scheduled Calendar Jobs"
@@ -1104,31 +1120,31 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
 
             <button
               onClick={() => setShowVehicles(!showVehicles)}
-              className={`min-h-[38px] px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
+              className={`min-h-[32px] px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
                 showVehicles ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:text-slate-900'
               }`}
               title="Toggle Cleaners' Live Van Locations (Cars/Vans)"
               aria-label="Toggle live van locations"
             >
               <Truck className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden sm:inline">Live Vans ({visibleLiveVanTechs.length})</span>
+              <span className="hidden sm:inline">Vans ({visibleLiveVanTechs.length})</span>
             </button>
 
             <button
               onClick={() => setShowDepots(!showDepots)}
-              className={`min-h-[38px] px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
+              className={`min-h-[32px] px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
                 showDepots ? 'bg-emerald-50 text-emerald-800 font-bold' : 'text-slate-600 hover:text-slate-900'
               }`}
               title="Toggle Cleaners' Home Addresses (Home Hubs)"
               aria-label="Toggle cleaner home hubs"
             >
               <Home className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="hidden sm:inline">Home Hubs ({visibleHomeHubTechs.length})</span>
+              <span className="hidden sm:inline">Hubs ({visibleHomeHubTechs.length})</span>
             </button>
 
             <button
               onClick={() => setMapType((m) => (m === 'roadmap' ? 'hybrid' : m === 'hybrid' ? 'terrain' : 'roadmap'))}
-              className={`min-h-[38px] px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
+              className={`min-h-[32px] px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer ${
                 mapType === 'hybrid'
                   ? 'bg-emerald-50 text-emerald-700 font-bold'
                   : mapType === 'terrain'
@@ -1144,7 +1160,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           </div>
         ) : (
           /* Full Expanded Filter Row */
-          <div className="flex items-center justify-between gap-2 w-full flex-wrap sm:flex-nowrap">
+          <div className="flex items-center justify-between gap-1.5 w-full flex-wrap sm:flex-nowrap">
             {/* Left Pills: Urgency Filters */}
             <div className="flex items-center gap-1 p-1 bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 shadow-md pointer-events-auto overflow-x-auto max-w-full" role="group" aria-label="Ticket Urgency Filter">
               <button
@@ -1152,7 +1168,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 onClick={() => onUrgencyFilterChange('ALL')}
                 aria-label={`Show all ${tickets.length} tickets`}
                 aria-pressed={urgencyFilter === 'ALL'}
-                className={`min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                className={`min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                   urgencyFilter === 'ALL'
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100'
@@ -1171,7 +1187,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 onClick={() => onUrgencyFilterChange('EMERGENCY')}
                 aria-label={`Filter by Emergency urgency, ${tickets.filter((t) => t.urgency === 'EMERGENCY').length} tickets`}
                 aria-pressed={urgencyFilter === 'EMERGENCY'}
-                className={`min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                className={`min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                   urgencyFilter === 'EMERGENCY'
                     ? 'bg-red-600 text-white shadow-xs'
                     : 'text-red-700 hover:text-red-800 hover:bg-red-50'
@@ -1191,7 +1207,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 onClick={() => onUrgencyFilterChange('SAME_DAY')}
                 aria-label={`Filter by Same-Day urgency, ${tickets.filter((t) => t.urgency === 'SAME_DAY').length} tickets`}
                 aria-pressed={urgencyFilter === 'SAME_DAY'}
-                className={`min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                className={`min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                   urgencyFilter === 'SAME_DAY'
                     ? 'bg-amber-600 text-white shadow-xs'
                     : 'text-amber-800 hover:text-amber-900 hover:bg-amber-50'
@@ -1211,7 +1227,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 onClick={() => onUrgencyFilterChange('ROUTINE')}
                 aria-label={`Filter by Routine urgency, ${tickets.filter((t) => t.urgency === 'ROUTINE').length} tickets`}
                 aria-pressed={urgencyFilter === 'ROUTINE'}
-                className={`min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                className={`min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                   urgencyFilter === 'ROUTINE'
                     ? 'bg-blue-600 text-white shadow-xs'
                     : 'text-blue-700 hover:text-blue-900 hover:bg-blue-50'
@@ -1227,21 +1243,21 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               </button>
             </div>
 
-            {/* Right Controls: Jobs + Live Vans (All/1/Off) + Home Hubs (All/1/Off) + Map Type */}
+            {/* Right Controls: Jobs + Live Vans (All/1/Off) + Home Hubs (All/1/Off) + Date Bar Toggle + Minimize All */}
             <div className="flex items-center bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 p-1 shadow-md pointer-events-auto shrink-0 gap-1 flex-wrap">
               <button
                 id="toggle-scheduled-jobs-layer"
                 onClick={() => setShowScheduledJobs(!showScheduledJobs)}
                 aria-pressed={showScheduledJobs}
                 aria-label="Toggle display of scheduled cleaner jobs"
-                className={`min-h-[38px] px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
+                className={`min-h-[34px] px-2 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer ${
                   showScheduledJobs
                     ? 'bg-purple-50 text-purple-700 border border-purple-200 font-bold'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
                 title="Toggle Scheduled Jobs on Map"
               >
-                <CalendarDays className="w-4 h-4 text-purple-600" aria-hidden="true" />
+                <CalendarDays className="w-3.5 h-3.5 text-purple-600" aria-hidden="true" />
                 <span className="hidden sm:inline">Jobs ({scheduledJobs.length})</span>
               </button>
 
@@ -1252,7 +1268,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                   onClick={() => setShowVehicles(!showVehicles)}
                   aria-pressed={showVehicles}
                   aria-label="Toggle display of live van locations on map"
-                  className={`min-h-[36px] px-2 py-1 text-xs font-bold flex items-center gap-1 cursor-pointer ${
+                  className={`min-h-[32px] px-2 py-1 text-xs font-bold flex items-center gap-1 cursor-pointer ${
                     showVehicles ? 'text-blue-800' : 'text-slate-500 hover:text-slate-800'
                   }`}
                   title="Turn Live Van Locations ON or OFF"
@@ -1272,10 +1288,10 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                         setLiveVanFilterTechId(val);
                       }
                     }}
-                    className="bg-white/90 border-l border-blue-200 text-[10px] font-black text-blue-900 px-1.5 py-1 rounded-r-lg focus:outline-none cursor-pointer max-w-[115px]"
-                    title="Show All 15 Live Vans or Just 1 Cleaner's Live Van"
+                    className="bg-white/90 border-l border-blue-200 text-[10px] font-black text-blue-900 px-1.5 py-1 rounded-r-lg focus:outline-none cursor-pointer max-w-[110px]"
+                    title="Show All Live Vans or Just 1 Cleaner's Live Van"
                   >
-                    <option value="ALL">All 15 Live</option>
+                    <option value="ALL">All Live</option>
                     {technicians.map((t) => (
                       <option key={`live-opt-${t.id}`} value={t.id}>
                         Only {t.name.split(' ')[0]}
@@ -1293,7 +1309,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                   onClick={() => setShowDepots(!showDepots)}
                   aria-pressed={showDepots}
                   aria-label="Toggle display of cleaners' home hubs"
-                  className={`min-h-[36px] px-2 py-1 text-xs font-bold flex items-center gap-1 cursor-pointer ${
+                  className={`min-h-[32px] px-2 py-1 text-xs font-bold flex items-center gap-1 cursor-pointer ${
                     showDepots ? 'text-emerald-900' : 'text-slate-500 hover:text-slate-800'
                   }`}
                   title="Turn Cleaners' Home Hubs ON or OFF"
@@ -1313,10 +1329,10 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                         setHubFilterTechId(val);
                       }
                     }}
-                    className="bg-white/90 border-l border-emerald-200 text-[10px] font-black text-emerald-900 px-1.5 py-1 rounded-r-lg focus:outline-none cursor-pointer max-w-[115px]"
-                    title="Show All 15 Cleaner Home Hubs or Just 1 Cleaner's Home Hub"
+                    className="bg-white/90 border-l border-emerald-200 text-[10px] font-black text-emerald-900 px-1.5 py-1 rounded-r-lg focus:outline-none cursor-pointer max-w-[110px]"
+                    title="Show All Cleaner Home Hubs or Just 1 Cleaner's Home Hub"
                   >
-                    <option value="ALL">All 15 Hubs</option>
+                    <option value="ALL">All Hubs</option>
                     {technicians.map((t) => (
                       <option key={`hub-opt-${t.id}`} value={t.id}>
                         Only {t.name.split(' ')[0]}&apos;s Hub
@@ -1332,7 +1348,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 onClick={() => setMapType((m) => (m === 'roadmap' ? 'hybrid' : m === 'hybrid' ? 'terrain' : 'roadmap'))}
                 aria-pressed={mapType !== 'roadmap'}
                 aria-label="Toggle map view between Streets, Satellite, and Terrain"
-                className={`min-h-[38px] px-2 sm:px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
+                className={`min-h-[34px] px-2 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer ${
                   mapType === 'hybrid'
                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold'
                     : mapType === 'terrain'
@@ -1341,231 +1357,271 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 }`}
                 title={`Current: ${mapType === 'roadmap' ? 'Streets' : mapType === 'hybrid' ? 'Satellite' : 'Terrain'} (Click to cycle Streets / Satellite / Terrain)`}
               >
-                <Layers className={`w-4 h-4 ${mapType === 'hybrid' ? 'text-emerald-600' : mapType === 'terrain' ? 'text-purple-600' : 'text-slate-600'}`} aria-hidden="true" />
+                <Layers className={`w-3.5 h-3.5 ${mapType === 'hybrid' ? 'text-emerald-600' : mapType === 'terrain' ? 'text-purple-600' : 'text-slate-600'}`} aria-hidden="true" />
                 <span className="hidden sm:inline capitalize">{mapType === 'roadmap' ? 'Streets' : mapType}</span>
               </button>
 
+              {/* Toggle Date & Pin Toolbar independently */}
               <button
-                onClick={() => setIsFilterBarCollapsed(true)}
-                className="min-h-[38px] min-w-[34px] px-1.5 py-1 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors flex items-center justify-center cursor-pointer"
-                title="Collapse filter bar to see more map"
-                aria-label="Collapse filter bar"
+                type="button"
+                onClick={() => setIsDateToolbarCollapsed(!isDateToolbarCollapsed)}
+                className={`min-h-[34px] px-2 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer border ${
+                  !isDateToolbarCollapsed
+                    ? 'bg-purple-600 text-white border-purple-700'
+                    : 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100'
+                }`}
+                title="Show or hide the Date Picker & Caller Pin Drop toolbar"
               >
-                <ChevronUp className="w-4 h-4" />
+                <CalendarDays className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{!isDateToolbarCollapsed ? 'Hide Date Bar' : 'Date & Pin'}</span>
+              </button>
+
+              {/* Minimize Entire Top Overlay to Just See the Map */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFilterBarCollapsed(true);
+                  setIsDateToolbarCollapsed(true);
+                  setShowDayOfWeekBar(false);
+                  setShowClosestCleanersPanel(false);
+                  setShowTwoAddressPanel(false);
+                }}
+                className="min-h-[34px] px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-black transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                title="Minimize all top toolbars so you can see the full map unobstructed"
+                aria-label="Minimize map toolbar"
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+                <span>Hide Bars</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* Schedule Horizon, Any-Date Picker, Day-of-Week Selector & Caller Pin Drop Radar Bar */}
-        <div className="pointer-events-auto flex flex-col gap-1.5 bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 px-2.5 py-2 shadow-md self-start max-w-full">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="flex items-center gap-1 pr-1.5 border-r border-slate-200 flex-wrap">
-              <CalendarDays className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 hidden sm:inline">
-                Inspect Date:
-              </span>
-
-              {/* Prev Day / Calendar Date Picker / Next Day */}
-              <div className="flex items-center bg-purple-50 border border-purple-300 rounded-lg px-1 py-0.5 gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => stepInspectDate(-1)}
-                  className="px-1.5 py-0.5 rounded hover:bg-purple-200 text-purple-900 font-black text-[10px] cursor-pointer"
-                  title="Previous Day"
-                >
-                  ◀
-                </button>
-                <input
-                  type="date"
-                  value={selectedInspectDate}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setSelectedInspectDate(e.target.value);
-                      setScheduleHorizon('SPECIFIC_DATE');
-                      setShowScheduledJobs(true);
-                      setShowScheduleDrawer(true);
-                    }
-                  }}
-                  className="bg-transparent text-[10px] font-mono font-black text-purple-950 focus:outline-none cursor-pointer px-1"
-                  title="Pick any date to inspect jobs and closest cleaners on the map"
-                />
-                <button
-                  type="button"
-                  onClick={() => stepInspectDate(1)}
-                  className="px-1.5 py-0.5 rounded hover:bg-purple-200 text-purple-900 font-black text-[10px] cursor-pointer"
-                  title="Next Day"
-                >
-                  ▶
-                </button>
-              </div>
-
-              {/* Quick Horizon & Tomorrow Buttons */}
-              {(
-                [
-                  { id: 'TODAY', label: `Today (${liveToday.formattedShort})`, date: liveToday.dateString },
-                  { id: 'TOMORROW', label: `Tomorrow (${tomorrowInfo.shortLabel})`, date: tomorrowInfo.dateString },
-                  { id: 'WEEK', label: '7 Days' },
-                  { id: 'MONTH', label: 'Full Month' },
-                  { id: 'ALL', label: 'All Dates' },
-                ] as const
-              ).map((h) => (
-                <button
-                  key={h.id}
-                  type="button"
-                  onClick={() => {
-                    if ('date' in h && h.date) {
-                      setSelectedInspectDate(h.date);
-                    }
-                    setScheduleHorizon(h.id);
-                    setShowScheduledJobs(true);
-                    setShowScheduleDrawer(true);
-                  }}
-                  className={`px-2 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
-                    scheduleHorizon === h.id
-                      ? 'bg-purple-600 text-white shadow-2xs'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  }`}
-                >
-                  {h.label}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                onClick={() => setShowDayOfWeekBar(!showDayOfWeekBar)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all cursor-pointer ${
-                  showDayOfWeekBar
-                    ? 'bg-fuchsia-600 text-white border-fuchsia-700'
-                    : 'bg-fuchsia-50 text-fuchsia-900 border-fuchsia-200 hover:bg-fuchsia-100'
-                }`}
-                title="Show/Hide Day of the Week Picker (This Week & Next Week)"
-              >
-                {showDayOfWeekBar ? 'Hide Days' : 'Pick Day of Week'}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowScheduleDrawer(!showScheduleDrawer)}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border transition-all cursor-pointer flex items-center gap-1 ${
-                  showScheduleDrawer
-                    ? 'bg-purple-700 text-white border-purple-800 shadow-xs'
-                    : 'bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100'
-                }`}
-              >
-                <span>
-                  {showScheduleDrawer
-                    ? 'Hide Inspector'
-                    : `Inspect Stops (${horizonFilteredScheduledJobs.length} Jobs)`}
+        {/* Schedule Horizon, Any-Date Picker, Day-of-Week Selector & Caller Pin Drop Radar Bar (Collapsible!) */}
+        {!isDateToolbarCollapsed && (
+          <div className="pointer-events-auto flex flex-col gap-1 bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 px-2.5 py-1.5 shadow-md self-start max-w-full">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex items-center gap-1 pr-1.5 border-r border-slate-200 flex-wrap">
+                <CalendarDays className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 hidden sm:inline">
+                  Inspect Date:
                 </span>
-                {showScheduleDrawer ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              </button>
-            </div>
 
-            {/* Caller Pin Drop & Hub / Live / Same-Day Job Distance Toggle */}
-            <button
-              type="button"
-              onClick={() => setShowClosestCleanersPanel(!showClosestCleanersPanel)}
-              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer border ${
-                showClosestCleanersPanel
-                  ? 'bg-pink-600 text-white border-pink-700 shadow-2xs'
-                  : 'bg-pink-50 text-pink-950 border-pink-300 hover:bg-pink-100'
-              }`}
-            >
-              <MapPin className="w-3.5 h-3.5" />
-              <span>
-                📌 Drop Caller Pin • Hub/Live/Job Distance (#1: {rankedCleanersToTarget[0]?.tech.name.split(' ')[0]} •{' '}
-                {rankedCleanersToTarget[0]?.bestDistKm} km)
-              </span>
-            </button>
-
-            {/* Click Map to Drop Pin Quick Toggle */}
-            <button
-              type="button"
-              onClick={() => {
-                const next = !isClickToDropPinEnabled;
-                setIsClickToDropPinEnabled(next);
-                if (next) setShowClosestCleanersPanel(true);
-              }}
-              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer border ${
-                isClickToDropPinEnabled
-                  ? 'bg-rose-600 text-white border-rose-700 animate-pulse shadow-xs'
-                  : 'bg-white text-rose-700 border-rose-300 hover:bg-rose-50'
-              }`}
-              title="Click anywhere on the map to drop the caller's address pin and measure distance to all cleaner hubs or live vans"
-            >
-              <Compass className="w-3.5 h-3.5" />
-              <span>{isClickToDropPinEnabled ? '📍 Click Map Active (Tap Map)' : '📍 Tap Map to Drop Pin'}</span>
-            </button>
-
-            {/* 2-Address Picker Toggle */}
-            <button
-              type="button"
-              onClick={() => setShowTwoAddressPanel(!showTwoAddressPanel)}
-              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer border ${
-                showTwoAddressPanel
-                  ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
-                  : 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
-              }`}
-            >
-              <Route className="w-3.5 h-3.5" />
-              <span>Pick 2 Addresses ({twoAddrDistanceKm} km • ~{twoAddrDriveMins}m)</span>
-            </button>
-          </div>
-
-          {/* Day-of-Week Selector Strip: This Week (Mon–Sun) + Next Week (Mon–Sun) */}
-          {showDayOfWeekBar && (
-            <div className="flex items-center gap-1 overflow-x-auto pt-1 border-t border-slate-100 pb-0.5 max-w-full">
-              <span className="text-[9px] font-black uppercase text-purple-800 shrink-0 mr-1">
-                Pick Day (This Wk / Next Wk):
-              </span>
-              {twoWeekDayPills.map((dayPill) => {
-                const isSelectedDay =
-                  (scheduleHorizon === 'SPECIFIC_DATE' && selectedInspectDate === dayPill.dateString) ||
-                  (scheduleHorizon === 'TODAY' && dayPill.isToday) ||
-                  (scheduleHorizon === 'TOMORROW' && dayPill.isTomorrow);
-
-                return (
+                {/* Prev Day / Calendar Date Picker / Next Day */}
+                <div className="flex items-center bg-purple-50 border border-purple-300 rounded-lg px-1 py-0.5 gap-0.5">
                   <button
-                    key={dayPill.dateString}
+                    type="button"
+                    onClick={() => stepInspectDate(-1)}
+                    className="px-1.5 py-0.5 rounded hover:bg-purple-200 text-purple-900 font-black text-[10px] cursor-pointer"
+                    title="Previous Day"
+                  >
+                    ◀
+                  </button>
+                  <input
+                    type="date"
+                    value={selectedInspectDate}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setSelectedInspectDate(e.target.value);
+                        setScheduleHorizon('SPECIFIC_DATE');
+                        setShowScheduledJobs(true);
+                        setShowScheduleDrawer(true);
+                      }
+                    }}
+                    className="bg-transparent text-[10px] font-mono font-black text-purple-950 focus:outline-none cursor-pointer px-1"
+                    title="Pick any date to inspect jobs and closest cleaners on the map"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => stepInspectDate(1)}
+                    className="px-1.5 py-0.5 rounded hover:bg-purple-200 text-purple-900 font-black text-[10px] cursor-pointer"
+                    title="Next Day"
+                  >
+                    ▶
+                  </button>
+                </div>
+
+                {/* Quick Horizon & Tomorrow Buttons */}
+                {(
+                  [
+                    { id: 'TODAY', label: `Today (${liveToday.formattedShort})`, date: liveToday.dateString },
+                    { id: 'TOMORROW', label: `Tomorrow (${tomorrowInfo.shortLabel})`, date: tomorrowInfo.dateString },
+                    { id: 'WEEK', label: '7 Days' },
+                    { id: 'MONTH', label: 'Full Month' },
+                    { id: 'ALL', label: 'All Dates' },
+                  ] as const
+                ).map((h) => (
+                  <button
+                    key={h.id}
                     type="button"
                     onClick={() => {
-                      setSelectedInspectDate(dayPill.dateString);
-                      setScheduleHorizon('SPECIFIC_DATE');
+                      if ('date' in h && h.date) {
+                        setSelectedInspectDate(h.date);
+                      }
+                      setScheduleHorizon(h.id);
                       setShowScheduledJobs(true);
                       setShowScheduleDrawer(true);
                     }}
-                    className={`px-2 py-1 rounded-lg text-[10px] font-extrabold shrink-0 flex items-center gap-1 border transition-all cursor-pointer ${
-                      isSelectedDay
-                        ? 'bg-purple-700 text-white border-purple-900 shadow-xs ring-2 ring-purple-300'
-                        : dayPill.isToday
-                        ? 'bg-amber-50 text-amber-950 border-amber-300 hover:bg-amber-100'
-                        : dayPill.isNextWeek
-                        ? 'bg-indigo-50/70 text-indigo-950 border-indigo-200 hover:bg-indigo-100'
-                        : 'bg-slate-50 text-slate-800 border-slate-200 hover:bg-purple-50'
+                    className={`px-2 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                      scheduleHorizon === h.id
+                        ? 'bg-purple-600 text-white shadow-2xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                     }`}
-                    title={`${dayPill.dayFull}, ${dayPill.monthDay} (${dayPill.jobsCount} scheduled jobs)`}
                   >
-                    <span>
-                      {dayPill.isNextWeek ? `Next ${dayPill.dayShort}` : dayPill.dayShort} {dayPill.monthDay}
-                    </span>
-                    <span
-                      className={`px-1 py-0.2 rounded-full text-[9px] font-mono font-black ${
-                        isSelectedDay
-                          ? 'bg-white text-purple-900'
-                          : dayPill.jobsCount > 0
-                          ? 'bg-purple-200 text-purple-900'
-                          : 'bg-slate-200 text-slate-600'
-                      }`}
-                    >
-                      {dayPill.jobsCount}
-                    </span>
+                    {h.label}
                   </button>
-                );
-              })}
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => setShowDayOfWeekBar(!showDayOfWeekBar)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition-all cursor-pointer ${
+                    showDayOfWeekBar
+                      ? 'bg-fuchsia-600 text-white border-fuchsia-700'
+                      : 'bg-fuchsia-50 text-fuchsia-900 border-fuchsia-200 hover:bg-fuchsia-100'
+                  }`}
+                  title="Show/Hide Day of the Week Picker (This Week & Next Week)"
+                >
+                  {showDayOfWeekBar ? 'Hide Days' : 'Pick Day of Week'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowScheduleDrawer(!showScheduleDrawer)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border transition-all cursor-pointer flex items-center gap-1 ${
+                    showScheduleDrawer
+                      ? 'bg-purple-700 text-white border-purple-800 shadow-xs'
+                      : 'bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100'
+                  }`}
+                >
+                  <span>
+                    {showScheduleDrawer
+                      ? 'Hide Inspector'
+                      : `Inspect Stops (${horizonFilteredScheduledJobs.length} Jobs)`}
+                  </span>
+                  {showScheduleDrawer ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+              </div>
+
+              {/* Caller Pin Drop & Hub / Live / Same-Day Job Distance Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowClosestCleanersPanel(!showClosestCleanersPanel)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer border ${
+                  showClosestCleanersPanel
+                    ? 'bg-pink-600 text-white border-pink-700 shadow-2xs'
+                    : 'bg-pink-50 text-pink-950 border-pink-300 hover:bg-pink-100'
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>
+                  📌 Drop Caller Pin • Hub/Live/Job Distance (#1: {rankedCleanersToTarget[0]?.tech.name.split(' ')[0]} •{' '}
+                  {rankedCleanersToTarget[0]?.bestDistKm} km)
+                </span>
+              </button>
+
+              {/* Click Map to Drop Pin Quick Toggle */}
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !isClickToDropPinEnabled;
+                  setIsClickToDropPinEnabled(next);
+                  if (next) setShowClosestCleanersPanel(true);
+                }}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer border ${
+                  isClickToDropPinEnabled
+                    ? 'bg-rose-600 text-white border-rose-700 animate-pulse shadow-xs'
+                    : 'bg-white text-rose-700 border-rose-300 hover:bg-rose-50'
+                }`}
+                title="Click anywhere on the map to drop the caller's address pin and measure distance to all cleaner hubs or live vans"
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span>{isClickToDropPinEnabled ? '📍 Click Map Active (Tap Map)' : '📍 Tap Map to Drop Pin'}</span>
+              </button>
+
+              {/* 2-Address Picker Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowTwoAddressPanel(!showTwoAddressPanel)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1.5 transition-all cursor-pointer border ${
+                  showTwoAddressPanel
+                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                    : 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
+                }`}
+              >
+                <Route className="w-3.5 h-3.5" />
+                <span>Pick 2 Addresses ({twoAddrDistanceKm} km • ~{twoAddrDriveMins}m)</span>
+              </button>
+
+              {/* Minimize Date & Pin Box button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDateToolbarCollapsed(true);
+                  setShowDayOfWeekBar(false);
+                }}
+                className="ml-auto px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-black flex items-center gap-1 cursor-pointer border border-slate-300"
+                title="Minimize this Date & Pin toolbar to see more of the map"
+              >
+                <ChevronUp className="w-3 h-3" />
+                <span>Minimize</span>
+              </button>
             </div>
-          )}
-        </div>
+
+            {/* Day-of-Week Selector Strip: This Week (Mon–Sun) + Next Week (Mon–Sun) */}
+            {showDayOfWeekBar && (
+              <div className="flex items-center gap-1 overflow-x-auto pt-1 border-t border-slate-100 pb-0.5 max-w-full">
+                <span className="text-[9px] font-black uppercase text-purple-800 shrink-0 mr-1">
+                  Pick Day (This Wk / Next Wk):
+                </span>
+                {twoWeekDayPills.map((dayPill) => {
+                  const isSelectedDay =
+                    (scheduleHorizon === 'SPECIFIC_DATE' && selectedInspectDate === dayPill.dateString) ||
+                    (scheduleHorizon === 'TODAY' && dayPill.isToday) ||
+                    (scheduleHorizon === 'TOMORROW' && dayPill.isTomorrow);
+
+                  return (
+                    <button
+                      key={dayPill.dateString}
+                      type="button"
+                      onClick={() => {
+                        setSelectedInspectDate(dayPill.dateString);
+                        setScheduleHorizon('SPECIFIC_DATE');
+                        setShowScheduledJobs(true);
+                        setShowScheduleDrawer(true);
+                      }}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-extrabold shrink-0 flex items-center gap-1 border transition-all cursor-pointer ${
+                        isSelectedDay
+                          ? 'bg-purple-700 text-white border-purple-900 shadow-xs ring-2 ring-purple-300'
+                          : dayPill.isToday
+                          ? 'bg-amber-50 text-amber-950 border-amber-300 hover:bg-amber-100'
+                          : dayPill.isNextWeek
+                          ? 'bg-indigo-50/70 text-indigo-950 border-indigo-200 hover:bg-indigo-100'
+                          : 'bg-slate-50 text-slate-800 border-slate-200 hover:bg-purple-50'
+                      }`}
+                      title={`${dayPill.dayFull}, ${dayPill.monthDay} (${dayPill.jobsCount} scheduled jobs)`}
+                    >
+                      <span>
+                        {dayPill.isNextWeek ? `Next ${dayPill.dayShort}` : dayPill.dayShort} {dayPill.monthDay}
+                      </span>
+                      <span
+                        className={`px-1 py-0.2 rounded-full text-[9px] font-mono font-black ${
+                          isSelectedDay
+                            ? 'bg-white text-purple-900'
+                            : dayPill.jobsCount > 0
+                            ? 'bg-purple-200 text-purple-900'
+                            : 'bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {dayPill.jobsCount}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Expandable Caller Pin Drop & Cleaner Home Hubs / Live Vans / Same-Day Job Distance Panel */}
         {showClosestCleanersPanel && (

@@ -266,7 +266,13 @@ export const JOBBER_TEAM_MEMBERS: JobberTeamMember[] = [
 ];
 
 const BASE_SCHEDULED_VISITS: ScheduledJobItem[] = ((baseJobberSeed as any)?.scheduledVisits || []) as ScheduledJobItem[];
-const BASE_JOBBER_QUOTES: JobberQuote[] = ((baseJobberSeed as any)?.quotes || []) as JobberQuote[];
+const BASE_JOBBER_QUOTES: JobberQuote[] = (((baseJobberSeed as any)?.quotes || []) as JobberQuote[]).filter((q) => {
+  const addr = String(q?.serviceAddress || '').toLowerCase();
+  if (addr.includes('wetaskiwin') || addr.includes('red deer') || addr.includes('t9a') || addr.includes('t4n')) {
+    return false;
+  }
+  return true;
+});
 const BASE_JOBBER_INVOICES: JobberInvoice[] = ((baseJobberSeed as any)?.invoices || []) as JobberInvoice[];
 
 /**

@@ -3901,14 +3901,14 @@ export function App() {
         {!isZenMode && !isStandaloneBookingDomain && !isCustomerLockPreview && (
           <footer
             id="global-footer"
-            className={`min-h-[44px] py-1.5 bg-slate-900 text-slate-300 flex flex-wrap items-center px-3 sm:px-5 justify-between gap-2 text-xs shrink-0 font-medium z-30 border-t border-slate-700 shadow-lg ${
+            className={`py-0.5 bg-slate-900 text-slate-300 flex flex-nowrap items-center px-2 sm:px-3 justify-between gap-1.5 text-[10px] shrink-0 font-medium z-30 border-t border-slate-800 overflow-x-auto no-scrollbar whitespace-nowrap ${
               footerButtonsSide === 'right' ? 'flex-row' : 'flex-row-reverse'
             }`}
           >
-            {/* Status, Legal Links & Rearrange Controls (Sits on the Left when Footer Buttons are on the Right) */}
-            <div className="flex flex-wrap items-center gap-2.5 text-[11px]">
+            {/* Status, Legal Links & Rearrange Controls */}
+            <div className="flex items-center gap-1.5 text-[10px] shrink-0">
               <span className="text-pink-400 font-mono font-bold">1-833-TIDYUPS</span>
-              <div className="hidden sm:flex items-center gap-2 border-l border-slate-700 pl-2.5">
+              <div className="hidden lg:flex items-center gap-1.5 border-l border-slate-700 pl-1.5">
                 <button
                   onClick={() => {
                     setActiveLegalTab('SUPPORT');
@@ -3936,27 +3936,23 @@ export function App() {
                   }}
                   className="hover:text-white cursor-pointer"
                 >
-                  /privacy-policy
+                  /privacy
                 </button>
-              </div>
-              <div className="hidden xl:flex items-center gap-1.5 border-l border-slate-700 pl-2.5">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                <span className="uppercase tracking-widest text-slate-300 text-[10px]">TidyUps Master v4.25</span>
               </div>
 
               {/* Rearrange Header & Footer Buttons Control */}
-              <div className="flex items-center gap-1.5 border-l border-slate-700 pl-2.5">
+              <div className="flex items-center gap-1 border-l border-slate-700 pl-1.5">
                 <button
                   type="button"
                   onClick={() => setIsRearrangingBars((prev) => !prev)}
-                  className={`px-2.5 py-1 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all border ${
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all border ${
                     isRearrangingBars
-                      ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md'
+                      ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-xs'
                       : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600'
                   }`}
                   title="Rearrange Header or Footer buttons from left to right (or drag any button directly)"
                 >
-                  <span>⇄ {isRearrangingBars ? 'Done Rearranging' : 'Rearrange Header / Footer'}</span>
+                  <span>⇄ {isRearrangingBars ? 'Done' : 'Rearrange'}</span>
                 </button>
 
                 {isRearrangingBars && (
@@ -3964,10 +3960,10 @@ export function App() {
                     <button
                       type="button"
                       onClick={() => toggleFooterSide(footerButtonsSide === 'right' ? 'left' : 'right')}
-                      className="px-2 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-extrabold cursor-pointer"
+                      className="px-1.5 py-0.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[9px] font-extrabold cursor-pointer"
                       title="Move all footer buttons between Left Side and Right Side"
                     >
-                      Footer Side: {footerButtonsSide === 'right' ? 'Right → (Switch to Left)' : '← Left (Switch to Right)'}
+                      {footerButtonsSide === 'right' ? 'Right →' : '← Left'}
                     </button>
                     <button
                       type="button"
@@ -3976,18 +3972,18 @@ export function App() {
                         updateFooterOrder(DEFAULT_FOOTER_BTN_ORDER);
                         toggleFooterSide('right');
                       }}
-                      className="px-2 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 text-[10px] font-bold cursor-pointer"
+                      className="px-1.5 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 text-[9px] font-bold cursor-pointer"
                       title="Reset Header and Footer button positions to default"
                     >
-                      Reset Order
+                      Reset
                     </button>
                   </>
                 )}
               </div>
             </div>
 
-            {/* Right-Hand Side (by default): Rearrangeable Footer Action Buttons including Management & Block Spam Caller */}
-            <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2 ml-auto">
+            {/* Right-Hand Side (by default): Single-Line Rearrangeable Footer Action Buttons */}
+            <div className="flex flex-nowrap items-center justify-end gap-1 ml-auto shrink-0">
               {footerBtnOrder.map((btnKey, idx) => {
                 let btnNode: React.ReactNode = null;
 
@@ -3999,15 +3995,15 @@ export function App() {
                         setIsStaffAuthenticated(true);
                         setActiveTopView('FB_MESSENGER_AI');
                       }}
-                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                      className={`px-2 py-0.5 rounded-md font-black text-[10px] flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap ${
                         activeTopView === 'FB_MESSENGER_AI'
-                          ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white ring-2 ring-blue-300'
+                          ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white ring-1 ring-blue-300'
                           : 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40'
                       }`}
                       title="Drag left/right to rearrange • 3-Page Facebook Messenger AI Bot & Conversation Board"
                     >
-                      <MessageSquare className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                      <span>Facebook AI (3 Pages)</span>
+                      <MessageSquare className="w-3 h-3 text-blue-400 shrink-0" />
+                      <span>Facebook AI</span>
                     </button>
                   );
                 } else if (btnKey === 'PASTE_TABLE') {
@@ -4019,15 +4015,15 @@ export function App() {
                         setMasterHubFocusBlock('PASTE_TABLE');
                         setActiveTopView('MASTER_HUB');
                       }}
-                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                      className={`px-2 py-0.5 rounded-md font-black text-[10px] flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap ${
                         activeTopView === 'MASTER_HUB' && masterHubFocusBlock === 'PASTE_TABLE'
-                          ? 'bg-amber-500 text-slate-950 ring-2 ring-amber-300'
+                          ? 'bg-amber-500 text-slate-950 ring-1 ring-amber-300'
                           : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
                       }`}
                       title="Drag left/right to rearrange • Quicklink: Paste Quotes & Pasted Leads Table"
                     >
-                      <ClipboardPaste className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>Paste Table (Paste Quotes &amp; Leads)</span>
+                      <ClipboardPaste className="w-3 h-3 text-amber-400 shrink-0" />
+                      <span>Paste Table</span>
                     </button>
                   );
                 } else if (btnKey === 'MASTER_TABLE') {
@@ -4039,15 +4035,15 @@ export function App() {
                         setMasterHubFocusBlock('MASTER_TABLE');
                         setActiveTopView('MASTER_HUB');
                       }}
-                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                      className={`px-2 py-0.5 rounded-md font-black text-[10px] flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap ${
                         activeTopView === 'MASTER_HUB' && (masterHubFocusBlock === 'MASTER_TABLE' || masterHubFocusBlock === 'ALL')
-                          ? 'bg-emerald-500 text-slate-950 ring-2 ring-emerald-300'
+                          ? 'bg-emerald-500 text-slate-950 ring-1 ring-emerald-300'
                           : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
                       }`}
                       title="Drag left/right to rearrange • Open TidyUps Master Leads & Quotes Table"
                     >
-                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>Master Leads &amp; Quotes Table</span>
+                      <FileSpreadsheet className="w-3 h-3 text-emerald-400 shrink-0" />
+                      <span>Master Leads</span>
                     </button>
                   );
                 } else if (btnKey === 'QUICK_MAPS') {
@@ -4058,15 +4054,15 @@ export function App() {
                         setIsStaffAuthenticated(true);
                         setActiveTopView('ADDRESS_SEARCH');
                       }}
-                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                      className={`px-2 py-0.5 rounded-md font-black text-[10px] flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap ${
                         activeTopView === 'ADDRESS_SEARCH'
-                          ? 'bg-sky-500 text-slate-950 ring-2 ring-sky-300'
+                          ? 'bg-sky-500 text-slate-950 ring-1 ring-sky-300'
                           : 'bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40'
                       }`}
                       title="Drag left/right to rearrange • Open Dedicated Quick Map & Schedule Radar Page"
                     >
-                      <MapIcon className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                      <span>Quick Map &amp; Schedule Radar</span>
+                      <MapIcon className="w-3 h-3 text-sky-400 shrink-0" />
+                      <span>Quick Map</span>
                     </button>
                   );
                 } else if (btnKey === 'DISPATCH_MAP') {
@@ -4077,7 +4073,7 @@ export function App() {
                         setIsStaffAuthenticated(true);
                         setActiveTopView('MAP');
                       }}
-                      className={`px-2.5 py-1 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer transition-all ${
+                      className={`px-2 py-0.5 rounded-md font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap ${
                         activeTopView === 'MAP'
                           ? 'bg-pink-600 text-white'
                           : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
@@ -4085,7 +4081,7 @@ export function App() {
                       title="Drag left/right to rearrange • Open Full Screen Territory Dispatch Map"
                     >
                       <Navigation className="w-3 h-3 text-pink-400 shrink-0" />
-                      <span>Full Dispatch Map</span>
+                      <span>Dispatch Map</span>
                     </button>
                   );
                 } else if (btnKey === 'SCHEDULE_SEARCH') {
@@ -4097,7 +4093,7 @@ export function App() {
                         setMasterHubFocusBlock('SCHEDULE_SEARCH');
                         setActiveTopView('MASTER_HUB');
                       }}
-                      className={`px-2.5 py-1 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer transition-all ${
+                      className={`px-2 py-0.5 rounded-md font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap ${
                         activeTopView === 'MASTER_HUB' && masterHubFocusBlock === 'SCHEDULE_SEARCH'
                           ? 'bg-purple-500 text-white'
                           : 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40'
@@ -4105,7 +4101,7 @@ export function App() {
                       title="Drag left/right to rearrange • Jump to Schedule & Search Block"
                     >
                       <Calendar className="w-3 h-3 text-purple-400 shrink-0" />
-                      <span>Schedule &amp; Search</span>
+                      <span>Schedule Search</span>
                     </button>
                   );
                 } else if (btnKey === 'SYNC_ALL') {
@@ -4114,10 +4110,10 @@ export function App() {
                       type="button"
                       onClick={() => handleSyncEverything(false)}
                       disabled={isSyncingEverything}
-                      className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                      className="px-2 py-0.5 rounded-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-[10px] flex items-center gap-1 cursor-pointer disabled:opacity-50 whitespace-nowrap"
                       title="Drag left/right to rearrange • 1-Click Sync Everything"
                     >
-                      <RefreshCw className={`w-3 h-3 ${isSyncingEverything ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-2.5 h-2.5 ${isSyncingEverything ? 'animate-spin' : ''}`} />
                       <span>{isSyncingEverything ? 'Syncing...' : 'Sync All'}</span>
                     </button>
                   );
@@ -4129,14 +4125,14 @@ export function App() {
                         setIsStaffAuthenticated(true);
                         setActiveTopView('MANAGEMENT');
                       }}
-                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-md ${
+                      className={`px-2 py-0.5 rounded-md font-black text-[10px] flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap ${
                         ['MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL'].includes(activeTopView)
-                          ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white ring-2 ring-indigo-300'
+                          ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white ring-1 ring-indigo-300'
                           : 'bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-400/50'
                       }`}
                       title="Drag left/right to rearrange • Open Management Hub (Intakes, Quotes, Invoices, Staff Roster & Settings)"
                     >
-                      <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                      <SlidersHorizontal className="w-3 h-3 text-indigo-300 shrink-0" />
                       <span>Management</span>
                     </button>
                   );
@@ -4148,14 +4144,14 @@ export function App() {
                         setIsStaffAuthenticated(true);
                         setActiveTopView('QUICK_QUOTE');
                       }}
-                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                      className={`px-2 py-0.5 rounded-md font-black text-[10px] flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap ${
                         activeTopView === 'QUICK_QUOTE'
-                          ? 'bg-gradient-to-r from-pink-600 via-fuchsia-600 to-purple-600 text-white ring-2 ring-pink-300'
+                          ? 'bg-gradient-to-r from-pink-600 via-fuchsia-600 to-purple-600 text-white ring-1 ring-pink-300'
                           : 'bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 border border-pink-500/40'
                       }`}
                       title="Drag left/right to rearrange • Open Voice Dictation & Quick Quote Intake"
                     >
-                      <Mic className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                      <Mic className="w-3 h-3 text-pink-400 shrink-0" />
                       <span>Voice Dictation</span>
                     </button>
                   );
@@ -4173,11 +4169,11 @@ export function App() {
                           setIsProjectBackupModalOpen(true);
                         }
                       }}
-                      className="px-3 py-1 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-xs shadow-md flex items-center gap-1.5 border border-cyan-300/50 cursor-pointer transition-all active:scale-95"
+                      className="px-2 py-0.5 rounded-md bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-[10px] flex items-center gap-1 border border-cyan-300/50 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
                       title="1-Click Download Numbered Project Backup ZIP directly from app.tidyupscleaning.com (No Google popup needed)"
                     >
-                      <FileArchive className="w-3.5 h-3.5 text-white shrink-0" />
-                      <span>📦 Backup ZIP (PR6+)</span>
+                      <FileArchive className="w-3 h-3 text-white shrink-0" />
+                      <span>Backup ZIP</span>
                     </button>
                   );
                 } else if (btnKey === 'BLOCK_SPAM') {
@@ -4185,12 +4181,11 @@ export function App() {
                     <button
                       type="button"
                       onClick={() => handleOpenSpamShield()}
-                      className="px-3 py-1 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs shadow-md flex items-center gap-1.5 border border-rose-300/50 cursor-pointer transition-all active:scale-95"
+                      className="px-2 py-0.5 rounded-md bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-[10px] flex items-center gap-1 border border-rose-300/50 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
                       title="Drag left/right to rearrange • Instant Call Blocker: Block nuisance callers, area codes & telemarketers across all Twilio lines"
                     >
-                      <div className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                      <ShieldAlert className="w-3.5 h-3.5 text-white shrink-0" />
-                      <span>Block Spam Caller</span>
+                      <ShieldAlert className="w-3 h-3 text-white shrink-0" />
+                      <span>Block Spam</span>
                     </button>
                   );
                 }
@@ -4204,7 +4199,7 @@ export function App() {
                     onDragStart={() => handleBarDragStart('footer', btnKey)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={() => handleBarDrop('footer', btnKey)}
-                    className={`flex items-center gap-0.5 rounded-xl transition-all ${
+                    className={`flex items-center gap-0.5 rounded-md transition-all shrink-0 ${
                       isRearrangingBars ? 'ring-1 ring-amber-400 bg-slate-800 p-0.5' : ''
                     } ${draggedBarItem?.bar === 'footer' && draggedBarItem?.id === btnKey ? 'opacity-40 scale-95' : ''}`}
                   >
@@ -4216,7 +4211,7 @@ export function App() {
                           e.stopPropagation();
                           moveBarButton('footer', btnKey, 'left');
                         }}
-                        className="px-1.5 py-0.5 rounded bg-slate-950 text-amber-300 hover:bg-slate-700 disabled:opacity-25 text-[10px] font-black cursor-pointer"
+                        className="px-1 py-0.5 rounded bg-slate-950 text-amber-300 hover:bg-slate-700 disabled:opacity-25 text-[9px] font-black cursor-pointer"
                         title="Move Button Left"
                       >
                         ◀
@@ -4231,7 +4226,7 @@ export function App() {
                           e.stopPropagation();
                           moveBarButton('footer', btnKey, 'right');
                         }}
-                        className="px-1.5 py-0.5 rounded bg-slate-950 text-amber-300 hover:bg-slate-700 disabled:opacity-25 text-[10px] font-black cursor-pointer"
+                        className="px-1 py-0.5 rounded bg-slate-950 text-amber-300 hover:bg-slate-700 disabled:opacity-25 text-[9px] font-black cursor-pointer"
                         title="Move Button Right"
                       >
                         ▶

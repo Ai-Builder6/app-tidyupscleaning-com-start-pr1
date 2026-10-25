@@ -137,20 +137,20 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const universalScrollerBar = (
     <div
       id="universal-bottom-horizontal-scroller"
-      className="w-full z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-2.5 py-1 flex items-center gap-2 text-slate-200 select-none shrink-0"
+      className="w-full z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-2 py-0.5 flex items-center gap-1.5 text-slate-200 select-none shrink-0"
     >
       <button
         type="button"
         onClick={() => stepHorizontalScroll(-20)}
-        className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-[10px] font-black text-cyan-300 border border-slate-700 flex items-center gap-0.5 cursor-pointer shrink-0"
+        className="px-1.5 py-0.2 rounded bg-slate-800 hover:bg-slate-700 active:scale-95 text-[9px] font-black text-cyan-300 border border-slate-700 flex items-center gap-0.5 cursor-pointer shrink-0"
         title="Scroll Page Left"
       >
-        <ChevronLeft className="w-3.5 h-3.5" />
+        <ChevronLeft className="w-3 h-3" />
         <span>Left</span>
       </button>
 
-      <div className="flex-1 flex items-center gap-2 min-w-0">
-        <MoveHorizontal className="w-3.5 h-3.5 text-cyan-400 shrink-0 hidden sm:inline" />
+      <div className="flex-1 flex items-center gap-1.5 min-w-0">
+        <MoveHorizontal className="w-3 h-3 text-cyan-400 shrink-0 hidden sm:inline" />
         <input
           type="range"
           min={0}
@@ -158,9 +158,9 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           value={scrollPercent}
           onChange={(e) => applyHorizontalScroll(Number(e.target.value))}
           aria-label="Universal Page Horizontal Scroller"
-          className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+          className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400"
         />
-        <span className="text-[10px] font-mono font-bold text-slate-400 w-8 text-right shrink-0">
+        <span className="text-[9px] font-mono font-bold text-slate-400 w-7 text-right shrink-0">
           {Math.round(scrollPercent)}%
         </span>
       </div>
@@ -169,7 +169,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         <button
           type="button"
           onClick={() => applyHorizontalScroll(0)}
-          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] font-bold text-slate-300 border border-slate-700 cursor-pointer shrink-0"
+          className="px-1 py-0.2 rounded bg-slate-800 hover:bg-slate-700 text-[9px] font-bold text-slate-300 border border-slate-700 cursor-pointer shrink-0"
           title="Reset Horizontal Scroll"
         >
           Reset
@@ -179,11 +179,11 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       <button
         type="button"
         onClick={() => stepHorizontalScroll(20)}
-        className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-[10px] font-black text-cyan-300 border border-slate-700 flex items-center gap-0.5 cursor-pointer shrink-0"
+        className="px-1.5 py-0.2 rounded bg-slate-800 hover:bg-slate-700 active:scale-95 text-[9px] font-black text-cyan-300 border border-slate-700 flex items-center gap-0.5 cursor-pointer shrink-0"
         title="Scroll Page Right"
       >
         <span>Right</span>
-        <ChevronRight className="w-3.5 h-3.5" />
+        <ChevronRight className="w-3 h-3" />
       </button>
     </div>
   );
@@ -192,7 +192,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
     return (
       <>
         {!isOnline && (
-          <div className="fixed bottom-[88px] left-3 right-3 z-50 flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-bold text-slate-950 shadow-lg">
+          <div className="fixed bottom-[64px] left-3 right-3 z-50 flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-3 py-1 text-xs font-bold text-slate-950 shadow-lg">
             <WifiOff className="w-3.5 h-3.5 shrink-0" />
             <span>Offline Mode — Showing cached route &amp; stops</span>
           </div>
@@ -200,7 +200,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         {universalScrollerBar}
         <nav
           aria-label="Cleaner Bottom Navigation"
-          className="flex w-full z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 text-white px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] items-center justify-around shadow-[0_-8px_25px_rgba(0,0,0,0.35)] shrink-0"
+          className="flex w-full z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 text-white px-2 py-0.5 pb-[max(0.25rem,env(safe-area-inset-bottom))] items-center justify-around shrink-0"
         >
           <button
             type="button"
@@ -208,13 +208,13 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               onSetCleanerShowMap?.(false);
               onSelectView('MAP');
             }}
-            className={`flex-1 py-1.5 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] font-extrabold transition-all cursor-pointer ${
+            className={`flex-1 py-1 px-2 rounded-lg flex flex-row items-center justify-center gap-1.5 text-[11px] font-extrabold transition-all cursor-pointer ${
               activeTopView === 'MAP' && !cleanerShowMap
                 ? 'text-pink-400 bg-white/10'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Truck className="w-4 h-4" />
+            <Truck className="w-3.5 h-3.5" />
             <span>My Daily Stops</span>
           </button>
 
@@ -224,13 +224,13 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               onSetCleanerShowMap?.(true);
               onSelectView('MAP');
             }}
-            className={`flex-1 py-1.5 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] font-extrabold transition-all cursor-pointer ${
+            className={`flex-1 py-1 px-2 rounded-lg flex flex-row items-center justify-center gap-1.5 text-[11px] font-extrabold transition-all cursor-pointer ${
               activeTopView === 'MAP' && cleanerShowMap
                 ? 'text-pink-400 bg-white/10'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <MapIcon className="w-4 h-4" />
+            <MapIcon className="w-3.5 h-3.5" />
             <span>My Route Map</span>
           </button>
         </nav>
@@ -291,7 +291,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   return (
     <>
       {!isOnline && (
-        <div className="fixed bottom-[88px] left-3 right-3 z-50 flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-bold text-slate-950 shadow-lg">
+        <div className="fixed bottom-[64px] left-3 right-3 z-50 flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-3 py-1 text-xs font-bold text-slate-950 shadow-lg">
           <WifiOff className="w-3.5 h-3.5 shrink-0" />
           <span>Offline Mode — Cached dispatch data is active</span>
         </div>
@@ -300,7 +300,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       <nav
         id="ios-mobile-bottom-nav"
         aria-label="Desktop, iPad, and iPhone Bottom Navigation"
-        className="flex w-full z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 text-white px-1.5 sm:px-3 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] items-center justify-between gap-1 sm:gap-2 shadow-[0_-8px_25px_rgba(0,0,0,0.35)] shrink-0 overflow-x-auto no-scrollbar"
+        className="flex w-full z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 text-white px-1.5 sm:px-3 py-0.5 pb-[max(0.25rem,env(safe-area-inset-bottom))] items-center justify-between gap-1 shrink-0 overflow-x-auto no-scrollbar"
       >
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -316,31 +316,29 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               key={item.id}
               type="button"
               onClick={() => onSelectView(item.id)}
-              className={`relative flex-1 min-w-[68px] py-1.5 px-1 rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 cursor-pointer ${
+              className={`relative flex-1 min-w-fit py-1 px-2 rounded-lg border flex flex-row items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer whitespace-nowrap ${
                 isActive
                   ? item.activeColor
                   : 'border-transparent text-slate-400 hover:text-white hover:bg-white/5'
               }`}
             >
-              <div className="relative flex items-center justify-center">
-                <Icon className="w-4 h-4 shrink-0" />
-                {item.badge && (
-                  <span
-                    className={`ml-1 px-1 py-0.2 rounded-full text-[9px] font-mono font-black leading-none ${
-                      item.id === 'QUICK_QUOTE'
-                        ? 'text-[8px]'
-                        : isActive
-                        ? 'bg-white text-slate-950'
-                        : 'bg-slate-800 text-slate-200'
-                    }`}
-                  >
-                    {item.badge}
-                  </span>
-                )}
-              </div>
-              <span className="text-[10px] font-extrabold truncate max-w-full leading-tight">
+              <Icon className="w-3.5 h-3.5 shrink-0" />
+              <span className="text-[10px] font-extrabold truncate leading-none">
                 {item.label}
               </span>
+              {item.badge && (
+                <span
+                  className={`px-1 py-0.2 rounded-full text-[8px] font-mono font-black leading-none ${
+                    item.id === 'QUICK_QUOTE'
+                      ? 'text-[8px]'
+                      : isActive
+                      ? 'bg-white text-slate-950'
+                      : 'bg-slate-800 text-slate-200'
+                  }`}
+                >
+                  {item.badge}
+                </span>
+              )}
             </button>
           );
         })}
@@ -349,11 +347,11 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           <button
             type="button"
             onClick={onOpenSpamShield}
-            className="py-1.5 px-2 rounded-xl border border-rose-500/40 bg-rose-950/70 hover:bg-rose-900 text-rose-200 flex flex-col items-center justify-center gap-0.5 active:scale-95 cursor-pointer shrink-0"
+            className="py-1 px-2 rounded-lg border border-rose-500/40 bg-rose-950/70 hover:bg-rose-900 text-rose-200 flex flex-row items-center justify-center gap-1 active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
             title="Block Caller or Area Code"
           >
-            <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
-            <span className="text-[10px] font-extrabold leading-tight">Block #</span>
+            <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span className="text-[10px] font-extrabold leading-none">Block #</span>
           </button>
         )}
       </nav>

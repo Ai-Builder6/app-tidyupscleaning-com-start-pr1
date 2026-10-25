@@ -653,18 +653,6 @@ function buildVisualWorksheetXml(options: {
       rowsXml.push(`<row r="${currentRow}" ht="26" customHeight="1">${cells.join('')}</row>`);
       currentRow++;
     });
-
-    // On the Master "All Clean Leads" tab, if any of the 4 channels has 0 rows yet, include its color-coded template row right in the table so all 4 source colors are visible in the main table!
-    if (isMasterSheet) {
-      const presentCategories = new Set(
-        leads.map((l) => detectSourceCategory(l.sourceTab, l.source))
-      );
-      starterTemplates.forEach((tpl, idx) => {
-        if (!presentCategories.has(tpl.cat)) {
-          renderStarterTemplateRow(tpl, idx);
-        }
-      });
-    }
   }
 
   const lastDataRow = currentRow - 1;
@@ -918,14 +906,126 @@ function buildTwentyColumnWebhookSheetXml(
 </worksheet>`;
 }
 
+const CORRUPTED_AD_ID_PHONES = new Set([
+  '5526108796',
+  '9527272744',
+  '8018242991',
+  '5827707945',
+  '8675440779',
+  '8276700165',
+  '2632050097',
+  '7807185092', // TidyUps own number
+  '7805550199',
+  '7805550148',
+  '7805550188',
+  '7805550100',
+]);
+
+const EDMONTON_AREA_CODES = new Set(['780', '587', '825', '368']);
+
+export function isAddressInGreaterEdmonton(address?: string, city?: string, postalCode?: string): boolean {
+  const combined = `${address || ''} ${city || ''} ${postalCode || ''}`.toLowerCase();
+
+  // Explicit out-of-province or out-of-service-area cities/provinces/streets
+  if (
+    /\b(red\s*deer|wetaskiwin|calgary|lethbridge|medicine\s*hat|fort\s*mcmurray|grande\s*prairie|banff|canmore|airdrie|okotoks|cochrane|camrose|lloydminster|barrie|surrey|vancouver|burnaby|victoria|kelowna|saskatoon|regina|winnipeg|toronto|ottawa|mississauga|brampton|hamilton|london|montreal|laval|quebec|halifax|mountain\s*view|california|texas|florida|new\s*york|ontario|british\s*columbia|saskatchewan|manitoba|nova\s*scotia|bibby\s*crt|willis\s*crescent|13485\s*71\s*ave|123\s*main\s*st|100\s*test\s*street)\b/i.test(
+      combined
+    )
+  ) {
+    return false;
+  }
+
+  // Check Canadian postal code if present
+  const postalMatch = combined.match(/\b([a-z]\d[a-z])\s*(\d[a-z]\d)\b/i);
+  if (postalMatch) {
+    const fsa = postalMatch[1].toUpperCase();
+    // Greater Edmonton FSAs: T5*, T6*, T7X (Spruce Grove), T7Y (Parkland/Spruce Grove), T7Z (Stony Plain),
+    // T8A/T8B/T8C/T8E/T8G/T8H (Sherwood Park / Strathcona County), T8L (Fort Saskatchewan), T8N (St. Albert),
+    // T8R (Morinville), T8T (Sturgeon County), T9E (Leduc/Nisku), T9G (Devon), T4X (Beaumont), T0C (Calmar), T0A (Gibbons/Bon Accord)
+    const isGreaterEdmontonFsa =
+      fsa.startsWith('T5') ||
+      fsa.startsWith('T6') ||
+      fsa === 'T7X' ||
+      fsa === 'T7Y' ||
+      fsa === 'T7Z' ||
+      fsa === 'T8A' ||
+      fsa === 'T8B' ||
+      fsa === 'T8C' ||
+      fsa === 'T8E' ||
+      fsa === 'T8G' ||
+      fsa === 'T8H' ||
+      fsa === 'T8L' ||
+      fsa === 'T8N' ||
+      fsa === 'T8R' ||
+      fsa === 'T8T' ||
+      fsa === 'T9E' ||
+      fsa === 'T9G' ||
+      fsa === 'T4X' ||
+      fsa === 'T0C' ||
+      fsa === 'T0A';
+    if (!isGreaterEdmontonFsa) {
+      return false;
+    }
+  }
+
+  // US 5-digit ZIP codes (like 94043)
+  if (/\b94043\b|\bca\s+9\d{4}\b/i.test(combined)) {
+    return false;
+  }
+
+  // Check city if specified
+  const cleanCity = String(city || '').trim().toLowerCase();
+  if (cleanCity) {
+    const allowedCities = [
+      'edmonton',
+      'st. albert',
+      'st albert',
+      'saint albert',
+      'sherwood park',
+      'strathcona county',
+      'leduc',
+      'leduc county',
+      'spruce grove',
+      'stony plain',
+      'parkland county',
+      'beaumont',
+      'fort saskatchewan',
+      'devon',
+      'morinville',
+      'calmar',
+      'nisku',
+      'acheson',
+      'gibbons',
+      'bon accord',
+      'sturgeon county',
+      'ardrossan',
+      'rolly view',
+      'cooking lake',
+      'enoch',
+      'ab',
+      'alberta',
+    ];
+    if (!allowedCities.some((ac) => cleanCity.includes(ac))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export function isFalseOrCatalogLeadRow(name?: string): boolean {
   const s = String(name || '').trim();
   if (!s) return true;
   if (/^\d+$/.test(s)) return true;
   if (/^\d+\s*lead\(s\)/i.test(s)) return true;
-  if (/^\[.*auto-colored.*\]$/i.test(s)) return true;
+  if (/^\[.*\]$/i.test(s)) return true;
+  if (/^\[facebook|^\[google|^\[pasted|^\[voice/i.test(s)) return true;
+  if (/^(as:|ag:|c:|f:|l:)/i.test(s)) return true;
+  if (/^(potential\s+job\s+caller|cleaning\s+caller|inbound\s+caller|phone\s+caller|phone\s+lead|inbound\s+ad\s+lead)/i.test(s)) {
+    return true;
+  }
   if (
-    /\b\d\s*bed\b|\bmove\s*out\b|\bmovein\b|\bmove-in\b|\bdeep\s*clean|\binitial\s*basic|\bbi-weekly|\bweekly\s*home|\bmonthly\s*maintenance|\bhourly\s*rate|\btandem\s*crew|\binside\s*(oven|refrigerator|fridge|kitchen|cabinets)|\bbaseboards\b|\binterior\s*windows|\bfinished\s*basement|\bfull\s*basement|\bpet\s*hair|\bblinds\b|\bbalcony\b|\bfuel\b|\bdiscount\b|\bwall\s*washing|\bceiling\s*fan|\bgarage\s*sweep|\bcarpet\s*steam|\bupholstery|\bcommercial\s*office|\bpost-renovation|\bairbnb\b|test\s*lead|dummy\s*data|fb\s*leads\s*v1|engagement\s*ads|june\s*lead\s*ads|sample\s*(ad|campaign|row)|sync\s*verification|lead\(s\)|auto-colored|github\.com|dispatch\s*geeni|book\s*my\s*cleaning|easy-cleans|sarah\s*\(fb\s*ad\s*test\)/i.test(
+    /\b\d\s*bed\b|\bmove\s*out\b|\bmovein\b|\bmove-in\b|\bdeep\s*clean|\binitial\s*basic|\bbi-weekly|\bweekly\s*home|\bmonthly\s*maintenance|\bhourly\s*rate|\btandem\s*crew|\binside\s*(oven|refrigerator|fridge|kitchen|cabinets)|\bbaseboards\b|\binterior\s*windows|\bfinished\s*basement|\bfull\s*basement|\bpet\s*hair|\bblinds\b|\bbalcony\b|\bfuel\b|\bdiscount\b|\bwall\s*washing|\bceiling\s*fan|\bgarage\s*sweep|\bcarpet\s*steam|\bupholstery|\bcommercial\s*office|\bpost-renovation|\bairbnb\b|test\s*lead|dummy\s*data|fb\s*leads|engagement\s*ads|june\s*lead\s*ads|sample\s*(ad|campaign|row)|sync\s*verification|lead\(s\)|auto-colored|github\.com|dispatch\s*geeni|book\s*my\s*cleaning|easy-cleans|sarah\s*\(fb\s*ad\s*test\)|new\s*app\s*leads|app\s*booking\s*v\d|tidyups\s*cleaning|richard\s*penny|joey\s*penny|joseph\s*henny|leicester\s*smith|sync\s*test|john\s*doe|what\s*\(phone\s*lead\)|sadhin\s*sorkar|shirley\s*k\s*chavez|jessie\s*vachon|diane\s*bogner|cassandra.*avon|agunbiade.*samuel|sonia\s*jordon\s*otoole|darlene\s*turnbull|venessa\s*azure/i.test(
       s
     )
   ) {
@@ -959,8 +1059,95 @@ export function isFalseOrCatalogLeadRow(name?: string): boolean {
     'new',
     'client name',
     'full_name',
+    'fb',
+    'facebook',
+    'engagement',
+    'june',
+    'sample',
+    'sync',
+    'sarah',
+    'book',
+    'dispatch',
+    'joey',
+    'what',
+    'client',
   ]);
   return singleTokenGarbage.has(s.toLowerCase());
+}
+
+export function isOutOfEdmontonOrFakeOrOutdatedLead(lead: any): boolean {
+  if (!lead || typeof lead !== 'object') return true;
+  const id = String(lead.id || '').trim();
+  if (id.startsWith('lead-sheet-mvmwt') || id.startsWith('lead-sheet-mvo') || id.startsWith('lead-quo-')) {
+    return true;
+  }
+
+  const name = String(lead.customerName || lead.clientName || lead.name || '').trim();
+  if (isFalseOrCatalogLeadRow(name)) return true;
+
+  const email = String(lead.email || lead.clientEmail || '').trim().toLowerCase();
+  if (email.includes('test@meta.com') || email.includes('example.com') || email.includes('dummy')) {
+    return true;
+  }
+
+  const phoneDigits = String(lead.phone || lead.clientPhone || '').replace(/\D/g, '').slice(-10);
+  if (phoneDigits && CORRUPTED_AD_ID_PHONES.has(phoneDigits)) {
+    return true;
+  }
+  if (phoneDigits.length === 10 && phoneDigits.slice(3, 6) === '555') {
+    return true;
+  }
+
+  const address = String(lead.address || lead.serviceAddress || '').trim();
+  const city = String(lead.city || '').trim();
+  const postalCode = String(lead.postalCode || '').trim();
+  const notes = String(lead.notes || '').trim();
+
+  if (!isAddressInGreaterEdmonton(`${address} ${notes}`, city, postalCode)) {
+    return true;
+  }
+
+  // If the address is just a generic placeholder ("Edmonton, AB" or empty) with no street or postal code,
+  // require a valid Greater Edmonton area code (780, 587, 825, 368) or a real Jobber quote ID
+  const isGenericAddress =
+    !address ||
+    /^(edmonton(\s*,\s*ab|\s*,\s*alberta)?|st\.?\s*albert(\s*,\s*ab)?|sherwood\s*park(\s*,\s*ab)?|10405\s*jasper\s*ave.*)$/i.test(
+      address
+    );
+  const hasRealJobberQuote = String(lead.quoteId || lead.id || '').startsWith('Z2lkOi8v');
+
+  if (isGenericAddress && !postalCode && !hasRealJobberQuote) {
+    const areaCode = phoneDigits.slice(0, 3);
+    if (!areaCode || !EDMONTON_AREA_CODES.has(areaCode)) {
+      return true;
+    }
+  }
+
+  // Check if outdated: any unbooked/unconverted lead received before Oct 1, 2026 or requesting a past month (Jan-Sept 2026)
+  const isConvertedClient =
+    lead.status === 'Converted' ||
+    lead.status === 'Booked' ||
+    lead.quoteStatus === 'CONVERTED' ||
+    lead.quoteStatus === 'APPROVED' ||
+    lead.verdict === 'Client';
+
+  const dateReceived = String(lead.dateReceived || lead.createdAt || '').slice(0, 10);
+  const reqDate = String(lead.dateOfServiceRequested || lead.requestedDate || lead.scheduledDate || '').toLowerCase();
+
+  if (!isConvertedClient) {
+    if (dateReceived && dateReceived < '2026-09-30') {
+      return true;
+    }
+    if (
+      /\b(january|february|march|april|may|june|july|august|september|sept|aug|jul|jun|2025|2026-0[1-9])\b/i.test(
+        reqDate
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export async function generateStyledLeadsWorkbookBuffer(params: {
@@ -970,7 +1157,7 @@ export async function generateStyledLeadsWorkbookBuffer(params: {
   resolveJobberWebUri: (type: 'quotes' | 'clients', id?: string) => string;
 }): Promise<Buffer> {
   const { leads: rawLeads, quotes, appLeadHeaders, resolveJobberWebUri } = params;
-  const leads = (rawLeads || []).filter((l) => !isFalseOrCatalogLeadRow(l?.customerName));
+  const leads = (rawLeads || []).filter((l) => !isOutOfEdmontonOrFakeOrOutdatedLead(l));
 
   const fbLeads = leads.filter(
     (l) => detectSourceCategory(l.sourceTab, l.source) === 'FACEBOOK'

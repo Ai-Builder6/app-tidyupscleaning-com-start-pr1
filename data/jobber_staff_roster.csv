@@ -1,17 +1,17 @@
-Full Name,Mobile Phone,Email Address,Role,Can Drive,Can Accept Jobs,Van Unit,Color,Home Address
-"Boss iPad Pro 《iPhone》","1-204-599-8439","tidyupscleaning@gmail.com","Owner / Field Ops",Yes,Yes,"Boss Home","#fbff1a","48234 Mun 34E Landmark MB R0A0X0"
-"Richard ""Owner Account""","1-204-891-4099","Richardlivingsky@gmail.com","Owner / Lead Dispatcher",Yes,Yes,"Richard SUV","#fffb1a","1780 Wellington Ave, Winnipeg, MB"
-"1 Joseph Juma","1-204-881-5926","josephjuma30@gmail.com","Team Lead",Yes,Yes,"Joseph Car","#8d7244","240 Stradbrook Ave, Winnipeg, MB"
-"Adison Haugland","1-204-205-0327","adisonhaugland@icloud.com","Cleaning Specialist",Yes,Yes,"Adison","#edb1b1","1120 Grant Ave, Winnipeg, MB"
-"Cindy Guay","1-204-298-5714","guaycindy7@gmail.com","Cleaning Specialist",Yes,Yes,"Cindy Car","#EC4899","55 Nassau St N, Winnipeg, MB"
-"Dominic Mancini","1-431-588-4684","Dommancini29@gmail.com","Team Lead",Yes,Yes,"Dom (Lead Mobile)","#4F46E5","1455 Henderson Hwy, Winnipeg, MB"
-"Jasmin Kunin","1-204-891-0936","jasmckinley93@gmail.com","Cleaning Specialist",Yes,Yes,"Jasmin Suv","#6366F1","900 Corydon Ave, Winnipeg, MB"
-"Jen & Bryan Cabugon","1-431-998-9972","cediclean25@gmail.com","Team Lead",Yes,Yes,"Jen&Bryan","#F59E0B","1080 Wall St, Winnipeg, MB"
-"Joel MBATCHOU","1-431-792-5100","mbatchoujoel2018@gmail.com","Cleaning Specialist",Yes,Yes,"Joel Car","#10B981","400 St Mary Ave, Winnipeg, MB"
-"Kilab","1-431-277-8661","kalib11@icloud.com","Cleaning Specialist",Yes,Yes,"Kilab Car","#3B82F6","855 Regent Ave W, Winnipeg, MB"
-"Melissa Clarke","1-431-996-9682","melissasclarke90@gmail.com","Cleaning Specialist",Yes,Yes,"Melissa","#2563EB","1600 Kenaston Blvd, Winnipeg, MB"
-"N.Dinku","1-431-373-8485","ndinku@tidyupscleaning.com","Cleaning Specialist",Yes,Yes,"N.Dinku Car","#06B6D4","720 Broadway, Winnipeg, MB"
-"Neth & Carmen","1-431-336-6251","carmenchuacuco27@gmail.com","Team Lead",Yes,Yes,"Nenita","#F43F5E","1300 Ellice Ave, Winnipeg, MB"
-"Robyn Adele","1-204-869-5922","Robynadele95@gmail.com","Cleaning Specialist",Yes,Yes,"Robyn","#059669","620 Dakota St, Winnipeg, MB"
-"Sergine Ngongang wetie","1-431-294-8215","ngongangsergine96@gmail.com","Cleaning Specialist",Yes,Yes,"Sergine Car","#10B981","2075 Portage Ave, Winnipeg, MB"
-"FB App Tester","1-833-843-9877","fb-reviewer@tidyupscleaning.com","Admin / Reviewer",Yes,Yes,"FB Tester","#84CC16","201 Portage Ave, Winnipeg, MB"
+Name,Email,Phone,Role,Lead,Active,Home Address,Van Unit,Color
+Boss iPad Pro 《iPhone》,booking@tidyupscleaning.com,(780) 718-5092,Dispatcher,No,Yes,"7221 Chivers Pl SW, Edmonton, AB",Boss Home,#fbff1a
+Richard "Owner Account",booking@tidyupscleaning.com,(780) 718-5092,Owner,No,Yes,"8306 Chappelle Way Southwest, Edmonton, AB T6W 4L3, Canada",Richard SUV,#fffb1a
+1 Joseph Juma,baraka.cleaningservices95@gmail.com,(780) 267-3472,Cleaner,No,Yes,"3751 139 Ave NW, Edmonton, AB T5Y 3J5",Joseph Car,#8d7244
+Adison Haugland,hauglandadison@gmail.com,(780) 554-2851,Cleaner,No,Yes,"10231 120 St NW, Edmonton, AB T5K 2A4",Adison,#edb1b1
+Cindy Guay,cindybg@live.ca,(780) 863-0896,Cleaner,No,Yes,"740 Knottwood Rd S Northwest, Edmonton, AB T6K 1W5, Canada",Cindy Car,#EC4899
+Dominic Mancini,mittens45dm@gmail.com,(587) 385-8329,Dispatcher,Yes,Yes,"9722 154 St, Edmonton, AB T5P 2G3, Canada",Dom (Lead Mobile),#4F46E5
+Jasmin Kunin,kuninjasmin@gmail.com,1-204-891-0936,Cleaner,No,Yes,"900 Corydon Ave, Winnipeg, MB",Jasmin Suv,#6366F1
+Jen & Bryan Cabugon,cedi.cleans@gmail.com,(825) 888-3251,Cleaner,No,Yes,"9434 208 St NW, Edmonton, AB T5T 5X9, Canada",Jen&Bryan,#F59E0B
+Joel MBATCHOU,mbatchoujoakim@yahoo.fr,(587) 937-9408,Cleaner,No,Yes,"17908 61 Ave NW, Edmonton, AB T6M 1T1",Joel Car,#10B981
+Kilab,kffsfacilityservice10@gmail.com,1-431-277-8661,Cleaner,No,Yes,"855 Regent Ave W, Winnipeg, MB",Kilab Car,#3B82F6
+Melissa Clarke,clarkemelissa2025@gmail.com,(780) 954-2409,Cleaner,No,Yes,"7221 Chivers Pl SW, Edmonton, AB T6W 4L4, Canada",Melissa,#2563EB
+N.Dinku,bultoefa@gmail.com,1-431-373-8485,Cleaner,No,Yes,"720 Broadway, Winnipeg, MB",N.Dinku Car,#06B6D4
+Neth & Carmen,nhettemcarmen@yahoo.com,(780) 729-2031,Cleaner,No,Yes,"20123 58 Ave NW, Edmonton, AB T6M 0B5",Nenita,#F43F5E
+Robyn Adele,robynkierstead@hotmail.com,(780) 660-0681,Cleaner,No,Yes,"574 Saddleback Rd NW, Edmonton, AB T6J 4Z3",Robyn,#059669
+Sergine Ngongang wetie,tatiwetie@gmail.com,(418) 261-4689,Cleaner,No,Yes,"17115 61st Avenue Northwest, Edmonton, AB, Canada",Sergine Car,#10B981
+FB App Tester,booking+test@tidyupscleaning.com,1-833-843-9877,Cleaner,No,Yes,"201 Portage Ave, Winnipeg, MB",FB Tester,#84CC16
