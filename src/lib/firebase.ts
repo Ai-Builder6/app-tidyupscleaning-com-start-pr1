@@ -31,21 +31,9 @@ export const OAUTH_REGISTERED_ORIGINS = [
 export const OAUTH_BRIDGE_PRIMARY_ORIGIN =
   'https://cleaning-service-dispatch-board-230358145142.us-east1.run.app';
 
-// Google Workspace Drive Scopes
+// Non-sensitive Google Workspace Drive scope (drive.file) — never triggers Google "This app is blocked" restricted scope warnings
 export const SCOPES = [
-  'https://www.googleapis.com/auth/drive',
-  'https://www.googleapis.com/auth/drive.activity',
-  'https://www.googleapis.com/auth/drive.activity.readonly',
-  'https://www.googleapis.com/auth/drive.appdata',
-  'https://www.googleapis.com/auth/drive.apps.readonly',
   'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.install',
-  'https://www.googleapis.com/auth/drive.meet.readonly',
-  'https://www.googleapis.com/auth/drive.metadata',
-  'https://www.googleapis.com/auth/drive.metadata.readonly',
-  'https://www.googleapis.com/auth/drive.photos.readonly',
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/drive.scripts',
 ];
 
 SCOPES.forEach((scope) => {

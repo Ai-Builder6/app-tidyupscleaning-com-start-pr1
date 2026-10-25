@@ -210,23 +210,33 @@ export const StaffRosterModal: React.FC<StaffRosterModalProps> = ({
   const handleSaveStaffMember = () => {
     if (!editingStaff || !editingStaff.name.trim()) return;
 
+    const cleanFirst = editingStaff.name.trim().replace(/^\d+\s*/, '').split(' ')[0] || editingStaff.name.trim();
+    const resolvedVanUnit =
+      editingStaff.vanUnit && editingStaff.vanUnit.trim() && !/^Unit\s+\d+$/i.test(editingStaff.vanUnit.trim())
+        ? editingStaff.vanUnit.trim()
+        : `${cleanFirst} Car`;
+    const staffToSave: JobberStaffMember = {
+      ...editingStaff,
+      vanUnit: resolvedVanUnit,
+    };
+
     let updated: JobberStaffMember[];
     if (isAddMode) {
-      updated = [...staffList, { ...editingStaff, id: `staff-${Date.now()}` }];
-      showToast(`Added ${editingStaff.name} to Jobber staff roster!`, 'success');
+      updated = [...staffList, { ...staffToSave, id: `staff-${Date.now()}` }];
+      showToast(`Added ${staffToSave.name} (${staffToSave.vanUnit}) to Jobber staff roster!`, 'success');
     } else {
-      updated = staffList.map((s) => (s.id === editingStaff.id ? editingStaff : s));
-      showToast(`Saved changes for ${editingStaff.name}.`, 'success');
+      updated = staffList.map((s) => (s.id === staffToSave.id ? staffToSave : s));
+      showToast(`Saved changes for ${staffToSave.name} (Van: ${staffToSave.vanUnit}).`, 'success');
     }
 
     onUpdateStaffList(updated);
 
-    // Save CSV to server
+    // Save both staff array and CSV to server so Van Unit & Color are always preserved
     const newCsv = generateStaffCsv(updated);
     fetch('/api/staff/sync-csv', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ csvText: newCsv }),
+      body: JSON.stringify({ staff: updated, csvText: newCsv }),
     }).catch((err) => console.warn('Could not post updated staff to server:', err));
 
     setEditingStaff(null);

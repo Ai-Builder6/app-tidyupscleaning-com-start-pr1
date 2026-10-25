@@ -67,11 +67,11 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     role: 'Dispatcher',
     lead: false,
     active: true,
-    homeAddress: '8306 Chappelle Way Southwest, Edmonton, AB, Canada T6W4L3',
-    color: '#EC4899',
-    vanUnit: 'Executive HQ',
-    lat: 53.4184,
-    lng: -113.5786,
+    homeAddress: '7221 Chivers Pl SW, Edmonton, AB',
+    color: '#fbff1a',
+    vanUnit: 'Boss Home',
+    lat: 53.4150,
+    lng: -113.5720,
   },
   {
     id: 'staff-2',
@@ -81,11 +81,11 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     role: 'Owner',
     lead: false,
     active: true,
-    homeAddress: '8306 Chappelle Way Southwest, Edmonton, AB, Canada T6W4L3',
-    color: '#7C3AED',
-    vanUnit: 'Executive HQ',
-    lat: 53.4184,
-    lng: -113.5786,
+    homeAddress: '8306 Chappelle Way Southwest, Edmonton, AB T6W 4L3, Canada',
+    color: '#fffb1a',
+    vanUnit: 'Richard SUV',
+    lat: 53.3974,
+    lng: -113.5955,
   },
   {
     id: 'staff-3',
@@ -96,8 +96,8 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     lead: false,
     active: true,
     homeAddress: '3751 139 Ave NW, Edmonton, AB T5Y 3J5',
-    color: '#0891B2',
-    vanUnit: 'Unit 5',
+    color: '#8d7244',
+    vanUnit: 'Joseph Car',
     lat: 53.6025,
     lng: -113.4010,
   },
@@ -110,8 +110,8 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     lead: false,
     active: true,
     homeAddress: '10231 120 St NW, Edmonton, AB T5K 2A4',
-    color: '#D97706',
-    vanUnit: 'Unit 4',
+    color: '#edb1b1',
+    vanUnit: 'Adison',
     lat: 53.5435,
     lng: -113.5285,
   },
@@ -123,11 +123,11 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     role: 'Cleaner',
     lead: false,
     active: true,
-    homeAddress: '740 Knottwood Rd S Northwest, Edmonton, AB T6K 1W5',
-    color: '#10B981',
-    vanUnit: 'Unit 7',
-    lat: 53.4540,
-    lng: -113.4350,
+    homeAddress: '740 Knottwood Rd S Northwest, Edmonton, AB T6K 1W5, Canada',
+    color: '#EC4899',
+    vanUnit: 'Cindy Car',
+    lat: 53.4421,
+    lng: -113.4598,
   },
   {
     id: 'staff-6',
@@ -137,11 +137,11 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     role: 'Dispatcher',
     lead: true,
     active: true,
-    homeAddress: '9722 154 St, Edmonton, AB T5P 2G3',
+    homeAddress: '9722 154 St, Edmonton, AB T5P 2G3, Canada',
     color: '#4F46E5',
-    vanUnit: 'Unit 15 (Lead Mobile)',
-    lat: 53.5350,
-    lng: -113.5870,
+    vanUnit: 'Dom (Lead Mobile)',
+    lat: 53.5353,
+    lng: -113.5871,
   },
   {
     id: 'staff-7',
@@ -153,7 +153,7 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     active: true,
     homeAddress: '10740 109 St NW, Edmonton, AB T5H 3B6',
     color: '#6366F1',
-    vanUnit: 'Unit 8',
+    vanUnit: 'Jasmin Suv',
     lat: 53.5525,
     lng: -113.5085,
   },
@@ -165,11 +165,11 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     role: 'Cleaner',
     lead: false,
     active: true,
-    homeAddress: '9434 208 St NW, Edmonton, AB T5T 5X9',
+    homeAddress: '9434 208 St NW, Edmonton, AB T5T 5X9, Canada',
     color: '#F59E0B',
-    vanUnit: 'Unit 9 (Team)',
-    lat: 53.5310,
-    lng: -113.6820,
+    vanUnit: 'Jen&Bryan',
+    lat: 53.5315,
+    lng: -113.6777,
   },
   {
     id: 'staff-9',
@@ -180,8 +180,8 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     lead: false,
     active: true,
     homeAddress: '17908 61 Ave NW, Edmonton, AB T6M 1T1',
-    color: '#8B5CF6',
-    vanUnit: 'Unit 11',
+    color: '#10B981',
+    vanUnit: 'Joel Car',
     lat: 53.4975,
     lng: -113.6310,
   },
@@ -195,7 +195,7 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     active: true,
     homeAddress: '12219 103 St NW, Edmonton, AB T5G 2K2',
     color: '#3B82F6',
-    vanUnit: 'Unit 12',
+    vanUnit: 'Kilab Car',
     lat: 53.5780,
     lng: -113.4980,
   },
@@ -207,11 +207,11 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     role: 'Cleaner',
     lead: false,
     active: true,
-    homeAddress: '7221 Chivers Pl SW, Edmonton, AB, Canada T6W4L4',
+    homeAddress: '7221 Chivers Pl SW, Edmonton, AB T6W 4L4, Canada',
     color: '#2563EB',
-    vanUnit: 'Unit 1',
-    lat: 53.4150,
-    lng: -113.5720,
+    vanUnit: 'Melissa',
+    lat: 53.3968,
+    lng: -113.5972,
   },
   {
     id: 'staff-12',
@@ -223,7 +223,7 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     active: true,
     homeAddress: '10408 155 Ave NW, Edmonton, AB T5X 4G6',
     color: '#06B6D4',
-    vanUnit: 'Unit 13',
+    vanUnit: 'N.Dinku Car',
     lat: 53.6175,
     lng: -113.5040,
   },
@@ -237,7 +237,7 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     active: true,
     homeAddress: '20123 58 Ave NW, Edmonton, AB T6M 0B5',
     color: '#F43F5E',
-    vanUnit: 'Unit 14 (Team)',
+    vanUnit: 'Nenita',
     lat: 53.4940,
     lng: -113.6680,
   },
@@ -251,7 +251,7 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     active: true,
     homeAddress: '574 Saddleback Rd NW, Edmonton, AB T6J 4Z3',
     color: '#059669',
-    vanUnit: 'Unit 3',
+    vanUnit: 'Robyn',
     lat: 53.4680,
     lng: -113.5280,
   },
@@ -263,16 +263,31 @@ export const CANONICAL_JOBBER_STAFF: JobberStaffMember[] = [
     role: 'Cleaner',
     lead: false,
     active: true,
-    homeAddress: '17115 61 Ave NW, Edmonton, AB',
-    color: '#D946EF',
-    vanUnit: 'Unit 10',
-    lat: 53.4980,
-    lng: -113.6180,
+    homeAddress: '17115 61st Avenue Northwest, Edmonton, AB, Canada',
+    color: '#10B981',
+    vanUnit: 'Sergine Car',
+    lat: 53.4998,
+    lng: -113.5254,
+  },
+  {
+    id: 'staff-16',
+    name: 'FB App Tester',
+    email: 'booking+test@tidyupscleaning.com',
+    phone: '',
+    role: 'Cleaner',
+    lead: false,
+    active: true,
+    homeAddress: 'Edmonton, AB',
+    color: '#84CC16',
+    vanUnit: 'FB Tester',
+    lat: 53.5130,
+    lng: -113.4910,
   },
 ];
 
 /**
  * Robust CSV Parser that handles quoted strings with commas and multiline addresses
+ * and preserves custom Van Unit and Color columns so user-saved Van names never revert!
  */
 export function parseStaffCsv(csvText: string): JobberStaffMember[] {
   const lines: string[] = [];
@@ -311,6 +326,8 @@ export function parseStaffCsv(csvText: string): JobberStaffMember[] {
   const leadIdx = headerParts.findIndex(h => /lead/i.test(h));
   const activeIdx = headerParts.findIndex(h => /active/i.test(h));
   const addrIdx = headerParts.findIndex(h => /address/i.test(h));
+  const vanIdx = headerParts.findIndex(h => /van|unit|vehicle/i.test(h));
+  const colorIdx = headerParts.findIndex(h => /color|colour/i.test(h));
 
   const result: JobberStaffMember[] = [];
 
@@ -327,6 +344,8 @@ export function parseStaffCsv(csvText: string): JobberStaffMember[] {
     const rawLead = (row[leadIdx >= 0 ? leadIdx : 4] || 'No').trim();
     const rawActive = (row[activeIdx >= 0 ? activeIdx : 5] || 'Yes').trim();
     const homeAddress = (row[addrIdx >= 0 ? addrIdx : 6] || 'Edmonton, AB').trim();
+    const csvVanUnit = vanIdx >= 0 ? (row[vanIdx] || '').trim() : '';
+    const csvColor = colorIdx >= 0 ? (row[colorIdx] || '').trim() : '';
 
     let role: 'Owner' | 'Dispatcher' | 'Cleaner' = 'Cleaner';
     if (/owner/i.test(rawRole) || /director/i.test(rawRole)) role = 'Owner';
@@ -335,16 +354,35 @@ export function parseStaffCsv(csvText: string): JobberStaffMember[] {
     const lead = /yes|true|1/i.test(rawLead);
     const active = !/no|false|0/i.test(rawActive);
 
-    const color = CLEANER_COLOR_MAP[rawName] || DEFAULT_PALETTE[(i - 1) % DEFAULT_PALETTE.length];
+    // Match against canonical staff to preserve saved vanUnit & color if not in CSV
+    const canonicalMatch = CANONICAL_JOBBER_STAFF.find(
+      c =>
+        c.name.toLowerCase() === rawName.toLowerCase() ||
+        (email && c.email.toLowerCase() === email.toLowerCase() && !email.includes('booking@'))
+    );
+
+    const color =
+      csvColor ||
+      canonicalMatch?.color ||
+      CLEANER_COLOR_MAP[rawName] ||
+      DEFAULT_PALETTE[(i - 1) % DEFAULT_PALETTE.length];
     const coords = approximateEdmontonCoords(homeAddress);
 
-    // Extract unit number if found in name or assign standard Unit #
-    let vanUnit = `Unit ${i}`;
-    if (role === 'Owner') vanUnit = 'Executive HQ';
-    else if (rawName.includes('Boss iPad')) vanUnit = 'HQ Ops 1';
-    else if (rawName.includes('Richard')) vanUnit = 'HQ Ops 2';
-    else if (rawName.includes('Dominic')) vanUnit = 'Unit 15 (Lead Mobile)';
-    else if (rawName.includes('Team')) vanUnit = `Unit ${i} (Team)`;
+    let vanUnit = csvVanUnit;
+    if (!vanUnit || /^Unit\s+\d+$/i.test(vanUnit)) {
+      if (canonicalMatch?.vanUnit) {
+        vanUnit = canonicalMatch.vanUnit;
+      } else if (rawName.includes('Boss iPad')) {
+        vanUnit = 'Boss Home';
+      } else if (rawName.includes('Richard')) {
+        vanUnit = 'Richard SUV';
+      } else if (rawName.includes('Dominic')) {
+        vanUnit = 'Dom (Lead Mobile)';
+      } else {
+        const cleanFirst = rawName.replace(/^\d+\s*/, '').split(' ')[0];
+        vanUnit = cleanFirst || rawName;
+      }
+    }
 
     result.push({
       id: `staff-${i}`,
@@ -357,8 +395,8 @@ export function parseStaffCsv(csvText: string): JobberStaffMember[] {
       homeAddress,
       color,
       vanUnit,
-      lat: coords.lat,
-      lng: coords.lng,
+      lat: canonicalMatch?.lat || coords.lat,
+      lng: canonicalMatch?.lng || coords.lng,
     });
   }
 
@@ -394,21 +432,24 @@ function splitCsvRow(rowText: string): string[] {
 }
 
 /**
- * Converts staff array back into canonical CSV string
+ * Converts staff array back into canonical CSV string (including Van Unit and Color!)
  */
 export function generateStaffCsv(staffList: JobberStaffMember[]): string {
-  const headers = ['Name', 'Email', 'Phone', 'Role', 'Lead', 'Active', 'Home Address'];
+  const headers = ['Name', 'Email', 'Phone', 'Role', 'Lead', 'Active', 'Home Address', 'Van Unit', 'Color'];
   const rows = staffList.map(s => {
     const safeName = s.name.includes(',') ? `"${s.name}"` : s.name;
-    const safeAddr = `"${s.homeAddress.replace(/"/g, '""')}"`;
+    const safeAddr = `"${(s.homeAddress || '').replace(/"/g, '""')}"`;
+    const safeVan = (s.vanUnit || s.name).includes(',') ? `"${s.vanUnit || s.name}"` : (s.vanUnit || s.name);
     return [
       safeName,
-      s.email,
-      s.phone,
-      s.role,
+      s.email || '',
+      s.phone || '',
+      s.role || 'Cleaner',
       s.lead ? 'Yes' : 'No',
-      s.active ? 'Yes' : 'No',
-      safeAddr
+      s.active !== false ? 'Yes' : 'No',
+      safeAddr,
+      safeVan,
+      s.color || '#2563EB',
     ].join(',');
   });
 
@@ -419,10 +460,15 @@ export function generateStaffCsv(staffList: JobberStaffMember[]): string {
  * Converts a JobberStaffMember to Dispatcher Technician interface for Map & Kanban
  */
 export function staffMemberToTechnician(staff: JobberStaffMember, index: number): Technician {
+  const cleanFirst = staff.name.replace(/^\d+\s*/, '').split(' ')[0] || staff.name;
+  const vanLabel =
+    staff.vanUnit && !/^Unit\s+\d+$/i.test(staff.vanUnit)
+      ? staff.vanUnit
+      : cleanFirst;
   return {
     id: `cleaner-${index + 1}`,
     name: staff.name,
-    vanNumber: staff.vanUnit || `Unit ${index + 1}`,
+    vanNumber: vanLabel,
     phone: staff.phone,
     email: staff.email,
     role: staff.role === 'Dispatcher' ? 'Dispatcher / Mobile Lead' : staff.role,
@@ -443,7 +489,7 @@ export function staffMemberToTechnician(staff: JobberStaffMember, index: number)
     depotLocation: {
       lat: staff.lat,
       lng: staff.lng,
-      name: `${staff.name.split(' ')[0]} Home Hub`,
+      name: `${cleanFirst} Home Hub`,
       address: staff.homeAddress,
     },
     assignedTicketIds: [],

@@ -141,11 +141,11 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
     botName: 'TidyUps AI Messenger Assistant',
     verifyToken: 'tidyups_fb_verify_2026',
     greetingTemplate:
-      "Hi {{name}}! 👋 Thanks so much for reaching out to {{page}}! How are you doing today? Tell me a little bit about what kind of cleaning you're looking for — or if you prefer a quick self-serve form anytime, you can also check out https://833tidyups.com/booking!",
+      "Hi {{name}}! 👋 Thanks so much for reaching out to {{page}}! How are you doing today? Tell me a little bit about what kind of cleaning you're looking for — or if you prefer a quick self-serve form anytime, you can also check out https://app.tidyupscleaning.com/booking!",
     systemPrompt:
-      "You are a warm, friendly, communicative front-desk coordinator for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). CRITICAL CONVERSATION RULE: NEVER interrogate the client or ask for their name, address, phone number, service type, and bedrooms all at once in a single message! Instead, get a real, natural human conversation going by asking only ONE easy question at a time: first chat about what kind of cleaning they need; then in the next message ask about their home size (bedrooms/bathrooms or focus areas like oven/fridge); then ask what day works best for them; and finally ask for the best phone/email or neighborhood to send their official quote. If the client already filled out a form or gave all their info up front, thank them warmly and confirm what they shared without re-asking! And if a client doesn't feel like typing everything out in chat, warmly offer our quick booking link (https://833tidyups.com/booking). STRICT NO-PRICE RULE: Never quote dollar amounts in chat; let them know our owner puts together a personalized quote once we chat through their home.",
+      "You are a warm, friendly, communicative front-desk coordinator for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). CRITICAL CONVERSATION RULE: NEVER interrogate the client or ask for their name, address, phone number, service type, and bedrooms all at once in a single message! Instead, get a real, natural human conversation going by asking only ONE easy question at a time: first chat about what kind of cleaning they need; then in the next message ask about their home size (bedrooms/bathrooms or focus areas like oven/fridge); then ask what day works best for them; and finally ask for the best phone/email or neighborhood to send their official quote. If the client already filled out a form or gave all their info up front, thank them warmly and confirm what they shared without re-asking! And if a client doesn't feel like typing everything out in chat, warmly offer our quick booking link (https://app.tidyupscleaning.com/booking). STRICT NO-PRICE RULE: Never quote dollar amounts in chat; let them know our owner puts together a personalized quote once we chat through their home.",
     pricingRulesSummary:
-      "• CONVERSATIONAL FLOW (ONE STEP AT A TIME — NEVER ASK EVERYTHING AT ONCE):\n  - Step 1: Warmly say hello, be communicative, and ask what kind of cleaning they're thinking about (Move-Out, Deep Clean, or Standard).\n  - Step 2: Chat about their home (how many bedrooms & bathrooms, and if they want extras like inside oven, fridge, or baseboards).\n  - Step 3: Ask when they're hoping to have the cleaning done (date or morning/afternoon).\n  - Step 4: Ask for the best phone number or email (and address/area) to send their custom quote — OR offer our quick link https://833tidyups.com/booking if they prefer a form!\n• IF CLIENT ALREADY SENT ALL INFO (LEAD FORM): Acknowledge their exact details warmly and let them know our owner is preparing their personalized quote.\n• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts or hourly rates in Messenger.",
+      "• CONVERSATIONAL FLOW (ONE STEP AT A TIME — NEVER ASK EVERYTHING AT ONCE):\n  - Step 1: Warmly say hello, be communicative, and ask what kind of cleaning they're thinking about (Move-Out, Deep Clean, or Standard).\n  - Step 2: Chat about their home (how many bedrooms & bathrooms, and if they want extras like inside oven, fridge, or baseboards).\n  - Step 3: Ask when they're hoping to have the cleaning done (date or morning/afternoon).\n  - Step 4: Ask for the best phone number or email (and address/area) to send their custom quote — OR offer our quick link https://app.tidyupscleaning.com/booking if they prefer a form!\n• IF CLIENT ALREADY SENT ALL INFO (LEAD FORM): Acknowledge their exact details warmly and let them know our owner is preparing their personalized quote.\n• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts or hourly rates in Messenger.",
     autoSyncToGoogleSheet: true,
     autoCreateJobberQuote: true,
     notifyOwnerOnNewLead: true,
@@ -749,7 +749,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              AI chats naturally <strong className="text-slate-200">one simple question at a time</strong> (never asking everything at once) or offers your <strong className="text-blue-300">833tidyups.com/booking</strong> link, then prepares a <strong className="text-emerald-300">DRAFT Quote in Jobber + FB Leads Sheet</strong>!
+              AI chats naturally <strong className="text-slate-200">one simple question at a time</strong> (never asking everything at once) or offers your <strong className="text-blue-300">app.tidyupscleaning.com/booking</strong> link, then prepares a <strong className="text-emerald-300">DRAFT Quote in Jobber + FB Leads Sheet</strong>!
             </p>
           </div>
         </div>
@@ -1325,11 +1325,11 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
                           (activeThread.extracted?.customerName || activeThread.customerName || '')
                             .split(' ')[0] || 'there';
                         setMessageInput(
-                          `Hi ${firstName}! 👋 If you'd like to pop your cleaning details into our quick online form anytime, here is our link: https://833tidyups.com/booking — or we can just chat right here!`
+                          `Hi ${firstName}! 👋 If you'd like to pop your cleaning details into our quick online form anytime, here is our link: https://app.tidyupscleaning.com/booking — or we can just chat right here!`
                         );
                       }}
                       className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                      title="Insert a friendly message with your https://833tidyups.com/booking link"
+                      title="Insert a friendly message with your https://app.tidyupscleaning.com/booking link"
                     >
                       <Globe className="w-3 h-3" />
                       <span>Booking Link</span>

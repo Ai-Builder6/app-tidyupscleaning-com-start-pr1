@@ -71,6 +71,7 @@ import {
   saveQuoteToFirestore, 
   saveInvoiceToFirestore, 
   saveVanOverrideToFirestore, 
+  fetchVanOverridesFromFirestore,
   saveBlockedNumberToFirestore,
   deleteBlockedNumberFromFirestore,
   saveScreenedCallToFirestore,
@@ -79,6 +80,7 @@ import {
   syncAllToFirestore,
   FIRESTORE_DATABASE_ID
 } from './services/firestoreSyncService';
+import { saveAndDownloadNumberedProjectBackupZip } from './services/googleDriveBackupService';
 import { onFirebaseAuthStateChanged, getAccessTokenSync } from './lib/firebase';
 import { TeamChatDrawer } from './components/TeamChatDrawer';
 import { RoleSelectorModal } from './components/RoleSelectorModal';
@@ -287,8 +289,6 @@ export function App() {
   const [mapsAuthError, setMapsAuthError] = useState<boolean>(false);
   const [refererErrorUrl, setRefererErrorUrl] = useState<string | null>(null);
   const [quotaExceeded, setQuotaExceeded] = useState<boolean>(false);
-  const [technicians, setTechnicians] = useState<Technician[]>(INITIAL_TECHNICIANS);
-
   // Read locally cached dispatch data immediately so user entries never vanish on refresh
   const storedData = typeof window !== 'undefined' ? (() => {
     try {
@@ -298,6 +298,21 @@ export function App() {
       return null;
     }
   })() : null;
+
+  const [technicians, setTechnicians] = useState<Technician[]>(() => {
+    if (storedData?.technicians && Array.isArray(storedData.technicians) && storedData.technicians.length > 0) {
+      return storedData.technicians.map((t: Technician, idx: number) => {
+        const canonical = INITIAL_TECHNICIANS.find((c) => c.id === t.id) || INITIAL_TECHNICIANS[idx];
+        const hasGenericUnit = !t.vanNumber || /^unit\s+\d+$/i.test(String(t.vanNumber).trim());
+        return {
+          ...t,
+          vanNumber: hasGenericUnit && canonical?.vanNumber ? canonical.vanNumber : t.vanNumber,
+          color: t.color || canonical?.color || '#EC4899',
+        };
+      });
+    }
+    return INITIAL_TECHNICIANS;
+  });
 
   const [tickets, setTickets] = useState<ServiceTicket[]>(() => {
     const raw = (storedData?.tickets && storedData.tickets.length > 0) ? storedData.tickets : INITIAL_TICKETS;
@@ -552,7 +567,12 @@ export function App() {
       !j.clientName?.includes('Lindqvist')
     );
   });
-  const [staffList, setStaffList] = useState<JobberStaffMember[]>(() => CANONICAL_JOBBER_STAFF);
+  const [staffList, setStaffList] = useState<JobberStaffMember[]>(() => {
+    if (storedData?.staffRoster && Array.isArray(storedData.staffRoster) && storedData.staffRoster.length > 0) {
+      return storedData.staffRoster;
+    }
+    return CANONICAL_JOBBER_STAFF;
+  });
   const [clientsList, setClientsList] = useState<ClientRecord[]>(() => {
     const base = (storedData?.clients && storedData.clients.length > 0) ? storedData.clients : INITIAL_CLIENTS;
     const hasDevon = base.some((c: ClientRecord) => c.name?.toLowerCase().includes('devon clark') || (c.phone || '').includes('802-4918'));
@@ -653,12 +673,14 @@ export function App() {
 
   const DEFAULT_FOOTER_BTN_ORDER = [
     'FB_MESSENGER_AI',
+    'VOICE_DICTATION',
     'PASTE_TABLE',
     'MASTER_TABLE',
     'QUICK_MAPS',
     'MANAGEMENT',
     'DISPATCH_MAP',
     'SCHEDULE_SEARCH',
+    'BACKUP_ZIP',
     'SYNC_ALL',
     'BLOCK_SPAM',
   ];
@@ -685,7 +707,7 @@ export function App() {
   const [footerBtnOrder, setFooterBtnOrder] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('tidyups_footer_btn_order_v3');
+        const saved = localStorage.getItem('tidyups_footer_btn_order_v4');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1591,10 +1613,26 @@ export function App() {
     setStaffList(updatedStaff);
     const updatedTechs = updatedStaff.map((s, idx) => staffMemberToTechnician(s, idx));
     setTechnicians(updatedTechs);
-    fetch('/api/store/save', {
+    const overridesPatch: Record<string, any> = {};
+    updatedTechs.forEach((t) => {
+      overridesPatch[t.id] = {
+        id: t.id,
+        name: t.name,
+        vanNumber: t.vanNumber,
+        vanUnit: t.vanNumber,
+        phone: t.phone,
+        email: t.email,
+        color: t.color,
+        homeAddress: t.homeAddress,
+        depotLocation: t.depotLocation,
+        currentLocation: t.currentLocation,
+      };
+      saveVanOverrideToFirestore(t).catch(() => {});
+    });
+    fetch('/api/store/save?project=tidyups', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ staffRoster: updatedStaff }),
+      headers: { 'Content-Type': 'application/json', 'x-project-id': 'tidyups' },
+      body: JSON.stringify({ staffRoster: updatedStaff, cleanerOverrides: overridesPatch }),
     }).catch(() => {});
   }, []);
 
@@ -1729,17 +1767,26 @@ export function App() {
       const next = prev.map((t) => (t.id === updatedTech.id ? updatedTech : t));
       return next;
     });
-    // Also sync to staff roster
+    // Also sync to staff roster (matching by cleaner index, ID, email, or name)
     setStaffList((prev) => {
-      const nextStaff = prev.map((s) => {
-        if (s.name.toLowerCase() === updatedTech.name.toLowerCase() || s.id === updatedTech.id) {
+      const nextStaff = prev.map((s, idx) => {
+        const expectedCleanerId = `cleaner-${idx + 1}`;
+        const isMatch =
+          expectedCleanerId === updatedTech.id ||
+          s.id === updatedTech.id ||
+          (s.email && updatedTech.email && s.email.toLowerCase() === updatedTech.email.toLowerCase()) ||
+          s.name.toLowerCase() === updatedTech.name.toLowerCase();
+        if (isMatch) {
           return {
             ...s,
             name: updatedTech.name,
             phone: updatedTech.phone || s.phone,
-            homeAddress: updatedTech.homeAddress || s.homeAddress,
+            email: updatedTech.email || s.email,
+            homeAddress: updatedTech.homeAddress || updatedTech.depotLocation?.address || s.homeAddress,
             vanUnit: updatedTech.vanNumber || s.vanUnit,
             color: updatedTech.color || s.color,
+            lat: updatedTech.depotLocation?.lat || updatedTech.currentLocation?.lat || s.lat,
+            lng: updatedTech.depotLocation?.lng || updatedTech.currentLocation?.lng || s.lng,
           };
         }
         return s;
@@ -1752,29 +1799,37 @@ export function App() {
       return nextStaff;
     });
 
-    // Save home hub coordinates & address to backend
+    // Save home hub coordinates & address + vanNumber & color to backend
     fetch('/api/technicians/update-hub', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         cleanerId: updatedTech.id,
+        name: updatedTech.name,
+        vanNumber: updatedTech.vanNumber,
+        phone: updatedTech.phone,
+        email: updatedTech.email,
+        color: updatedTech.color,
         homeAddress: updatedTech.homeAddress || updatedTech.depotLocation?.address,
-        hubName: updatedTech.depotLocation?.name,
+        hubName: updatedTech.depotLocation?.name || updatedTech.vanNumber,
         lat: updatedTech.depotLocation?.lat,
         lng: updatedTech.depotLocation?.lng,
       }),
     }).catch((err) => console.warn('Update hub note:', err));
 
     // Save cleanerOverrides to persistent JSON store
-    fetch('/api/store/save', {
+    fetch('/api/store/save?project=tidyups', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-project-id': 'tidyups' },
       body: JSON.stringify({
         cleanerOverrides: {
           [updatedTech.id]: {
+            id: updatedTech.id,
             name: updatedTech.name,
             vanNumber: updatedTech.vanNumber,
+            vanUnit: updatedTech.vanNumber,
             phone: updatedTech.phone,
+            email: updatedTech.email,
             color: updatedTech.color,
             homeAddress: updatedTech.homeAddress,
             depotLocation: updatedTech.depotLocation,
@@ -1788,13 +1843,13 @@ export function App() {
     saveVanOverrideToFirestore(updatedTech).catch(() => {});
   }, []);
 
-  // Load persistent store on mount & handle direct URL deep linking (/book, /support, /quotes, /invoices, /unscheduled, /staff)
+  // Load persistent store on mount & handle direct URL deep linking (/booking, /book, /support, /quotes, /invoices, /unscheduled, /staff)
   useEffect(() => {
     // Check initial path or hash
     if (typeof window !== 'undefined') {
       const path = window.location.pathname.toLowerCase();
       const hash = window.location.hash.toLowerCase();
-      if (path === '/book' || hash === '#book' || path.startsWith('/book/')) {
+      if (path === '/booking' || path.startsWith('/booking/') || hash === '#booking' || path === '/book' || hash === '#book' || path.startsWith('/book/')) {
         setActiveTopView('CUSTOMER_PORTAL');
       } else if (path === '/master' || hash === '#master' || path === '/master-table' || hash === '#master-table') {
         setActiveTopView('MASTER_HUB');
@@ -1890,14 +1945,18 @@ export function App() {
           if (data.staffRoster && data.staffRoster.length > 0) {
             setStaffList(data.staffRoster);
             const baseTechs = data.staffRoster.map((s: JobberStaffMember, idx: number) => staffMemberToTechnician(s, idx));
-            const overrides = data.cleanerOverrides || {};
+            const rawOverrides = data.cleanerOverrides || {};
             const finalTechs = baseTechs.map((t: Technician) => {
-              const ov = overrides[t.id];
+              const ov = Array.isArray(rawOverrides)
+                ? rawOverrides.find((o: any) => o && o.id === t.id)
+                : rawOverrides[t.id];
               const assignedIds = cleanTickets.filter((tk: ServiceTicket) => tk.assignedTechId === t.id).map((tk: ServiceTicket) => tk.id);
               if (!ov) return { ...t, assignedTicketIds: assignedIds };
               return {
                 ...t,
                 ...ov,
+                vanNumber: ov.vanNumber || ov.vanUnit || t.vanNumber,
+                color: ov.color || t.color,
                 assignedTicketIds: assignedIds,
                 depotLocation: { ...t.depotLocation, ...(ov.depotLocation || {}) },
                 currentLocation: { ...t.currentLocation, ...(ov.currentLocation || {}) },
@@ -1905,15 +1964,19 @@ export function App() {
             });
             setTechnicians(finalTechs);
           } else {
-            const overrides = data.cleanerOverrides || {};
+            const rawOverrides = data.cleanerOverrides || {};
             setTechnicians((prev) =>
               prev.map((t) => {
-                const ov = overrides[t.id];
+                const ov = Array.isArray(rawOverrides)
+                  ? rawOverrides.find((o: any) => o && o.id === t.id)
+                  : rawOverrides[t.id];
                 const assignedIds = cleanTickets.filter((tk: ServiceTicket) => tk.assignedTechId === t.id).map((tk: ServiceTicket) => tk.id);
                 if (!ov) return { ...t, assignedTicketIds: assignedIds };
                 return {
                   ...t,
                   ...ov,
+                  vanNumber: ov.vanNumber || ov.vanUnit || t.vanNumber,
+                  color: ov.color || t.color,
                   assignedTicketIds: assignedIds,
                   depotLocation: { ...t.depotLocation, ...(ov.depotLocation || {}) },
                   currentLocation: { ...t.currentLocation, ...(ov.currentLocation || {}) },
@@ -1921,6 +1984,28 @@ export function App() {
               })
             );
           }
+
+          // Also fetch cloud vanOverrides from Firestore so edits made on any device sync immediately
+          fetchVanOverridesFromFirestore()
+            .then((cloudMap) => {
+              if (!cloudMap || Object.keys(cloudMap).length === 0) return;
+              setTechnicians((prev) =>
+                prev.map((t) => {
+                  const cloud = cloudMap[t.id];
+                  if (!cloud) return t;
+                  const hasValidVan = cloud.vanNumber && !/^unit\s+\d+$/i.test(String(cloud.vanNumber).trim());
+                  return {
+                    ...t,
+                    name: cloud.name || t.name,
+                    vanNumber: hasValidVan ? cloud.vanNumber : t.vanNumber,
+                    color: cloud.color || t.color,
+                    phone: cloud.phone || t.phone,
+                    homeAddress: cloud.homeAddress || t.homeAddress,
+                  };
+                })
+              );
+            })
+            .catch(() => {});
           if (data.quotes && data.quotes.length > 0) {
             setQuotesList((prev) => dedupeQuotesList([...data.quotes, ...prev]));
           }
@@ -2056,6 +2141,7 @@ export function App() {
         const payload = {
           tickets,
           technicians,
+          staffRoster: staffList,
           scheduledVisits: scheduledJobsList,
           unscheduledJobs: unscheduledJobsList,
           clients: clientsList,
@@ -2074,7 +2160,7 @@ export function App() {
     } catch (err) {
       console.warn('Auto-save error:', err);
     }
-  }, [activeProjectId, tickets, technicians, scheduledJobsList, unscheduledJobsList, clientsList, quotesList, invoicesList, serviceCatalog, quoCallsList, spamShieldConfig, blockedCallsHistory, leadsList]);
+  }, [activeProjectId, tickets, technicians, staffList, scheduledJobsList, unscheduledJobsList, clientsList, quotesList, invoicesList, serviceCatalog, quoCallsList, spamShieldConfig, blockedCallsHistory, leadsList]);
 
   // Save tickets to local persistent database whenever updated
   const saveStateToStore = useCallback((updatedTickets: ServiceTicket[]) => {
@@ -2591,7 +2677,7 @@ export function App() {
         setMapsAuthError(true);
       }}
     >
-      <div id="cleaning-dispatch-app" className="w-screen h-screen bg-slate-50 text-slate-900 font-sans select-none overflow-x-auto overflow-y-auto">
+      <div id="cleaning-dispatch-app" className="w-screen h-screen bg-slate-50 text-slate-900 font-sans select-none overflow-hidden flex flex-col">
         <div
           className={`${
             deviceOverride === 'IPHONE'
@@ -2602,8 +2688,8 @@ export function App() {
               ? 'min-w-[1380px]'
               : isStandaloneBookingDomain || isCustomerLockPreview || activeTopView === 'CUSTOMER_PORTAL'
               ? 'w-full'
-              : 'w-full xl:min-w-[1380px]'
-          } min-h-full h-full flex flex-col ${
+              : 'w-full'
+          } h-full max-h-screen overflow-hidden flex flex-col ${
             !isZenMode && isStaffAuthenticated && !isStandaloneBookingDomain && !isCustomerLockPreview && deviceOverride !== 'DESKTOP'
               ? 'pb-[58px] xl:pb-0'
               : ''
@@ -3065,6 +3151,8 @@ export function App() {
           </header>
         )}
 
+        {/* Scrollable Active View Container so Global Header & Footer Button Bars stay pinned on ALL pages (including Owner's Hub & Voice Dictation) */}
+        <div className="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden flex flex-col relative">
         {/* Standalone /thank-you Google Ads Conversion Page OR Customer Booking Domain (book.tidyupscleaning.com) */}
         {isThankYouConversionRoute ? (
           <ThankYouConversionPage
@@ -3537,6 +3625,14 @@ export function App() {
               setScheduledJobsSubTab('CALENDAR');
             }}
             onNavigateToIntakes={() => setActiveTopView('INTAKES')}
+            onNavigateToMasterHub={() => {
+              setMasterHubFocusBlock('ALL');
+              setActiveTopView('MASTER_HUB');
+            }}
+            onNavigateToManagement={() => setActiveTopView('MANAGEMENT')}
+            onNavigateToFbMessengerAi={() => setActiveTopView('FB_MESSENGER_AI')}
+            onNavigateToAddressRadar={() => setActiveTopView('ADDRESS_SEARCH')}
+            onNavigateToClients={() => setActiveTopView('CLIENTS')}
             calls={quoCallsList}
             visits={scheduledJobsList}
             clients={clientsList}
@@ -3799,6 +3895,7 @@ export function App() {
           </section>
         </main>
         )}
+        </div>
 
         {/* Global Quick-Link Footer Bar (Hidden on book.tidyupscleaning.com and Customer Lock Preview so customers cannot access staff tools) */}
         {!isZenMode && !isStandaloneBookingDomain && !isCustomerLockPreview && (
@@ -4041,6 +4138,46 @@ export function App() {
                     >
                       <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
                       <span>Management</span>
+                    </button>
+                  );
+                } else if (btnKey === 'VOICE_DICTATION') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffAuthenticated(true);
+                        setActiveTopView('QUICK_QUOTE');
+                      }}
+                      className={`px-3 py-1 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs ${
+                        activeTopView === 'QUICK_QUOTE'
+                          ? 'bg-gradient-to-r from-pink-600 via-fuchsia-600 to-purple-600 text-white ring-2 ring-pink-300'
+                          : 'bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 border border-pink-500/40'
+                      }`}
+                      title="Drag left/right to rearrange • Open Voice Dictation & Quick Quote Intake"
+                    >
+                      <Mic className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                      <span>Voice Dictation</span>
+                    </button>
+                  );
+                } else if (btnKey === 'BACKUP_ZIP') {
+                  btnNode = (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          setSyncAllStatusMessage('📦 Preparing numbered Backup ZIP download...');
+                          const res = await saveAndDownloadNumberedProjectBackupZip();
+                          setSyncAllStatusMessage(`✅ Downloaded ${res.fileName} to your device!`);
+                          setTimeout(() => setSyncAllStatusMessage(null), 5000);
+                        } catch {
+                          setIsProjectBackupModalOpen(true);
+                        }
+                      }}
+                      className="px-3 py-1 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-xs shadow-md flex items-center gap-1.5 border border-cyan-300/50 cursor-pointer transition-all active:scale-95"
+                      title="1-Click Download Numbered Project Backup ZIP directly from app.tidyupscleaning.com (No Google popup needed)"
+                    >
+                      <FileArchive className="w-3.5 h-3.5 text-white shrink-0" />
+                      <span>📦 Backup ZIP (PR6+)</span>
                     </button>
                   );
                 } else if (btnKey === 'BLOCK_SPAM') {

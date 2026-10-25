@@ -629,9 +629,9 @@ app.get("/api/geocode/forward", async (req, res) => {
   }
 });
 
-// Update Cleaner Home Hub Address & Coordinates
+// Update Cleaner Home Hub Address, Coordinates & Van Name
 app.post("/api/technicians/update-hub", (req, res) => {
-  const { cleanerId, homeAddress, hubName, lat, lng } = req.body || {};
+  const { cleanerId, homeAddress, hubName, lat, lng, vanNumber, name, phone, color } = req.body || {};
   if (!cleanerId || !homeAddress) {
     return res.status(400).json({ error: "cleanerId and homeAddress are required" });
   }
@@ -643,29 +643,36 @@ app.post("/api/technicians/update-hub", (req, res) => {
     cleanerOverrides: {},
     scheduledVisits: generateHistoricAndFutureVisits(),
     unscheduledJobs: INITIAL_UNSCHEDULED_JOBS,
+    staffRoster: CANONICAL_JOBBER_STAFF,
     quotes: [],
     invoices: [],
   };
 
   const existingOverrides = current.cleanerOverrides || {};
+  const prevOv = existingOverrides[cleanerId] || {};
   existingOverrides[cleanerId] = {
-    ...(existingOverrides[cleanerId] || {}),
+    ...prevOv,
+    ...(name ? { name } : {}),
+    ...(vanNumber ? { vanNumber } : {}),
+    ...(phone ? { phone } : {}),
+    ...(color ? { color } : {}),
     homeAddress,
     depotLocation: {
-      name: hubName || `${cleanerId} Home Hub`,
+      name: hubName || prevOv.depotLocation?.name || `${name || cleanerId} Home Hub`,
       address: homeAddress,
-      lat: Number(lat) || 53.5412,
-      lng: Number(lng) || -113.4988,
+      lat: Number(lat) || prevOv.depotLocation?.lat || 53.5412,
+      lng: Number(lng) || prevOv.depotLocation?.lng || -113.4988,
     },
     currentLocation: {
       address: homeAddress,
       city: "Edmonton",
-      lat: Number(lat) || 53.5412,
-      lng: Number(lng) || -113.4988,
+      lat: Number(lat) || prevOv.currentLocation?.lat || 53.5412,
+      lng: Number(lng) || prevOv.currentLocation?.lng || -113.4988,
     },
   };
 
   current.cleanerOverrides = existingOverrides;
+  repairAndSyncStoreData(current);
   current.lastSavedAt = new Date().toISOString();
   saveStore(current);
 
@@ -673,6 +680,7 @@ app.post("/api/technicians/update-hub", (req, res) => {
     success: true,
     message: `Home hub for ${cleanerId} updated to ${homeAddress}`,
     cleanerOverrides: current.cleanerOverrides,
+    staffRoster: current.staffRoster,
   });
 });
 
@@ -3802,6 +3810,77 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     }
   }
 
+  // 8. Synchronize staffRoster and cleanerOverrides so Van names & colors are always preserved and never revert to generic "Unit X"
+  if (!Array.isArray(store.staffRoster) || store.staffRoster.length === 0) {
+    store.staffRoster = [...CANONICAL_JOBBER_STAFF];
+    mutated = true;
+  }
+  if (!store.cleanerOverrides || typeof store.cleanerOverrides !== "object") {
+    store.cleanerOverrides = {};
+    mutated = true;
+  }
+
+  for (let idx = 0; idx < store.staffRoster.length; idx++) {
+    const s = store.staffRoster[idx];
+    if (!s) continue;
+    const cleanerId = `cleaner-${idx + 1}`;
+    const canonical = CANONICAL_JOBBER_STAFF[idx] || CANONICAL_JOBBER_STAFF.find(
+      (c) => c.name.toLowerCase() === (s.name || "").toLowerCase()
+    );
+    const ov = store.cleanerOverrides[cleanerId];
+
+    const isGenericUnit = (val?: string) =>
+      !val || /^Unit\s+\d+$/i.test(val.trim()) || /^HQ Ops \d+$/i.test(val.trim()) || /^Executive HQ$/i.test(val.trim());
+
+    // Determine best Van name from override, staffRoster, or canonical
+    let bestVanName = s.vanUnit;
+    if (ov?.vanNumber && !isGenericUnit(ov.vanNumber)) {
+      // If staffRoster has a non-generic custom vanUnit that differs from canonical, keep staffRoster if it was explicitly set, otherwise use ov.vanNumber
+      if (isGenericUnit(s.vanUnit)) {
+        bestVanName = ov.vanNumber;
+      } else {
+        bestVanName = ov.vanNumber || s.vanUnit;
+      }
+    } else if (isGenericUnit(bestVanName)) {
+      bestVanName = canonical?.vanUnit || s.name.replace(/^\d+\s*/, "").split(" ")[0] || s.name;
+    }
+
+    if (s.vanUnit !== bestVanName) {
+      s.vanUnit = bestVanName;
+      mutated = true;
+    }
+
+    const bestColor = ov?.color || s.color || canonical?.color || "#2563EB";
+    const bestAddress = ov?.homeAddress || s.homeAddress || canonical?.homeAddress || "Edmonton, AB";
+    const bestLat = ov?.depotLocation?.lat || s.lat || canonical?.lat || 53.52;
+    const bestLng = ov?.depotLocation?.lng || s.lng || canonical?.lng || -113.5;
+    const cleanFirst = (s.name || "").replace(/^\d+\s*/, "").split(" ")[0] || s.name;
+
+    if (!ov || ov.vanNumber !== bestVanName) {
+      store.cleanerOverrides[cleanerId] = {
+        ...(ov || {}),
+        name: ov?.name || s.name,
+        vanNumber: bestVanName,
+        phone: ov?.phone || s.phone,
+        color: bestColor,
+        homeAddress: bestAddress,
+        depotLocation: ov?.depotLocation || {
+          lat: bestLat,
+          lng: bestLng,
+          name: `${cleanFirst} Home Hub`,
+          address: bestAddress,
+        },
+        currentLocation: ov?.currentLocation || {
+          lat: bestLat,
+          lng: bestLng,
+          address: bestAddress,
+          city: "Edmonton",
+        },
+      };
+      mutated = true;
+    }
+  }
+
   return mutated;
 }
 
@@ -5064,8 +5143,142 @@ app.post("/api/database/sync-delta", async (_req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Persistent Store API Endpoints (Local JSON Database for Dispatch State)
+// Persistent Store API Endpoints & Live Production <-> Dev Sync Bridge
 // ─────────────────────────────────────────────────────────────────────────────
+let lastProdSyncTimestamp = 0;
+
+async function mergeFromLiveProductionIfNeeded(store: AppPersistentStore, projectId: string, req: any): Promise<boolean> {
+  const host = String(req?.headers?.host || "").toLowerCase();
+  const isLiveDomain = host.includes("app.tidyupscleaning.com") || host.includes("833tidyups.com");
+  const isInternalSync = req?.headers?.["x-live-sync"] === "1";
+  if (isLiveDomain || isInternalSync) return false;
+
+  const now = Date.now();
+  if (now - lastProdSyncTimestamp < 12000 && !req?.query?.forceLiveSync) {
+    return false;
+  }
+  lastProdSyncTimestamp = now;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const resp = await fetch(`https://app.tidyupscleaning.com/api/store?project=${projectId}`, {
+      headers: { "x-live-sync": "1" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) return false;
+    const liveData = await resp.json();
+    if (!liveData || typeof liveData !== "object") return false;
+
+    let changed = false;
+
+    // 1. Merge live cleanerOverrides & staffRoster so Van names edited on app.tidyupscleaning.com show up in development!
+    if (liveData.cleanerOverrides && typeof liveData.cleanerOverrides === "object") {
+      store.cleanerOverrides = {
+        ...(store.cleanerOverrides || {}),
+        ...liveData.cleanerOverrides,
+      };
+      changed = true;
+    }
+    if (Array.isArray(liveData.staffRoster) && liveData.staffRoster.length > 0) {
+      const localById = new Map<string, any>();
+      for (const s of store.staffRoster || []) {
+        if (s && s.id) localById.set(s.id, s);
+      }
+      store.staffRoster = liveData.staffRoster.map((ls: any, idx: number) => {
+        const cid = `cleaner-${idx + 1}`;
+        const ov = store.cleanerOverrides?.[cid];
+        const localS = localById.get(ls.id);
+        const isGeneric = (v?: string) => !v || /^Unit\s+\d+$/i.test(v.trim());
+        const bestVan =
+          !isGeneric(ov?.vanNumber)
+            ? ov.vanNumber
+            : !isGeneric(ls.vanUnit)
+            ? ls.vanUnit
+            : !isGeneric(localS?.vanUnit)
+            ? localS.vanUnit
+            : ls.vanUnit;
+        return {
+          ...(localS || {}),
+          ...ls,
+          vanUnit: bestVan,
+        };
+      });
+      changed = true;
+    }
+
+    // 2. Merge live clients by id
+    if (Array.isArray(liveData.clients) && liveData.clients.length > 0) {
+      const cliMap = new Map<string, any>();
+      for (const c of store.clients || []) {
+        if (c && c.id) cliMap.set(String(c.id), c);
+      }
+      for (const lc of liveData.clients) {
+        if (lc && lc.id) {
+          const prev = cliMap.get(String(lc.id));
+          cliMap.set(String(lc.id), prev ? { ...prev, ...lc } : lc);
+        }
+      }
+      if (cliMap.size !== (store.clients || []).length) changed = true;
+      store.clients = Array.from(cliMap.values());
+    }
+
+    // 3. Merge live adLeads by id
+    if (Array.isArray(liveData.adLeads) && liveData.adLeads.length > 0) {
+      const leadMap = new Map<string, any>();
+      for (const l of store.adLeads || []) {
+        if (l && l.id) leadMap.set(String(l.id), l);
+      }
+      for (const ll of liveData.adLeads) {
+        if (ll && ll.id) {
+          const prev = leadMap.get(String(ll.id));
+          leadMap.set(String(ll.id), prev ? { ...prev, ...ll } : ll);
+        }
+      }
+      if (leadMap.size !== (store.adLeads || []).length) changed = true;
+      store.adLeads = Array.from(leadMap.values());
+    }
+
+    // 4. Merge live quotes by id
+    if (Array.isArray(liveData.quotes) && liveData.quotes.length > 0) {
+      const qMap = new Map<string, any>();
+      for (const q of store.quotes || []) {
+        if (q && q.id) qMap.set(String(q.id), q);
+      }
+      for (const lq of liveData.quotes) {
+        if (lq && lq.id) {
+          const prev = qMap.get(String(lq.id));
+          qMap.set(String(lq.id), prev ? { ...prev, ...lq } : lq);
+        }
+      }
+      if (qMap.size !== (store.quotes || []).length) changed = true;
+      store.quotes = Array.from(qMap.values());
+    }
+
+    return changed;
+  } catch {
+    return false;
+  }
+}
+
+function pushStoreUpdateToLiveProduction(payload: Record<string, any>, projectId: string, req: any): void {
+  const host = String(req?.headers?.host || "").toLowerCase();
+  const isLiveDomain = host.includes("app.tidyupscleaning.com") || host.includes("833tidyups.com");
+  const isInternalSync = req?.headers?.["x-live-sync"] === "1";
+  if (isLiveDomain || isInternalSync) return;
+
+  fetch(`https://app.tidyupscleaning.com/api/store/save?project=${projectId}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-project-id": projectId,
+      "x-live-sync": "1",
+    },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+
 app.get("/api/store", async (req, res) => {
   const projectId = getProjectId(req);
   let store = loadStore(projectId);
@@ -5083,6 +5296,10 @@ app.get("/api/store", async (req, res) => {
     };
     changed = true;
   } else {
+    // Pull any live changes saved on app.tidyupscleaning.com into development automatically
+    if (await mergeFromLiveProductionIfNeeded(store, projectId, req)) {
+      changed = true;
+    }
     // If scheduledVisits is empty or null, seed with the 2-month historic and forward schedule
     if (!store.scheduledVisits || store.scheduledVisits.length === 0) {
       store.scheduledVisits = generateHistoricAndFutureVisits();
@@ -5201,16 +5418,53 @@ const handleSaveStore = (req: any, res: any) => {
     return Array.from(byId.values());
   })();
 
+  // Synchronize cleanerOverrides <-> staffRoster when either one is saved!
+  const nextCleanerOverrides = cleanerOverrides
+    ? { ...(current.cleanerOverrides || {}), ...cleanerOverrides }
+    : { ...(current.cleanerOverrides || {}) };
+  let nextStaffRoster = Array.isArray(staffRoster) && staffRoster.length > 0 ? [...staffRoster] : [...(current.staffRoster || CANONICAL_JOBBER_STAFF)];
+
+  if (Array.isArray(staffRoster) && staffRoster.length > 0 && !cleanerOverrides) {
+    // User edited staffRoster (e.g. in StaffRosterModal): propagate vanUnit, name, phone, color, homeAddress to cleanerOverrides
+    nextStaffRoster.forEach((s: any, idx: number) => {
+      const cid = `cleaner-${idx + 1}`;
+      const existingOv = nextCleanerOverrides[cid] || {};
+      nextCleanerOverrides[cid] = {
+        ...existingOv,
+        name: s.name || existingOv.name,
+        vanNumber: s.vanUnit || existingOv.vanNumber || s.name,
+        phone: s.phone || existingOv.phone,
+        color: s.color || existingOv.color,
+        homeAddress: s.homeAddress || existingOv.homeAddress,
+      };
+    });
+  } else if (cleanerOverrides && typeof cleanerOverrides === "object") {
+    // User edited cleanerOverrides (e.g. in VanHubEditModal): propagate vanNumber, name, phone, color, homeAddress to staffRoster
+    nextStaffRoster = nextStaffRoster.map((s: any, idx: number) => {
+      const cid = `cleaner-${idx + 1}`;
+      const ov = cleanerOverrides[cid] || cleanerOverrides[s.id];
+      if (!ov) return s;
+      return {
+        ...s,
+        name: ov.name || s.name,
+        vanUnit: ov.vanNumber || s.vanUnit,
+        phone: ov.phone || s.phone,
+        color: ov.color || s.color,
+        homeAddress: ov.homeAddress || s.homeAddress,
+        lat: ov.depotLocation?.lat || s.lat,
+        lng: ov.depotLocation?.lng || s.lng,
+      };
+    });
+  }
+
   const updated: AppPersistentStore = {
     ...current,
     lastSavedAt: new Date().toISOString(),
     tickets: tickets || current.tickets,
-    cleanerOverrides: cleanerOverrides
-      ? { ...(current.cleanerOverrides || {}), ...cleanerOverrides }
-      : current.cleanerOverrides,
+    cleanerOverrides: nextCleanerOverrides,
     scheduledVisits: mergeWithBaseScheduledVisits(scheduledVisits || current.scheduledVisits),
     unscheduledJobs: unscheduledJobs || current.unscheduledJobs,
-    staffRoster: staffRoster || current.staffRoster,
+    staffRoster: nextStaffRoster,
     clients: clients || current.clients,
     quotes: mergedQuotes,
     invoices: invoices || current.invoices,
@@ -5242,10 +5496,34 @@ const handleSaveStore = (req: any, res: any) => {
 
   repairAndSyncStoreData(updated);
   const ok = saveStore(updated, projectId);
+
+  // Also persist updated staffRoster to data/jobber_staff_roster.csv if staffRoster or cleanerOverrides changed
+  if (staffRoster || cleanerOverrides) {
+    try {
+      const csvPath = path.join(process.cwd(), "data", "jobber_staff_roster.csv");
+      fs.writeFileSync(csvPath, generateStaffCsv(updated.staffRoster || CANONICAL_JOBBER_STAFF), "utf-8");
+    } catch {}
+  }
+
+  // Forward save to live production app so dev and prod stay in sync
+  pushStoreUpdateToLiveProduction(
+    {
+      ...(cleanerOverrides || staffRoster ? { cleanerOverrides: updated.cleanerOverrides, staffRoster: updated.staffRoster } : {}),
+      ...(clients ? { clients: updated.clients } : {}),
+      ...(adLeads ? { adLeads: updated.adLeads } : {}),
+      ...(quotes ? { quotes: updated.quotes } : {}),
+      ...(spamShieldConfig ? { spamShieldConfig: updated.spamShieldConfig } : {}),
+    },
+    projectId,
+    req
+  );
+
   res.json({
     success: ok,
     lastSavedAt: updated.lastSavedAt,
     activeProjectId: projectId,
+    cleanerOverrides: updated.cleanerOverrides,
+    staffRoster: updated.staffRoster,
     spamShieldConfig: updated.spamShieldConfig,
     blockedCallsHistory: updated.blockedCallsHistory,
     workspaceState: updated.workspaceState,
@@ -5314,17 +5592,17 @@ app.get("/api/staff", (_req, res) => {
   res.json({ success: true, count: staff.length, staff, csv });
 });
 
-// POST synchronize staff roster from CSV text
+// POST synchronize staff roster from staff array or CSV text
 app.post("/api/staff/sync-csv", (req, res) => {
   const { csvText, staff } = req.body || {};
   let updatedStaff: JobberStaffMember[] = [];
 
-  if (csvText && typeof csvText === "string") {
-    updatedStaff = parseStaffCsv(csvText);
-    const csvPath = path.join(process.cwd(), "data", "jobber_staff_roster.csv");
-    fs.writeFileSync(csvPath, csvText, "utf-8");
-  } else if (Array.isArray(staff) && staff.length > 0) {
+  if (Array.isArray(staff) && staff.length > 0) {
     updatedStaff = staff;
+    const csvPath = path.join(process.cwd(), "data", "jobber_staff_roster.csv");
+    fs.writeFileSync(csvPath, generateStaffCsv(updatedStaff), "utf-8");
+  } else if (csvText && typeof csvText === "string") {
+    updatedStaff = parseStaffCsv(csvText);
     const csvPath = path.join(process.cwd(), "data", "jobber_staff_roster.csv");
     fs.writeFileSync(csvPath, generateStaffCsv(updatedStaff), "utf-8");
   } else {
@@ -5344,14 +5622,35 @@ app.post("/api/staff/sync-csv", (req, res) => {
   };
 
   current.staffRoster = updatedStaff;
+  const nextOv = { ...(current.cleanerOverrides || {}) };
+  updatedStaff.forEach((s: JobberStaffMember, idx: number) => {
+    const cid = `cleaner-${idx + 1}`;
+    const prev = nextOv[cid] || {};
+    nextOv[cid] = {
+      ...prev,
+      name: s.name || prev.name,
+      vanNumber: s.vanUnit || prev.vanNumber || s.name,
+      phone: s.phone || prev.phone,
+      color: s.color || prev.color,
+      homeAddress: s.homeAddress || prev.homeAddress,
+    };
+  });
+  current.cleanerOverrides = nextOv;
   current.lastSavedAt = new Date().toISOString();
   saveStore(current);
+
+  pushStoreUpdateToLiveProduction(
+    { staffRoster: current.staffRoster, cleanerOverrides: current.cleanerOverrides },
+    "tidyups",
+    req
+  );
 
   res.json({
     success: true,
     message: `Synchronized ${updatedStaff.length} staff members with Jobber spreadsheet!`,
     count: updatedStaff.length,
     staff: updatedStaff,
+    cleanerOverrides: current.cleanerOverrides,
     csv: generateStaffCsv(updatedStaff),
   });
 });
@@ -8645,11 +8944,44 @@ app.get("/api/project/export-zip", async (req, res) => {
     const incrementPr = req.query.increment === "true" || forceRebuild;
     const requestedPr = (req.query.pr as string) || "";
     const isDriveMode = req.query.mode === "drive";
+    const autoGithubBackup = req.query.autoGithubBackup === "true";
     const { buffer, reused, createdAt, filename, prNumber, prLabel } = await getOrCreateWholeProjectZip({
       forceRebuild: forceRebuild || incrementPr || Boolean(requestedPr),
       incrementPr,
       requestedPr,
     });
+
+    // If autoGithubBackup=true, also push the project backup to GitHub in the background using the server's saved token
+    if (autoGithubBackup) {
+      setImmediate(async () => {
+        try {
+          const store = loadStore();
+          const token = resolveServerGithubToken(undefined, store?.githubToken);
+          if (token) {
+            const owner = store?.githubOwner || "Ai-Builder6";
+            const targetRepo = store?.githubRepo || `APP.TIDYUPSCLEANING.COM-START-PR6`;
+            const ghHeaders: Record<string, string> = {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "TidyUps-Cleaning-App-Sync",
+            };
+            const files = collectWorkspaceFilesForGitHub(process.cwd(), "");
+            await pushWorkspaceFilesToGithubRepo({
+              owner,
+              targetRepo,
+              prLabel,
+              commitMessage: `feat(${prLabel}): automatic 1-click app backup (${filename})`,
+              files,
+              ghHeaders,
+            });
+          }
+        } catch (bgErr) {
+          console.warn("Background GitHub backup sync note:", bgErr);
+        }
+      });
+    }
 
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("X-Zip-Cache-Status", reused ? "REUSED_EXISTING" : "CREATED_NEW");
@@ -8666,6 +8998,26 @@ app.get("/api/project/export-zip", async (req, res) => {
     res.send(buffer);
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to generate project zip" });
+  }
+});
+
+app.get("/api/project/download-saved-zip", (req, res) => {
+  try {
+    const requestedFile = path.basename(String(req.query.filename || ""));
+    if (!requestedFile || !requestedFile.endsWith(".zip")) {
+      return res.status(400).json({ error: "Invalid backup filename" });
+    }
+    const targetPath = path.join(CACHED_PROJECT_ZIP_DIR, requestedFile);
+    if (!fs.existsSync(targetPath)) {
+      return res.status(404).json({ error: "Saved backup file not found on server" });
+    }
+    const buf = fs.readFileSync(targetPath);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${requestedFile}"`);
+    res.setHeader("Content-Length", String(buf.length));
+    return res.send(buf);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Failed to download saved backup zip" });
   }
 });
 
@@ -9335,11 +9687,11 @@ const DEFAULT_FB_BOT_SETTINGS = {
     process.env.FB_WEBHOOK_VERIFY_TOKEN ||
     "tidyups_fb_verify_2026",
   greetingTemplate:
-    "Hi {{name}}! 👋 Thanks so much for reaching out to {{page}}! How are you doing today? Tell me a little bit about what kind of cleaning you're looking for — or if you prefer a quick self-serve form anytime, you can also check out https://833tidyups.com/booking!",
+    "Hi {{name}}! 👋 Thanks so much for reaching out to {{page}}! How are you doing today? Tell me a little bit about what kind of cleaning you're looking for — or if you prefer a quick self-serve form anytime, you can also check out https://app.tidyupscleaning.com/booking!",
   systemPrompt:
-    "You are a warm, friendly, communicative front-desk coordinator for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). CRITICAL CONVERSATION RULE: NEVER interrogate the client or ask for their name, address, phone number, service type, and bedrooms all at once in a single message! Instead, get a real, natural human conversation going by asking only ONE easy question at a time: first chat about what kind of cleaning they need; then in the next message ask about their home size (bedrooms/bathrooms or focus areas like oven/fridge); then ask what day works best for them; and finally ask for the best phone/email or neighborhood to send their official quote. If the client already filled out a form or gave all their info up front, thank them warmly and confirm what they shared without re-asking! And if a client doesn't feel like typing everything out in chat, warmly offer our quick booking link (https://833tidyups.com/booking). STRICT NO-PRICE RULE: Never quote dollar amounts in chat; let them know our owner puts together a personalized quote once we chat through their home.",
+    "You are a warm, friendly, communicative front-desk coordinator for TidyUps Cleaning Service Inc in Edmonton & surrounding areas (St. Albert, Sherwood Park, Leduc, Spruce Grove). CRITICAL CONVERSATION RULE: NEVER interrogate the client or ask for their name, address, phone number, service type, and bedrooms all at once in a single message! Instead, get a real, natural human conversation going by asking only ONE easy question at a time: first chat about what kind of cleaning they need; then in the next message ask about their home size (bedrooms/bathrooms or focus areas like oven/fridge); then ask what day works best for them; and finally ask for the best phone/email or neighborhood to send their official quote. If the client already filled out a form or gave all their info up front, thank them warmly and confirm what they shared without re-asking! And if a client doesn't feel like typing everything out in chat, warmly offer our quick booking link (https://app.tidyupscleaning.com/booking). STRICT NO-PRICE RULE: Never quote dollar amounts in chat; let them know our owner puts together a personalized quote once we chat through their home.",
   pricingRulesSummary:
-    "• CONVERSATIONAL FLOW (ONE STEP AT A TIME — NEVER ASK EVERYTHING AT ONCE):\n  - Step 1: Warmly say hello, be communicative, and ask what kind of cleaning they're thinking about (Move-Out, Deep Clean, or Standard).\n  - Step 2: Chat about their home (how many bedrooms & bathrooms, and if they want extras like inside oven, fridge, or baseboards).\n  - Step 3: Ask when they're hoping to have the cleaning done (date or morning/afternoon).\n  - Step 4: Ask for the best phone number or email (and address/area) to send their custom quote — OR offer our quick link https://833tidyups.com/booking if they prefer a form!\n• IF CLIENT ALREADY SENT ALL INFO (LEAD FORM): Acknowledge their exact details warmly and let them know our owner is preparing their personalized quote.\n• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts or hourly rates in Messenger.",
+    "• CONVERSATIONAL FLOW (ONE STEP AT A TIME — NEVER ASK EVERYTHING AT ONCE):\n  - Step 1: Warmly say hello, be communicative, and ask what kind of cleaning they're thinking about (Move-Out, Deep Clean, or Standard).\n  - Step 2: Chat about their home (how many bedrooms & bathrooms, and if they want extras like inside oven, fridge, or baseboards).\n  - Step 3: Ask when they're hoping to have the cleaning done (date or morning/afternoon).\n  - Step 4: Ask for the best phone number or email (and address/area) to send their custom quote — OR offer our quick link https://app.tidyupscleaning.com/booking if they prefer a form!\n• IF CLIENT ALREADY SENT ALL INFO (LEAD FORM): Acknowledge their exact details warmly and let them know our owner is preparing their personalized quote.\n• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts or hourly rates in Messenger.",
   autoSyncToGoogleSheet: true,
   autoCreateJobberQuote: true,
   notifyOwnerOnNewLead: true,
@@ -9537,11 +9889,14 @@ function ensureFbStoreInitialized(store: any) {
     ) {
       store.fbBotSettings.verifyToken = process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK;
     }
-    // Auto-upgrade old price-quoting or multi-question dump prompts to the new Conversational 1-Step-at-a-Time Mode
+    // Auto-upgrade old price-quoting, multi-question dump prompts, or legacy 833tidyups.com/booking links to https://app.tidyupscleaning.com/booking
     if (
       String(store.fbBotSettings.pricingRulesSummary || "").includes("$52.50/hr") ||
       String(store.fbBotSettings.systemPrompt || "").includes("questions the customer asks about pricing") ||
-      String(store.fbBotSettings.systemPrompt || "").includes("Focus on gathering as much helpful information as possible: (1)")
+      String(store.fbBotSettings.systemPrompt || "").includes("Focus on gathering as much helpful information as possible: (1)") ||
+      String(store.fbBotSettings.greetingTemplate || "").includes("833tidyups.com") ||
+      String(store.fbBotSettings.systemPrompt || "").includes("833tidyups.com") ||
+      String(store.fbBotSettings.pricingRulesSummary || "").includes("833tidyups.com")
     ) {
       store.fbBotSettings.greetingTemplate = DEFAULT_FB_BOT_SETTINGS.greetingTemplate;
       store.fbBotSettings.systemPrompt = DEFAULT_FB_BOT_SETTINGS.systemPrompt;
@@ -9912,8 +10267,8 @@ async function runFacebookMessengerAiTurn(
 
   if (!mergedExtracted.serviceType) {
     nextConversationGoal =
-      "Step 1 — Start a warm, friendly conversation! Acknowledge what they said and ask ONLY ONE easy question: what kind of cleaning they are looking for (such as a Move-Out clean, Deep clean, or regular clean). Also casually mention that if they ever prefer a quick self-serve form, they can use https://833tidyups.com/booking — or we can just chat right here! Do NOT ask for their address, phone number, or bedrooms yet.";
-    fallbackReply = `Hi ${firstNameOnly}! 👋 Thanks so much for reaching out to us! We'd love to help get your place sparkling. To get our chat started, what kind of cleaning are you thinking about (like a Move-Out clean, a Deep clean, or a regular clean)? Or if you'd rather use our quick form anytime, here is our link: https://833tidyups.com/booking`;
+      "Step 1 — Start a warm, friendly conversation! Acknowledge what they said and ask ONLY ONE easy question: what kind of cleaning they are looking for (such as a Move-Out clean, Deep clean, or regular clean). Also casually mention that if they ever prefer a quick self-serve form, they can use https://app.tidyupscleaning.com/booking — or we can just chat right here! Do NOT ask for their address, phone number, or bedrooms yet.";
+    fallbackReply = `Hi ${firstNameOnly}! 👋 Thanks so much for reaching out to us! We'd love to help get your place sparkling. To get our chat started, what kind of cleaning are you thinking about (like a Move-Out clean, a Deep clean, or a regular clean)? Or if you'd rather use our quick form anytime, here is our link: https://app.tidyupscleaning.com/booking`;
   } else if (!mergedExtracted.bedrooms || !mergedExtracted.bathrooms) {
     nextConversationGoal = `Step 2 — Be warm and enthusiastic about helping with their ${mergedExtracted.serviceType}! Ask ONLY ONE simple conversational question about their home: roughly how many bedrooms and bathrooms it has (and if there are any extra spots like the oven or fridge they want us to focus on). Do NOT ask for their address or phone number yet.`;
     fallbackReply = `We can definitely help you out with a ${mergedExtracted.serviceType}, ${firstNameOnly}! Tell me a little bit about your place — how many bedrooms and bathrooms does it have, and are there any specific areas (like inside the oven or fridge) you'd like extra attention on?`;
@@ -9921,8 +10276,8 @@ async function runFacebookMessengerAiTurn(
     nextConversationGoal = `Step 3 — Acknowledge their ${mergedExtracted.bedrooms}${mergedExtracted.bathrooms ? `, ${mergedExtracted.bathrooms}` : ""} home warmly! Ask ONLY ONE natural question: when they are hoping to have the cleaning done (what date or morning/afternoon works best for them). Do NOT ask for multiple things at once.`;
     fallbackReply = `Got it — a ${mergedExtracted.bedrooms}${mergedExtracted.bathrooms ? `, ${mergedExtracted.bathrooms}` : ""} ${mergedExtracted.serviceType} sounds great! When were you hoping to have the cleaning done, and do you prefer a morning or afternoon arrival?`;
   } else if (!mergedExtracted.phone && !mergedExtracted.email) {
-    nextConversationGoal = `Step 4 — Confirm that ${mergedExtracted.preferredDate} works great for their ${mergedExtracted.bedrooms} ${mergedExtracted.serviceType}! Now naturally ask what the best phone number or email (and general area/address if they'd like to share) is so our owner can send over their personalized quote — or let them know they can pop it into https://833tidyups.com/booking if they prefer.`;
-    fallbackReply = `Perfect, we have ${mergedExtracted.preferredDate} noted for your ${mergedExtracted.bedrooms} ${mergedExtracted.serviceType}! What is the best phone number or email to send your custom quote to (or feel free to use our quick link https://833tidyups.com/booking if you prefer)?`;
+    nextConversationGoal = `Step 4 — Confirm that ${mergedExtracted.preferredDate} works great for their ${mergedExtracted.bedrooms} ${mergedExtracted.serviceType}! Now naturally ask what the best phone number or email (and general area/address if they'd like to share) is so our owner can send over their personalized quote — or let them know they can pop it into https://app.tidyupscleaning.com/booking if they prefer.`;
+    fallbackReply = `Perfect, we have ${mergedExtracted.preferredDate} noted for your ${mergedExtracted.bedrooms} ${mergedExtracted.serviceType}! What is the best phone number or email to send your custom quote to (or feel free to use our quick link https://app.tidyupscleaning.com/booking if you prefer)?`;
   } else {
     nextConversationGoal = `All key info is collected! The client already shared their details (${mergedExtracted.serviceType}, ${mergedExtracted.bedrooms}, ${mergedExtracted.bathrooms}, ${mergedExtracted.preferredDate}, ${mergedExtracted.phone || mergedExtracted.email}). Do NOT re-ask for info they already gave! Warmly thank ${firstNameOnly}, confirm their specific details (and acknowledge any special note they wrote, like keeping their street address private until hired), let them know our owner is reviewing their custom quote right now, and ask if they have any questions for us in the meantime.`;
     fallbackReply = `Thank you so much for sharing all of those details, ${firstNameOnly}! We have everything noted for your ${mergedExtracted.bedrooms}, ${mergedExtracted.bathrooms} ${mergedExtracted.serviceType} around ${mergedExtracted.preferredDate}${mergedExtracted.timeWindow ? ` (${mergedExtracted.timeWindow})` : ""}. Our owner is putting together your custom quote right now to send over to you — in the meantime, are there any special areas like inside the oven or fridge you want us to make sure we include?`;
@@ -9956,7 +10311,7 @@ Today's Date in Edmonton: ${todayEdmontonStr}.
 
 CRITICAL NON-NEGOTIABLE RULES:
 1. NEVER ask for the client's name, address, phone number, service type, and bedrooms all at once in a single message! Have a warm, natural, human conversation and ask at most ONE simple question at a time.
-2. If the client wants a quick self-serve form instead of chatting back and forth, they can always use https://833tidyups.com/booking.
+2. If the client wants a quick self-serve form instead of chatting back and forth, they can always use https://app.tidyupscleaning.com/booking.
 3. NEVER discuss, quote, estimate, or mention any dollar prices, hourly rates, or totals in chat! Do NOT output "$" or any price numbers.
 
 Owner's Custom Instructions:

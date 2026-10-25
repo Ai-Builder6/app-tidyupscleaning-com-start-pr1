@@ -44,7 +44,7 @@ import {
 import { Technician } from '../types/dispatch';
 import {
   TIDYUPS_DRIVE_FOLDER_NAME,
-  uploadWholeProjectZipToDriveFolder,
+  saveAndDownloadNumberedProjectBackupZip,
   downloadFileFromApiWithoutNavigation,
 } from '../services/googleDriveBackupService';
 
@@ -172,14 +172,14 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
     setIsUploadingProjectDrive(true);
     setDriveBackupNotice(null);
     try {
-      const res = await uploadWholeProjectZipToDriveFolder({ forceRebuild: false });
+      const res = await saveAndDownloadNumberedProjectBackupZip({ autoGithubBackup: true });
       setDriveBackupNotice({
-        text: `✓ Uploaded "${res.file.name}" into Drive folder "${res.folder.name}"!`,
-        folderUrl: res.folder.webViewLink,
+        text: `✓ Saved & Downloaded "${res.filename}" (${res.prLabel}) + Backed up to Server & GitHub!${res.uploadedToDrive ? ` Also uploaded to Drive folder "${TIDYUPS_DRIVE_FOLDER_NAME}"!` : ''}`,
+        folderUrl: res.driveFolderUrl || 'https://github.com/Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR6',
       });
     } catch (err: any) {
       setDriveBackupNotice({
-        text: err?.message || 'Could not upload to Google Drive folder.',
+        text: err?.message || 'Could not build numbered Backup ZIP.',
         isError: true,
       });
     } finally {
@@ -188,7 +188,98 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-slate-900 text-slate-100 min-h-screen p-4 sm:p-6 lg:p-8 space-y-6">
+    <div className="flex-1 min-h-0 overflow-y-auto bg-slate-900 text-slate-100 p-4 sm:p-6 lg:p-8 space-y-5">
+      {/* Top Quick-Jump Button Bar on Owner's Hub */}
+      <div className="rounded-2xl bg-slate-950/90 border border-slate-700/80 px-3 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onNavigateToMasterHub}
+            className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Master Leads &amp; Quotes ({leadsCount + quotesCount})</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateToPasteTable}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <ClipboardPaste className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Paste Table</span>
+          </button>
+          {onNavigateToFbMessengerAi && (
+            <button
+              type="button"
+              onClick={onNavigateToFbMessengerAi}
+              className="px-3 py-1.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/40 text-blue-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <span>FB Messenger AI (3 Pages)</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onNavigateToVoiceIntake}
+            className="px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 border border-pink-400/40 text-pink-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <Mic className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+            <span>Voice Dictation &amp; Intake</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateToDispatchMap}
+            className="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400/40 text-purple-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <Navigation className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+            <span>Dispatch Map</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateToAddressRadar}
+            className="px-3 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <Map className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span>Quick Map Radar</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateToSchedule}
+            className="px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-indigo-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span>Schedule ({scheduledCount})</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateToClients}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <Users className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>Clients ({clientsCount})</span>
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleOneClickDriveUpload}
+            disabled={isUploadingProjectDrive}
+            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+          >
+            <FileArchive className="w-3.5 h-3.5 text-white shrink-0" />
+            <span>{isUploadingProjectDrive ? 'Saving PR# ZIP...' : '📦 Save Backup ZIP (PR6+)'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenSpamShield()}
+            className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-white shrink-0" />
+            <span>Block Spam Caller</span>
+          </button>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="border-b border-slate-800 pb-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
@@ -244,13 +335,13 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
             onClick={handleOneClickDriveUpload}
             disabled={isUploadingProjectDrive}
             className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
-            title={`1-Click: Create or reuse Whole Project & Workflows ZIP and upload straight to "${TIDYUPS_DRIVE_FOLDER_NAME}" in Google Drive`}
+            title="1-Click: Build, Save & Download Numbered PR6+ Backup ZIP directly from app.tidyupscleaning.com (Computer + Server + GitHub)"
           >
-            <CloudUpload className="w-3.5 h-3.5 text-white" />
+            <FileArchive className="w-3.5 h-3.5 text-white" />
             <span>
               {isUploadingProjectDrive
-                ? `Uploading to "${TIDYUPS_DRIVE_FOLDER_NAME}"...`
-                : '1-Click Upload ZIP to Drive'}
+                ? 'Building & Saving PR# Backup ZIP...'
+                : '1-Click Save & Download Backup ZIP'}
             </span>
           </button>
           {onOpenAccessManager && (
@@ -588,7 +679,7 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
                 onClick={onNavigateToCustomerPortal}
                 className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 text-xs font-bold flex items-center justify-between cursor-pointer"
               >
-                <span className="flex items-center gap-2"><Sparkles className="w-3.5 h-3.5 text-fuchsia-400" /> Customer Booking Page (/book)</span>
+                <span className="flex items-center gap-2"><Sparkles className="w-3.5 h-3.5 text-fuchsia-400" /> Customer Booking Page (/booking)</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
               {onOpenPublicBookingModal && (
@@ -756,9 +847,9 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
               </span>
             </div>
             <div>
-              <h3 className="font-black text-lg text-white">Whole Project &amp; Workflows → Google Drive</h3>
+              <h3 className="font-black text-lg text-white">1-Click Numbered Backup ZIP (PR6+)</h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                With 1 click, creates (or reuses) the complete project &amp; workflows <code className="text-emerald-300 font-mono">.zip</code> and uploads it directly into your <strong className="text-emerald-300">{TIDYUPS_DRIVE_FOLDER_NAME}</strong> folder in Google Drive — without downloading to your computer.
+                Works directly on <strong className="text-emerald-300">app.tidyupscleaning.com</strong> with zero popups! Builds &amp; downloads your numbered <code className="text-emerald-300 font-mono">.zip</code> (<code className="text-emerald-300">PR6</code>, <code className="text-emerald-300">PR7</code>...) straight to your computer AND saves a copy to the Server &amp; GitHub.
               </p>
               {driveBackupNotice && (
                 <div
@@ -776,7 +867,7 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
                       rel="noopener noreferrer"
                       className="px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black flex items-center gap-1 shrink-0"
                     >
-                      <span>Open Folder</span>
+                      <span>View Repo / Folder</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
@@ -791,9 +882,9 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
               disabled={isUploadingProjectDrive}
               className="flex-1 py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:opacity-95 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
             >
-              <CloudUpload className="w-3.5 h-3.5" />
+              <FileArchive className="w-3.5 h-3.5" />
               <span>
-                {isUploadingProjectDrive ? 'Uploading to Google Drive...' : '1-Click Upload to Drive Folder'}
+                {isUploadingProjectDrive ? 'Saving & Downloading ZIP...' : '1-Click Save & Download Backup ZIP'}
               </span>
             </button>
             {onOpenProjectBackup && (
@@ -802,7 +893,7 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
                 className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
-                <span>Drive Folder &amp; Workflows</span>
+                <span>All Backups, Drive &amp; GitHub</span>
               </button>
             )}
           </div>

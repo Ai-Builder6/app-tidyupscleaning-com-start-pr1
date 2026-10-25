@@ -793,7 +793,7 @@ export const QuickMapScheduleRadarView: React.FC<QuickMapScheduleRadarViewProps>
     <div
       className={
         mode === 'FULL_PAGE'
-          ? 'flex-1 min-h-screen bg-slate-100 p-3 sm:p-5 lg:p-6 space-y-4 overflow-y-auto'
+          ? 'flex-1 min-h-0 bg-slate-100 p-3 sm:p-5 lg:p-6 space-y-4 overflow-y-auto'
           : 'rounded-3xl bg-white border-2 border-sky-400 shadow-md overflow-hidden flex flex-col'
       }
     >

@@ -17,6 +17,8 @@ function isDedicatedCustomerBookingRoute(): boolean {
   const search = (window.location.search || '').toLowerCase();
   if (
     (window as any).__FORCE_CUSTOMER_BOOKING_ONLY__ ||
+    path === '/booking' ||
+    path.startsWith('/booking/') ||
     path === '/book' ||
     path.startsWith('/book/') ||
     path === '/customer-booking' ||

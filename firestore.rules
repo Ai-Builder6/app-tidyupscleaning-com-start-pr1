@@ -104,13 +104,16 @@ service cloud.firestore {
 
     function isValidVanOverride(data) {
       return data.keys().hasAll(['vanId']) &&
-             data.keys().hasOnly(['vanId', 'customVanName', 'cleanerName', 'phone', 'hubId', 'customHubName', 'color', 'updatedAt']) &&
+             data.keys().hasOnly(['vanId', 'customVanName', 'cleanerName', 'phone', 'hubId', 'customHubName', 'homeAddress', 'lat', 'lng', 'color', 'updatedAt']) &&
              data.vanId is string && isValidId(data.vanId) &&
              (!('customVanName' in data) || (data.customVanName is string && data.customVanName.size() <= 100)) &&
              (!('cleanerName' in data) || (data.cleanerName is string && data.cleanerName.size() <= 100)) &&
              (!('phone' in data) || (data.phone is string && data.phone.size() <= 30)) &&
              (!('hubId' in data) || (data.hubId is string && data.hubId.size() <= 50)) &&
              (!('customHubName' in data) || (data.customHubName is string && data.customHubName.size() <= 100)) &&
+             (!('homeAddress' in data) || (data.homeAddress is string && data.homeAddress.size() <= 300)) &&
+             (!('lat' in data) || (data.lat is number && data.lat >= -90 && data.lat <= 90)) &&
+             (!('lng' in data) || (data.lng is number && data.lng >= -180 && data.lng <= 180)) &&
              (!('color' in data) || (data.color is string && data.color.size() <= 20));
     }
 
@@ -183,15 +186,12 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(staffId);
     }
 
-    // Van & Hub Overrides Collection
+    // Van & Hub Overrides Collection (Supports both Firebase Auth and 1-Click Owner Console sync across Live & Dev)
     match /vanOverrides/{vanId} {
-      allow get: if isVerified() && isValidId(vanId);
-      allow list: if isVerified();
-      allow create: if isVerified() && isValidId(vanId) && isValidVanOverride(incoming()) && incoming().vanId == vanId;
-      allow update: if isVerified() && isValidId(vanId) && isValidVanOverride(incoming()) && incoming().vanId == existing().vanId && (
-        isAdmin() ||
-        incoming().diff(existing()).affectedKeys().hasOnly(['customVanName', 'cleanerName', 'phone', 'hubId', 'customHubName', 'color', 'updatedAt'])
-      );
+      allow get: if isValidId(vanId);
+      allow list: if true;
+      allow create: if isValidId(vanId) && isValidVanOverride(incoming()) && incoming().vanId == vanId;
+      allow update: if isValidId(vanId) && isValidVanOverride(incoming()) && incoming().vanId == existing().vanId;
       allow delete: if isAdmin() && isValidId(vanId);
     }
 

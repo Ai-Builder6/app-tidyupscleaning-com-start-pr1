@@ -268,13 +268,13 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
     }
   };
 
-  // Download a numbered PR# ZIP copy directly to computer
+  // 1-Click Save & Download a numbered PR# ZIP copy directly to computer + Server + GitHub (Zero OAuth popups!)
   const handleDownloadNumberedZip = async () => {
     setIsDownloadingLocal(true);
     setStatusBanner(null);
     try {
       const prQuery = selectedPrOverride ? `&pr=${encodeURIComponent(selectedPrOverride)}` : '';
-      const res = await fetch(`/api/project/export-zip?force=true&increment=true${prQuery}`);
+      const res = await fetch(`/api/project/export-zip?force=true&increment=true&autoGithubBackup=true${prQuery}`);
       if (!res.ok) throw new Error('Failed to build numbered ZIP archive.');
       const filename =
         res.headers.get('X-Zip-Filename') ||
@@ -288,13 +288,13 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 8000);
 
       setSelectedPrOverride('');
       refreshMetadata();
       setStatusBanner({
         type: 'success',
-        message: `✓ Downloaded numbered archive "${filename}" (${prLabel})! Next save will automatically increment to the next PR number.`,
+        message: `✓ Saved & Downloaded numbered archive "${filename}" (${prLabel}) + Backed up to Server & GitHub! Next save will automatically increment to the next PR number.`,
       });
     } catch (err: any) {
       setStatusBanner({
@@ -567,27 +567,30 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                     <button
                       type="button"
                       disabled={isUploadingDrive || isDownloadingLocal || isLoggingIn}
-                      onClick={() => handleOneClickUploadToDriveFolder(true)}
+                      onClick={handleDownloadNumberedZip}
                       className="flex-1 py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-xl cursor-pointer disabled:opacity-50 transition-all active:scale-99"
+                      title={`Build, save & download ${activePrLabel} ZIP directly from app.tidyupscleaning.com (Computer + Server + GitHub — Zero Popups)`}
                     >
-                      <CloudUpload className="w-5 h-5 shrink-0" />
+                      <FileArchive className="w-5 h-5 shrink-0" />
                       <span>
-                        {isUploadingDrive
-                          ? `Building & Uploading ${activePrLabel} ZIP to "${TIDYUPS_DRIVE_FOLDER_NAME}"...`
-                          : `1-Click Save ${activePrLabel} ZIP to Google Drive ("${TIDYUPS_DRIVE_FOLDER_NAME}")`}
+                        {isDownloadingLocal
+                          ? `Building & Downloading ${activePrLabel} Backup ZIP...`
+                          : `1-Click Save & Download ${activePrLabel} Backup ZIP (Computer + Server + GitHub)`}
                       </span>
                     </button>
 
                     <button
                       type="button"
                       disabled={isUploadingDrive || isDownloadingLocal || isLoggingIn}
-                      onClick={handleDownloadNumberedZip}
+                      onClick={() => handleOneClickUploadToDriveFolder(true)}
                       className="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 font-black text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
-                      title={`Build and download ${activePrLabel} ZIP directly to your computer`}
+                      title={`Also upload ${activePrLabel} ZIP into your "${TIDYUPS_DRIVE_FOLDER_NAME}" Google Drive folder`}
                     >
-                      <FileArchive className="w-4 h-4 text-emerald-400" />
+                      <CloudUpload className="w-4 h-4 text-emerald-400" />
                       <span>
-                        {isDownloadingLocal ? `Building ${activePrLabel}...` : `Download ${activePrLabel} ZIP`}
+                        {isUploadingDrive
+                          ? `Uploading ${activePrLabel} to Drive...`
+                          : `Upload ${activePrLabel} to Google Drive`}
                       </span>
                     </button>
                   </div>
@@ -676,6 +679,61 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                   </details>
                 </div>
               </div>
+
+              {/* Saved Numbered PR6+ Backups on Server (Works 100% Without Google Sign-In) */}
+              {savedLocalBackups.length > 0 && (
+                <div className="bg-[#171b29] border border-emerald-500/30 rounded-3xl p-5 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <FileArchive className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <div>
+                        <h4 className="text-sm font-black text-white">
+                          Saved Numbered Backups on Server (<span className="text-emerald-300 font-mono">PR6+</span>)
+                        </h4>
+                        <p className="text-[11px] text-slate-400">
+                          Click any saved archive below to download it immediately to your computer or phone (no Google login needed).
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={refreshMetadata}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                    {savedLocalBackups.map((b) => (
+                      <div
+                        key={b.filename}
+                        className="p-3 rounded-2xl bg-[#10131d] border border-slate-800 flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-bold text-white truncate flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-black shrink-0">
+                              {b.prLabel}
+                            </span>
+                            <span className="truncate font-mono">{b.filename}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            {new Date(b.createdAt).toLocaleString()} • {(b.sizeBytes / 1024).toFixed(0)} KB
+                          </div>
+                        </div>
+                        <a
+                          href={`/api/project/download-saved-zip?filename=${encodeURIComponent(b.filename)}`}
+                          download={b.filename}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1.5 shrink-0"
+                        >
+                          <FileArchive className="w-3.5 h-3.5" />
+                          <span>Download ZIP</span>
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Files Inside "TidyUps Cleaning App Backup Zips" Folder in Google Drive */}
               <div className="bg-[#171b29] border border-slate-800 rounded-3xl p-5 space-y-3">

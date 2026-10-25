@@ -90,6 +90,11 @@ interface QuickQuoteViewProps {
   onNavigateToMap?: () => void;
   onNavigateToSchedule?: () => void;
   onNavigateToIntakes?: () => void;
+  onNavigateToMasterHub?: () => void;
+  onNavigateToFbMessengerAi?: () => void;
+  onNavigateToManagement?: () => void;
+  onNavigateToAddressRadar?: () => void;
+  onNavigateToClients?: () => void;
   calls?: any[];
   visits?: any[];
   clients?: any[];
@@ -174,6 +179,11 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
   onNavigateToMap,
   onNavigateToSchedule,
   onNavigateToIntakes,
+  onNavigateToMasterHub,
+  onNavigateToFbMessengerAi,
+  onNavigateToManagement,
+  onNavigateToAddressRadar,
+  onNavigateToClients,
   calls = [],
   visits = [],
   clients = [],
@@ -2108,7 +2118,105 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
   const secondPinPos = projectMapCoord(secondCoords.lat, secondCoords.lng);
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0d0f17] text-slate-100 font-sans p-4 sm:p-6 lg:p-8 pb-32 space-y-6 animate-fadeIn min-h-[calc(100vh-4rem)]">
+    <div className="flex-1 min-h-0 overflow-y-auto bg-[#0d0f17] text-slate-100 font-sans p-4 sm:p-6 lg:p-8 pb-12 space-y-5 animate-fadeIn">
+      {/* Top Quick-Jump Button Bar on Voice Dictation & Intake */}
+      <div className="rounded-2xl bg-slate-950/90 border border-slate-800 px-3 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {onNavigateToMasterHub && (
+            <button
+              type="button"
+              onClick={onNavigateToMasterHub}
+              className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Master Leads &amp; Quotes</span>
+            </button>
+          )}
+          {onNavigateToFbMessengerAi && (
+            <button
+              type="button"
+              onClick={onNavigateToFbMessengerAi}
+              className="px-3 py-1.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/40 text-blue-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <span>💬</span>
+              <span>FB Messenger AI (3 Pages)</span>
+            </button>
+          )}
+          {onNavigateToMap && (
+            <button
+              type="button"
+              onClick={onNavigateToMap}
+              className="px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 border border-pink-400/40 text-pink-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <Navigation className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+              <span>Dispatch Map</span>
+            </button>
+          )}
+          {onNavigateToAddressRadar && (
+            <button
+              type="button"
+              onClick={onNavigateToAddressRadar}
+              className="px-3 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <Compass className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+              <span>Quick Map &amp; Radar</span>
+            </button>
+          )}
+          {onNavigateToSchedule && (
+            <button
+              type="button"
+              onClick={onNavigateToSchedule}
+              className="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400/40 text-purple-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <Calendar className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <span>Schedule ({visits.length})</span>
+            </button>
+          )}
+          {onNavigateToClients && (
+            <button
+              type="button"
+              onClick={onNavigateToClients}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <Users className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>Clients ({clients.length})</span>
+            </button>
+          )}
+          {onNavigateToManagement && (
+            <button
+              type="button"
+              onClick={onNavigateToManagement}
+              className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-all"
+            >
+              <span>👑</span>
+              <span>Owner Hub</span>
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {onOpenProjectBackup && (
+            <button
+              type="button"
+              onClick={onOpenProjectBackup}
+              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <FileArchive className="w-3.5 h-3.5 text-white shrink-0" />
+              <span>📦 Backup ZIP (PR6+)</span>
+            </button>
+          )}
+          {onOpenSpamShield && (
+            <button
+              type="button"
+              onClick={() => onOpenSpamShield(customerPhone || '')}
+              className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-white shrink-0" />
+              <span>Block Spam Caller</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Top Banner & Header */}
       <div ref={topDictationSectionRef} className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-slate-800/80">
         <div className="flex items-center gap-3">

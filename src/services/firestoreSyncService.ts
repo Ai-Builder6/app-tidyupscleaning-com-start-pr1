@@ -284,9 +284,27 @@ export async function saveInvoiceToFirestore(invoice: JobberInvoice): Promise<vo
 // VAN & HUB OVERRIDES SYNC
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface VanOverrideRecord {
+  vanId: string;
+  customVanName: string;
+  cleanerName: string;
+  phone: string;
+  hubId: string;
+  customHubName: string;
+  homeAddress?: string;
+  lat?: number;
+  lng?: number;
+  color: string;
+  updatedAt: string;
+}
+
 export function toFirestoreVanOverride(tech: Technician): Record<string, unknown> {
   const vanId = sanitizeDocId(tech.id, 'van').substring(0, 50);
-  return stripUndefinedFields({
+  const homeAddr = (tech.homeAddress || tech.depotLocation?.address || '').trim().substring(0, 300);
+  const lat = typeof tech.depotLocation?.lat === 'number' ? tech.depotLocation.lat : tech.currentLocation?.lat;
+  const lng = typeof tech.depotLocation?.lng === 'number' ? tech.depotLocation.lng : tech.currentLocation?.lng;
+
+  const payload: Record<string, unknown> = {
     vanId,
     customVanName: (tech.vanNumber || tech.name).substring(0, 100),
     cleanerName: (tech.name || '').substring(0, 100),
@@ -295,7 +313,11 @@ export function toFirestoreVanOverride(tech: Technician): Record<string, unknown
     customHubName: (tech.depotLocation?.name || `${tech.name} Hub`).substring(0, 100),
     color: (tech.color || '#2563EB').substring(0, 20),
     updatedAt: new Date().toISOString(),
-  });
+  };
+  if (homeAddr) payload.homeAddress = homeAddr;
+  if (typeof lat === 'number' && !isNaN(lat)) payload.lat = lat;
+  if (typeof lng === 'number' && !isNaN(lng)) payload.lng = lng;
+  return stripUndefinedFields(payload);
 }
 
 export async function saveVanOverrideToFirestore(tech: Technician): Promise<void> {
@@ -306,6 +328,36 @@ export async function saveVanOverrideToFirestore(tech: Technician): Promise<void
     await setDoc(docRef, payload, { merge: true });
   } catch (error) {
     console.warn(`Firestore save error on vanOverrides/${vanId}:`, error);
+  }
+}
+
+export async function fetchVanOverridesFromFirestore(): Promise<Record<string, VanOverrideRecord>> {
+  try {
+    const snap = await getDocs(collection(db, 'vanOverrides'));
+    const map: Record<string, VanOverrideRecord> = {};
+    snap.forEach((d) => {
+      const data = d.data() as any;
+      if (data && (data.vanId || d.id)) {
+        const key = String(data.vanId || d.id);
+        map[key] = {
+          vanId: key,
+          customVanName: data.customVanName || '',
+          cleanerName: data.cleanerName || '',
+          phone: data.phone || '',
+          hubId: data.hubId || '',
+          customHubName: data.customHubName || '',
+          homeAddress: data.homeAddress,
+          lat: typeof data.lat === 'number' ? data.lat : undefined,
+          lng: typeof data.lng === 'number' ? data.lng : undefined,
+          color: data.color || '#2563EB',
+          updatedAt: data.updatedAt || new Date().toISOString(),
+        };
+      }
+    });
+    return map;
+  } catch (err) {
+    console.warn('Could not read vanOverrides from Firestore:', err);
+    return {};
   }
 }
 

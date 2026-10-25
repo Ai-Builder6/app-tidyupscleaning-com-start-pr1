@@ -237,7 +237,7 @@ export const ClientsDatabaseView: React.FC<ClientsDatabaseViewProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 min-h-screen p-4 sm:p-6 lg:p-8 space-y-6">
+    <div className="flex-1 min-h-0 overflow-y-auto bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8 space-y-6">
       {/* ─────────────────────────────────────────────────────────────────────────
           Header matching Screenshots 2, 3, 4
          ───────────────────────────────────────────────────────────────────────── */}
