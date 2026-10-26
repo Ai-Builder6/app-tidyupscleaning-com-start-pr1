@@ -3205,7 +3205,7 @@ export function App() {
             onBackToBookingForm={() => {
               setIsThankYouConversionRoute(false);
               try {
-                window.history.pushState({}, '', '/book');
+                window.history.pushState({}, '', '/booking');
               } catch {}
             }}
             onReturnToStaffConsole={() => {
@@ -3234,6 +3234,7 @@ export function App() {
               if (Array.isArray(reconnected.quotes)) handleQuotesUpdated(reconnected.quotes);
             }}
             onBookingSubmitted={(ticket, fullPayload) => {
+              setIsThankYouConversionRoute(true);
               setTickets((prev) => [ticket, ...prev]);
               saveStateToStore([ticket, ...tickets]);
               if (fullPayload?.lead) {

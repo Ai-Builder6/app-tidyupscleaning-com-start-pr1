@@ -1500,6 +1500,21 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     {copiedField === 'google_key' ? 'Copied Key!' : 'Copy Key'}
                   </button>
                 </div>
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
+                  <span className="text-[10px] text-slate-400 truncate">
+                    Thank-You URL:{' '}
+                    <code className="text-pink-300 font-mono font-bold">
+                      https://app.tidyupscleaning.com/thank-you
+                    </code>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyHelper('thank_you_url', 'https://app.tidyupscleaning.com/thank-you')}
+                    className="text-[10px] text-pink-400 hover:underline font-bold cursor-pointer shrink-0"
+                  >
+                    {copiedField === 'thank_you_url' ? 'Copied /thank-you!' : 'Copy /thank-you'}
+                  </button>
+                </div>
               </div>
 
               {/* 4. 20-Column Lead Schema */}

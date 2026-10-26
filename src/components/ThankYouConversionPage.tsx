@@ -243,10 +243,14 @@ export const ThankYouConversionPage: React.FC<ThankYouConversionPageProps> = ({
                 : 'Thank you for completing the form!'}
             </h1>
             <p className="text-base sm:text-xl font-extrabold text-pink-400 max-w-lg mx-auto">
-              A team member will be in contact with you shortly.
+              A team member will be in touch shortly.
             </p>
             <p className="text-xs sm:text-sm text-zinc-300 max-w-md mx-auto leading-relaxed">
-              We have received your home cleaning details in our dispatch system and prepared your quote review. One of our local Edmonton team members will reach out to confirm your appointment and answer any questions.
+              Thank you for completing the form — a team member will be in touch shortly to confirm your cleaning details and arrival window. Need immediate assistance? Call us anytime at{' '}
+              <a href="tel:+18338439877" className="text-emerald-400 font-black hover:underline">
+                1-833-843-9877 (833-TIDYUPS)
+              </a>
+              .
             </p>
           </div>
 
@@ -367,7 +371,7 @@ export const ThankYouConversionPage: React.FC<ThankYouConversionPageProps> = ({
                 if (onBackToBookingForm) {
                   onBackToBookingForm();
                 } else {
-                  window.location.href = '/book';
+                  window.location.href = '/booking';
                 }
               }}
               className="px-5 py-3 rounded-2xl bg-gradient-to-r from-pink-600 to-red-600 hover:from-pink-500 hover:to-red-500 text-white text-xs sm:text-sm font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer"
