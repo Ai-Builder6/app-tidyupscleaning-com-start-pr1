@@ -1468,26 +1468,38 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 </p>
               </div>
 
-              {/* 3. Direct Inbound Webhook URL */}
+              {/* 3. Direct Inbound Webhook URL & Google Ads Key */}
               <div className="p-3 rounded-xl bg-[#131724] border border-slate-800 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-400">
-                    3. Direct FB / Google Ads Webhook URL
+                    3. Direct FB / Google Ads Webhook URL &amp; Key
                   </span>
                   <button
                     type="button"
                     onClick={() => handleCopyHelper('webhook', webhookUrl)}
                     className="text-[11px] text-blue-400 hover:underline font-bold cursor-pointer"
                   >
-                    {copiedField === 'webhook' ? 'Copied!' : 'Copy Webhook'}
+                    {copiedField === 'webhook' ? 'Copied URL!' : 'Copy Webhook URL'}
                   </button>
                 </div>
                 <div className="font-mono text-[11px] text-blue-300 bg-[#0b0e17] px-2.5 py-1.5 rounded border border-slate-800 truncate">
                   {webhookUrl}
                 </div>
-                <p className="text-[10px] text-slate-400">
-                  Supports Meta hub.challenge GET verification &amp; Google Ads POST.
-                </p>
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <span className="text-[10px] text-slate-400">
+                    Google Ads Key:{' '}
+                    <code className="text-emerald-300 font-mono font-bold bg-[#0b0e17] px-1.5 py-0.5 rounded border border-slate-800">
+                      tidyups-yeg-leads-2026
+                    </code>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyHelper('google_key', 'tidyups-yeg-leads-2026')}
+                    className="text-[10px] text-emerald-400 hover:underline font-bold cursor-pointer shrink-0"
+                  >
+                    {copiedField === 'google_key' ? 'Copied Key!' : 'Copy Key'}
+                  </button>
+                </div>
               </div>
 
               {/* 4. 20-Column Lead Schema */}

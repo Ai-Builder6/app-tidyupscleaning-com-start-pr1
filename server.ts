@@ -6636,6 +6636,8 @@ app.post("/api/google-sheets/config", (req, res) => {
 
 // GET /api/leads/webhook (and /api/webhooks/facebook, /api/webhooks/google):
 // Supports Facebook / Meta Lead Ads hub.challenge verification AND browser health check
+const GOOGLE_ADS_WEBHOOK_KEY = process.env.GOOGLE_ADS_WEBHOOK_KEY || "tidyups-yeg-leads-2026";
+
 const handleLeadWebhookVerification = (req: any, res: any) => {
   const mode = req.query["hub.mode"];
   const challenge = req.query["hub.challenge"];
@@ -6645,6 +6647,8 @@ const handleLeadWebhookVerification = (req: any, res: any) => {
   res.status(200).json({
     status: "active",
     service: "833 TidyUps Lead & Customer Booking Webhook",
+    webhookUrl: "https://app.tidyupscleaning.com/api/leads/webhook",
+    googleAdsKey: GOOGLE_ADS_WEBHOOK_KEY,
     endpoints: [
       "https://app.tidyupscleaning.com/api/leads/webhook",
       "https://book.tidyupscleaning.com/api/leads/webhook",
@@ -6667,6 +6671,17 @@ app.get("/api/leads/google", handleLeadWebhookVerification);
 const handleInboundLeadWebhook = (forcedPlatform?: "Facebook Leads" | "Google Leads") => (req: any, res: any) => {
   const projectId = getProjectId(req);
   const body = req.body || {};
+
+  // Support Google Ads Lead Form Extension "Send test data" verification ping (returns 200 OK without inserting fake test leads)
+  if (body.is_test === true || body.is_test === "true") {
+    return res.status(200).json({
+      success: true,
+      isTestVerification: true,
+      googleAdsKeyVerified: true,
+      receivedKey: body.google_key || GOOGLE_ADS_WEBHOOK_KEY,
+      message: "✓ Google Ads Lead Form Webhook test verified (200 OK). Fake test payload ignored to keep Edmonton leads clean.",
+    });
+  }
 
   // Support Google Ads Lead Form Extension format (user_column_data array), Meta Leadgen nested changes, as well as Zapier / Make flat JSON
   const colMap: Record<string, string> = {};
