@@ -14503,6 +14503,19 @@ function evaluateSpamCallRule(fromRaw: string, config: any): { isBlocked: boolea
 
   const raw = (fromRaw || "").trim();
   const digits = raw.replace(/\D/g, "");
+  const normalizedFromDigits = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+
+  // 0. Check Explicitly Unblocked / Whitelisted Numbers first
+  if (Array.isArray(config.unblockedNumbers) && normalizedFromDigits.length >= 7) {
+    const isExplicitlyUnblocked = config.unblockedNumbers.some((uNum: string) => {
+      const uDigits = String(uNum || "").replace(/\D/g, "");
+      const normUDigits = uDigits.length === 11 && uDigits.startsWith("1") ? uDigits.slice(1) : uDigits;
+      return normUDigits === normalizedFromDigits || String(uNum).trim() === raw;
+    });
+    if (isExplicitlyUnblocked) {
+      return { isBlocked: false };
+    }
+  }
 
   // Detect Country Code
   let detectedCountry = "+1";
@@ -14536,7 +14549,6 @@ function evaluateSpamCallRule(fromRaw: string, config: any): { isBlocked: boolea
   }
 
   // 3. Exact Blacklisted Numbers
-  const normalizedFromDigits = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
   const isBlacklisted = (config.blockedNumbers || []).some((bNum: string) => {
     const bDigits = bNum.replace(/\D/g, "");
     const normalizedBDigits = bDigits.length === 11 && bDigits.startsWith("1") ? bDigits.slice(1) : bDigits;
@@ -14800,12 +14812,24 @@ app.post("/api/twilio/unblock-number", (req, res) => {
       if (!(store.spamShieldConfig as any).unblockedNumbers.includes(formattedE164)) {
         (store.spamShieldConfig as any).unblockedNumbers.push(formattedE164);
       }
+      if (Array.isArray(store.blockedCallsHistory)) {
+        store.blockedCallsHistory = store.blockedCallsHistory.filter(
+          (h: any) => normalizePhoneDigits(h.callerNumber) !== targetDigits && h.callerNumber !== number
+        );
+      }
+      if (Array.isArray(store.recentInboundCalls)) {
+        store.recentInboundCalls = store.recentInboundCalls.map((c: any) =>
+          normalizePhoneDigits(c.callerNumber) === targetDigits ? { ...c, status: "ALLOWED", reason: "Manually unblocked" } : c
+        );
+      }
       if (Array.isArray(store.quoCallLogs)) {
         store.quoCallLogs = store.quoCallLogs.map((c: any) => {
           if (normalizePhoneDigits(c.callerPhone) === targetDigits) {
             return {
               ...c,
-              status: c.hasCleaningIntent ? "CLEANING_LEAD" : "SCREENED_CALL",
+              status: c.hasCleaningIntent ? "CLEANING_LEAD" : "POTENTIAL_JOB",
+              leadVerdict: c.hasCleaningIntent ? "GOOD_LEAD" : "POTENTIAL_JOB",
+              leadVerdictLabel: c.hasCleaningIntent ? "✅ Good Lead — Potential Job" : "🟡 Potential Job — Follow-Up",
               isBlocked: false,
               manuallyBlocked: false,
             };
@@ -14833,6 +14857,8 @@ app.post("/api/twilio/unblock-number", (req, res) => {
     success: true,
     message: `Unblocked ${number} and updated database.`,
     config: store.spamShieldConfig,
+    history: store.blockedCallsHistory || [],
+    recentInboundCalls: store.recentInboundCalls || [],
     calls: store.quoCallLogs || [],
   });
 });

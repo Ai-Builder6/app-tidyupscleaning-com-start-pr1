@@ -486,12 +486,43 @@ export async function deleteBlockedNumberRuleFromFirestore(
   ruleType: 'number' | 'prefix' | 'areacode' | 'country' = 'number'
 ): Promise<void> {
   if (!pattern || !pattern.trim()) return;
-  const docId = sanitizeDocId(`blk_${ruleType}_${pattern.trim()}`, 'blk');
-  try {
-    const docRef = doc(db, 'blockedNumbers', docId);
-    await deleteDoc(docRef);
-  } catch (error) {
-    console.warn(`Firestore delete error on blockedNumbers/${docId}:`, error);
+  const raw = pattern.trim();
+  const digits = raw.replace(/\D/g, '');
+  const norm10 = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+
+  const candidateIds = new Set<string>([sanitizeDocId(`blk_${ruleType}_${raw}`, 'blk')]);
+  if (ruleType === 'number' && norm10.length === 10) {
+    candidateIds.add(sanitizeDocId(`blk_number_${norm10}`, 'blk'));
+    candidateIds.add(sanitizeDocId(`blk_number_+1${norm10}`, 'blk'));
+    candidateIds.add(sanitizeDocId(`blk_number_1${norm10}`, 'blk'));
+    candidateIds.add(sanitizeDocId(`blk_number_(${norm10.slice(0, 3)}) ${norm10.slice(3, 6)}-${norm10.slice(6)}`, 'blk'));
+  }
+
+  for (const id of candidateIds) {
+    try {
+      await deleteDoc(doc(db, 'blockedNumbers', id));
+    } catch {
+      // ignore
+    }
+  }
+
+  // Also scan blockedNumbers collection for any document matching the 10-digit number
+  if (ruleType === 'number' && norm10.length >= 7) {
+    try {
+      const snap = await getDocs(collection(db, 'blockedNumbers'));
+      const deletions: Promise<void>[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as any;
+        const pDigits = String(data?.pattern || '').replace(/\D/g, '');
+        const pNorm = pDigits.length === 11 && pDigits.startsWith('1') ? pDigits.slice(1) : pDigits;
+        if (pNorm && pNorm === norm10) {
+          deletions.push(deleteDoc(doc(db, 'blockedNumbers', d.id)).catch(() => {}));
+        }
+      });
+      if (deletions.length > 0) await Promise.all(deletions);
+    } catch {
+      // ignore
+    }
   }
 }
 

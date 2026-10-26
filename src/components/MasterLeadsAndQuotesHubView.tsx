@@ -316,6 +316,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
   const [expandedCallCardTranscriptId, setExpandedCallCardTranscriptId] = useState<string | null>(null);
   const [showScreenedCallsList, setShowScreenedCallsList] = useState<boolean>(true);
   const [screenedCallFilter, setScreenedCallFilter] = useState<'ALL' | 'CLEANING' | 'POTENTIAL' | 'BLOCKED'>('ALL');
+  const [callEvaluatorSearch, setCallEvaluatorSearch] = useState<string>('');
   const [togglingCallId, setTogglingCallId] = useState<string | null>(null);
   const [sheetUrl, setSheetUrl] = useState(`https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`);
   const [spreadsheetId, setSpreadsheetId] = useState(LEADS_SPREADSHEET_ID);
@@ -2040,6 +2041,51 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                   </button>
                 ))}
 
+                <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-700 rounded-xl px-2.5 py-1">
+                  <Search size={13} className="text-emerald-400 shrink-0" />
+                  <input
+                    type="text"
+                    value={callEvaluatorSearch}
+                    onChange={(e) => setCallEvaluatorSearch(e.target.value)}
+                    placeholder="Find & unblock phone # (e.g. 7807603033)..."
+                    className="bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none w-48 sm:w-56 font-mono"
+                  />
+                  {callEvaluatorSearch.trim() && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const raw = callEvaluatorSearch.trim();
+                          const digits = raw.replace(/\D/g, '');
+                          const norm10 = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+                          if (norm10.length >= 7 && onToggleBlockScreenedCall) {
+                            setTogglingCallId('search-unblock');
+                            await onToggleBlockScreenedCall({
+                              callerPhone: `+1${norm10}`,
+                              callerName: 'Searched Number',
+                              block: false,
+                            });
+                            setTogglingCallId(null);
+                            setLocalBanner(`✅ Unblocked +1${norm10} across Spam Shield & Call Evaluator`);
+                          }
+                        }}
+                        disabled={togglingCallId === 'search-unblock'}
+                        className="px-2 py-0.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black cursor-pointer shrink-0"
+                        title="Immediately unblock this searched number across Spam Shield & Call Evaluator"
+                      >
+                        ✅ Unblock
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCallEvaluatorSearch('')}
+                        className="text-slate-400 hover:text-white text-[10px] font-bold px-1 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </>
+                  )}
+                </div>
+
                 <button
                   type="button"
                   onClick={() => onOpenSpamShield()}
@@ -2062,6 +2108,20 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 max-h-[520px] overflow-y-auto pr-1 pt-1">
                 {calls
                   .filter((call) => {
+                    if (callEvaluatorSearch.trim()) {
+                      const q = callEvaluatorSearch.trim().toLowerCase();
+                      const qDigits = q.replace(/\D/g, '');
+                      const qNorm = qDigits.length === 11 && qDigits.startsWith('1') ? qDigits.slice(1) : qDigits;
+                      const cDigits = String(call.callerPhone || '').replace(/\D/g, '');
+                      const cNorm = cDigits.length === 11 && cDigits.startsWith('1') ? cDigits.slice(1) : cDigits;
+                      const matchesText =
+                        String(call.callerPhone || '').toLowerCase().includes(q) ||
+                        String(call.callerName || '').toLowerCase().includes(q) ||
+                        String(call.summary || '').toLowerCase().includes(q);
+                      const matchesDigits =
+                        Boolean(qNorm) && (cDigits.includes(qDigits) || cNorm.includes(qNorm) || qNorm.includes(cNorm));
+                      if (!matchesText && !matchesDigits) return false;
+                    }
                     const blocked = isCallerPhoneBlocked(call.callerPhone, call) || call.leadVerdict === 'BAD_LEAD';
                     const isGoodOrPotential =
                       !blocked &&
@@ -2071,9 +2131,11 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                         call.leadVerdict === 'POTENTIAL_JOB');
                     const isPotentialFollowUp =
                       !blocked && (call.leadVerdict === 'POTENTIAL_JOB' || (!call.hasCleaningIntent && call.isPotentialOrGoodLead));
-                    if (screenedCallFilter === 'BLOCKED') return blocked;
-                    if (screenedCallFilter === 'CLEANING') return isGoodOrPotential;
-                    if (screenedCallFilter === 'POTENTIAL') return isPotentialFollowUp;
+                    if (!callEvaluatorSearch.trim()) {
+                      if (screenedCallFilter === 'BLOCKED') return blocked;
+                      if (screenedCallFilter === 'CLEANING') return isGoodOrPotential;
+                      if (screenedCallFilter === 'POTENTIAL') return isPotentialFollowUp;
+                    }
                     return true;
                   })
                   .slice(0, 60)

@@ -30,6 +30,7 @@ import {
   saveBlockedNumberToFirestore,
   deleteBlockedNumberFromFirestore,
   saveScreenedCallToFirestore,
+  fetchBlockedNumberRulesFromFirestore,
 } from '../services/firestoreSyncService';
 
 interface SpamShieldViewProps {
@@ -114,14 +115,40 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
     ? `${window.location.origin}/api/twilio/voice`
     : 'https://app.tidyupscleaning.com/api/twilio/voice';
 
-  // Fetch current config & history
+  // Fetch current config & history + merge Firestore blocked numbers
   const fetchSpamShield = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/twilio/spam-shield?project=${projectId}`);
+      const [res, firestoreRules] = await Promise.all([
+        fetch(`/api/twilio/spam-shield?project=${projectId}`),
+        fetchBlockedNumberRulesFromFirestore().catch(() => []),
+      ]);
       const data = await res.json();
       if (data.success && data.config) {
-        setConfig(data.config);
+        const unblockedSet = new Set(
+          ((data.config as any).unblockedNumbers || []).map((u: string) => {
+            const d = String(u || '').replace(/\D/g, '');
+            return d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+          })
+        );
+        const mergedNumbers = [...(data.config.blockedNumbers || [])];
+        const existingNorms = new Set(
+          mergedNumbers.map((n: string) => {
+            const d = String(n || '').replace(/\D/g, '');
+            return d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+          })
+        );
+        for (const r of firestoreRules || []) {
+          if (r.ruleType === 'number' && r.pattern && r.isActive !== false) {
+            const d = String(r.pattern).replace(/\D/g, '');
+            const norm = d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+            if (norm && !unblockedSet.has(norm) && !existingNorms.has(norm)) {
+              mergedNumbers.push(r.pattern);
+              existingNorms.add(norm);
+            }
+          }
+        }
+        setConfig({ ...data.config, blockedNumbers: mergedNumbers });
         if (data.config.forwardDestinationNumber) {
           setForwardNumberInput(data.config.forwardDestinationNumber);
         }
@@ -170,47 +197,134 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
   const quickDetectedAreaCode = extractAreaCode(quickBlockInput);
   const quickDigitsCount = (quickBlockInput || '').replace(/\D/g, '').length;
 
-  // Evaluate live lookup status for whatever number is typed in quickBlockInput
+  // Evaluate live lookup status & find all matching blocked numbers/calls for whatever is typed in quickBlockInput
   const evaluateLookupStatus = (rawQuery: string) => {
-    const cleanDigits = normalizePhone10(rawQuery);
-    if (cleanDigits.length < 3) return null;
+    const trimmed = String(rawQuery || '').trim();
+    const cleanDigits = normalizePhone10(trimmed);
+    if (cleanDigits.length < 2 && trimmed.length < 2) return null;
 
     const exactMatchedEntry = (config.blockedNumbers || []).find((b) => {
       const bNorm = normalizePhone10(b);
-      return Boolean(cleanDigits && bNorm === cleanDigits) || String(b).trim() === rawQuery.trim();
+      return (cleanDigits.length >= 7 && bNorm === cleanDigits) || String(b).trim() === trimmed;
     });
 
     const partialMatchedEntries = (config.blockedNumbers || []).filter((b) => {
       const bNorm = normalizePhone10(b);
-      return bNorm.includes(cleanDigits) || String(b).toLowerCase().includes(rawQuery.trim().toLowerCase());
+      return (
+        (cleanDigits && bNorm.includes(cleanDigits)) ||
+        String(b).toLowerCase().includes(trimmed.toLowerCase())
+      );
     });
 
     const matchedPrefix = (config.blockedPrefixes || []).find((p) => {
       const pDigits = String(p || '').replace(/\*/g, '').replace(/\D/g, '');
       const pNorm = pDigits.length >= 4 && pDigits.startsWith('1') ? pDigits.slice(1) : pDigits;
-      return Boolean(pNorm && cleanDigits.startsWith(pNorm));
+      return Boolean(cleanDigits && pNorm && (cleanDigits.startsWith(pNorm) || pNorm.includes(cleanDigits)));
     });
 
-    const matchedScreened = quoScreenedCalls.find((c) => normalizePhone10(c.callerPhone) === cleanDigits);
-    const matchedHistory = history.find((h) => normalizePhone10(h.callerNumber) === cleanDigits);
+    const matchedScreenedList = quoScreenedCalls.filter((c) => {
+      const cNorm = normalizePhone10(c.callerPhone);
+      return (
+        (cleanDigits && cNorm.includes(cleanDigits)) ||
+        String(c.callerName || '').toLowerCase().includes(trimmed.toLowerCase()) ||
+        String(c.callerPhone || '').toLowerCase().includes(trimmed.toLowerCase())
+      );
+    });
+
+    const matchedHistoryList = history.filter((h) => {
+      const hNorm = normalizePhone10(h.callerNumber);
+      return (
+        (cleanDigits && hNorm.includes(cleanDigits)) ||
+        String(h.callerName || '').toLowerCase().includes(trimmed.toLowerCase()) ||
+        String(h.callerNumber || '').toLowerCase().includes(trimmed.toLowerCase())
+      );
+    });
+
+    const matchedScreened = matchedScreenedList.find((c) => normalizePhone10(c.callerPhone) === cleanDigits) || matchedScreenedList[0];
+    const matchedHistory = matchedHistoryList.find((h) => normalizePhone10(h.callerNumber) === cleanDigits) || matchedHistoryList[0];
 
     const isScreenedBlocked = Boolean(
-      matchedScreened && (matchedScreened.isBlocked || matchedScreened.status === 'SOLICITOR_BLOCKED')
+      matchedScreened &&
+        normalizePhone10(matchedScreened.callerPhone) === cleanDigits &&
+        (matchedScreened.isBlocked || matchedScreened.status === 'SOLICITOR_BLOCKED')
     );
 
-    const isBlocked = Boolean(exactMatchedEntry || matchedPrefix || isScreenedBlocked);
+    const isWhitelisted = Boolean(
+      cleanDigits.length >= 7 &&
+        ((config as any).unblockedNumbers || []).some((u: string) => normalizePhone10(u) === cleanDigits)
+    );
+
+    const isBlocked = Boolean(!isWhitelisted && (exactMatchedEntry || matchedPrefix || isScreenedBlocked));
+
+    // Build unified deduplicated list of all matching numbers across blockedNumbers, screenedCalls, and history so user can find & unblock any of them in 1 click
+    const combinedMatches: Array<{
+      phone: string;
+      norm10: string;
+      pretty: string;
+      label: string;
+      source: string;
+      isBlocked: boolean;
+    }> = [];
+    const seenNorms = new Set<string>();
+
+    for (const b of partialMatchedEntries) {
+      const n10 = normalizePhone10(b) || b;
+      if (seenNorms.has(n10)) continue;
+      seenNorms.add(n10);
+      const hist = history.find((h) => normalizePhone10(h.callerNumber) === n10);
+      const scr = quoScreenedCalls.find((c) => normalizePhone10(c.callerPhone) === n10);
+      combinedMatches.push({
+        phone: b,
+        norm10: n10,
+        pretty: formatPhonePretty(b),
+        label: scr?.callerName || hist?.reason || 'Saved in Blocked Exact Numbers',
+        source: 'Blocked List',
+        isBlocked: true,
+      });
+    }
+
+    for (const c of matchedScreenedList) {
+      const n10 = normalizePhone10(c.callerPhone) || c.callerPhone;
+      if (!n10 || seenNorms.has(n10)) continue;
+      seenNorms.add(n10);
+      const cBlocked = Boolean(c.isBlocked || c.status === 'SOLICITOR_BLOCKED');
+      combinedMatches.push({
+        phone: c.callerPhone,
+        norm10: n10,
+        pretty: formatPhonePretty(c.callerPhone),
+        label: `${c.callerName ? `${c.callerName} — ` : ''}${c.summary || c.blockedReason || 'Sonia AI Screened Call'}`,
+        source: 'Sonia AI Call List',
+        isBlocked: cBlocked,
+      });
+    }
+
+    for (const h of matchedHistoryList) {
+      const n10 = normalizePhone10(h.callerNumber) || h.callerNumber;
+      if (!n10 || seenNorms.has(n10)) continue;
+      seenNorms.add(n10);
+      combinedMatches.push({
+        phone: h.callerNumber,
+        norm10: n10,
+        pretty: formatPhonePretty(h.callerNumber),
+        label: h.reason || 'Intercepted in Blocked Calls History',
+        source: 'Blocked History Log',
+        isBlocked: true,
+      });
+    }
 
     return {
-      rawQuery: rawQuery.trim(),
+      rawQuery: trimmed,
       cleanDigits,
-      prettyPhone: formatPhonePretty(rawQuery),
+      prettyPhone: formatPhonePretty(trimmed),
       isBlocked,
+      isWhitelisted,
       exactMatchedEntry,
       partialMatchedEntries,
       matchedPrefix,
       matchedScreened,
       matchedHistory,
       isScreenedBlocked,
+      combinedMatches,
     };
   };
 
@@ -285,6 +399,8 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
       const data = await res.json();
       if (data.success) {
         setConfig(data.config);
+        if (data.history) setHistory(data.history);
+        if (data.recentInboundCalls) setRecentCalls(data.recentInboundCalls);
         if (data.calls) {
           setQuoScreenedCalls(
             data.calls.filter(
@@ -293,8 +409,8 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
           );
         }
         deleteBlockedNumberFromFirestore(number).catch(() => {});
-        setStatusNotice(`Unblocked & updated in Database: ${number}`);
-        setTimeout(() => setStatusNotice(null), 3000);
+        setStatusNotice(`✅ Unblocked & whitelisted in Database: ${formatPhonePretty(number)}`);
+        setTimeout(() => setStatusNotice(null), 3500);
       }
     } catch {
       setStatusNotice('Error unblocking rule.');
@@ -535,29 +651,34 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
             )}
           </div>
 
-          {/* Action A: Block or Unblock this exact number */}
-          {topLookupStatus?.exactMatchedEntry ? (
-            <button
-              type="button"
-              onClick={() => handleUnblockItem(topLookupStatus.exactMatchedEntry!, 'number')}
-              className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer shrink-0 active:scale-95"
-              title="This number is currently blocked. Click to unblock it."
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Unblock Exact Number</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={quickDigitsCount < 7}
-              onClick={() => handleBlockItem(quickBlockInput.trim(), 'number', '1-Click manual block')}
-              className="px-4 py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer shrink-0 active:scale-95"
-              title="Block this exact 10-digit phone number"
-            >
-              <PhoneOff className="w-4 h-4" />
-              <span>Block Exact Number</span>
-            </button>
-          )}
+          {/* Action A1: 1-Click UNBLOCK this number (always available when searching a 7+ digit number or matching entry) */}
+          <button
+            type="button"
+            disabled={quickDigitsCount < 7 && !topLookupStatus?.exactMatchedEntry}
+            onClick={() =>
+              handleUnblockItem(
+                topLookupStatus?.exactMatchedEntry || quickBlockInput.trim(),
+                'number'
+              )
+            }
+            className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer shrink-0 active:scale-95"
+            title="Unblock and whitelist this phone number so their calls always ring through"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Unblock Number</span>
+          </button>
+
+          {/* Action A2: Block this exact number */}
+          <button
+            type="button"
+            disabled={quickDigitsCount < 7}
+            onClick={() => handleBlockItem(quickBlockInput.trim(), 'number', '1-Click manual block')}
+            className="px-4 py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer shrink-0 active:scale-95"
+            title="Block this exact 10-digit phone number"
+          >
+            <PhoneOff className="w-4 h-4" />
+            <span>Block Number</span>
+          </button>
 
           {/* Action B: 1-Click Block ENTIRE 3-Digit Area Code */}
           <button
@@ -576,145 +697,177 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
           </button>
         </div>
 
-        {/* LIVE INSTANT SEARCH RESULT BANNER (Shows immediately when typing a number like 7807603033) */}
+        {/* LIVE INSTANT SEARCH & UNBLOCK PANEL (Shows immediately when typing any digits/number) */}
         {topLookupStatus && (
           <div
-            className={`p-4 rounded-2xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn ${
+            className={`p-4 rounded-2xl border-2 space-y-3 animate-fadeIn ${
               topLookupStatus.isBlocked
                 ? 'bg-rose-950/90 border-rose-500 text-rose-100 shadow-lg shadow-rose-950/50'
-                : 'bg-emerald-950/80 border-emerald-500/70 text-emerald-100 shadow-lg shadow-emerald-950/40'
+                : 'bg-slate-900/95 border-emerald-500/70 text-emerald-100 shadow-lg shadow-emerald-950/40'
             }`}
           >
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span
-                  className={`px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider ${
-                    topLookupStatus.isBlocked
-                      ? 'bg-rose-600 text-white'
-                      : 'bg-emerald-600 text-white'
-                  }`}
-                >
-                  {topLookupStatus.isBlocked ? '🚫 BLOCKED' : '✅ NOT BLOCKED'}
-                </span>
-                <span className="font-mono font-black text-base text-white">
-                  {topLookupStatus.prettyPhone}
-                </span>
-                {topLookupStatus.cleanDigits.length === 10 && (
-                  <span className="font-mono text-xs text-slate-300">
-                    (Digits: {topLookupStatus.cleanDigits} / +1{topLookupStatus.cleanDigits})
-                  </span>
-                )}
-              </div>
-
-              <div className="text-xs text-slate-200">
-                {topLookupStatus.exactMatchedEntry ? (
-                  <span>
-                    Found in your <strong>Blocked Exact Numbers</strong> list as{' '}
-                    <code className="px-1.5 py-0.5 rounded bg-black/40 font-mono text-rose-300">
-                      {topLookupStatus.exactMatchedEntry}
-                    </code>
-                    . Calls from this number are automatically rejected before ringing.
-                  </span>
-                ) : topLookupStatus.matchedPrefix ? (
-                  <span>
-                    Blocked by <strong>Area Code / Prefix Rule</strong>{' '}
-                    <code className="px-1.5 py-0.5 rounded bg-black/40 font-mono text-rose-300">
-                      {topLookupStatus.matchedPrefix}
-                    </code>
-                    . All calls matching this prefix are rejected.
-                  </span>
-                ) : topLookupStatus.isScreenedBlocked ? (
-                  <span>
-                    Blocked via <strong>Sonia AI Screened Call List</strong> (
-                    {topLookupStatus.matchedScreened?.summary || 'Solicitor / Spam'}).
-                  </span>
-                ) : (
-                  <span>
-                    <strong>{topLookupStatus.prettyPhone}</strong> is <strong>NOT</strong> in your blocked numbers list or blocked area codes. Calls from this number can ring through.
-                  </span>
-                )}
-              </div>
-
-              {(topLookupStatus.matchedHistory || topLookupStatus.matchedScreened) && (
-                <div className="text-[11px] text-amber-200/90 font-mono pt-0.5">
-                  📞 Previous Call History:{' '}
-                  {topLookupStatus.matchedScreened?.summary ||
-                    topLookupStatus.matchedHistory?.reason ||
-                    'Logged in call history'}
-                </div>
-              )}
-
-              {!topLookupStatus.exactMatchedEntry && topLookupStatus.partialMatchedEntries.length > 0 && (
-                <div className="pt-1 flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[11px] font-bold text-rose-300">
-                    Matching numbers in blocklist ({topLookupStatus.partialMatchedEntries.length}):
-                  </span>
-                  {topLookupStatus.partialMatchedEntries.slice(0, 6).map((m) => (
-                    <span
-                      key={m}
-                      className="px-2 py-0.5 rounded-lg bg-rose-900/70 border border-rose-500/40 font-mono text-xs text-white flex items-center gap-1.5"
-                    >
-                      <span>{m}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleUnblockItem(m, 'number')}
-                        className="text-rose-300 hover:text-white font-bold cursor-pointer"
-                        title={`Unblock ${m}`}
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0 flex-wrap">
-              {topLookupStatus.exactMatchedEntry ? (
-                <button
-                  type="button"
-                  onClick={() => handleUnblockItem(topLookupStatus.exactMatchedEntry!, 'number')}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shadow-md transition-all flex items-center gap-1.5"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Unblock {topLookupStatus.prettyPhone}</span>
-                </button>
-              ) : topLookupStatus.matchedPrefix ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => handleUnblockItem(topLookupStatus.matchedPrefix!, 'prefix')}
-                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shadow-md transition-all"
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider ${
+                      topLookupStatus.isBlocked
+                        ? 'bg-rose-600 text-white'
+                        : topLookupStatus.isWhitelisted
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'bg-emerald-600 text-white'
+                    }`}
                   >
-                    Unblock Prefix ({topLookupStatus.matchedPrefix})
-                  </button>
-                  {topLookupStatus.cleanDigits.length >= 7 && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleBlockItem(topLookupStatus.rawQuery, 'number', `Blocked exact number ${topLookupStatus.prettyPhone}`)
-                      }
-                      className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs cursor-pointer shadow-md transition-all"
-                    >
-                      + Also Block Exact #
-                    </button>
+                    {topLookupStatus.isBlocked
+                      ? '🚫 BLOCKED'
+                      : topLookupStatus.isWhitelisted
+                      ? '✅ UNBLOCKED & WHITELISTED'
+                      : '✅ NOT BLOCKED'}
+                  </span>
+                  <span className="font-mono font-black text-base text-white">
+                    {topLookupStatus.prettyPhone}
+                  </span>
+                  {topLookupStatus.cleanDigits.length === 10 && (
+                    <span className="font-mono text-xs text-slate-300">
+                      (Digits: {topLookupStatus.cleanDigits} / +1{topLookupStatus.cleanDigits})
+                    </span>
                   )}
-                </>
-              ) : (
-                topLookupStatus.cleanDigits.length >= 7 && (
+                </div>
+
+                <div className="text-xs text-slate-200">
+                  {topLookupStatus.exactMatchedEntry ? (
+                    <span>
+                      Found in your <strong>Blocked Exact Numbers</strong> list as{' '}
+                      <code className="px-1.5 py-0.5 rounded bg-black/40 font-mono text-rose-300">
+                        {topLookupStatus.exactMatchedEntry}
+                      </code>
+                      . Click <strong>Unblock</strong> to allow calls from this number.
+                    </span>
+                  ) : topLookupStatus.matchedPrefix ? (
+                    <span>
+                      Matched <strong>Blocked Area Code / Prefix Rule</strong>{' '}
+                      <code className="px-1.5 py-0.5 rounded bg-black/40 font-mono text-rose-300">
+                        {topLookupStatus.matchedPrefix}
+                      </code>
+                      . Click <strong>Unblock Number</strong> to whitelist this caller or unblock the prefix.
+                    </span>
+                  ) : topLookupStatus.isScreenedBlocked ? (
+                    <span>
+                      Blocked via <strong>Sonia AI Screened Call List</strong> (
+                      {topLookupStatus.matchedScreened?.summary || 'Solicitor / Spam'}). Click <strong>Unblock</strong> to restore.
+                    </span>
+                  ) : topLookupStatus.isWhitelisted ? (
+                    <span>
+                      <strong>{topLookupStatus.prettyPhone}</strong> has been explicitly <strong>Unblocked &amp; Whitelisted</strong>. Calls from this number will always ring through.
+                    </span>
+                  ) : (
+                    <span>
+                      <strong>{topLookupStatus.prettyPhone}</strong> is currently <strong>NOT</strong> in your blocked numbers list. You can click <strong>Unblock / Whitelist</strong> to guarantee it is never blocked, or <strong>Block</strong> to reject it.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Direct 1-Click Unblock + Block Buttons for Searched Number */}
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {topLookupStatus.cleanDigits.length >= 7 && (
                   <button
                     type="button"
                     onClick={() =>
-                      handleBlockItem(topLookupStatus.rawQuery, 'number', `Blocked via Instant Lookup (${topLookupStatus.prettyPhone})`)
+                      handleUnblockItem(
+                        topLookupStatus.exactMatchedEntry || topLookupStatus.rawQuery,
+                        'number'
+                      )
+                    }
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shadow-md transition-all flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>
+                      {topLookupStatus.isBlocked
+                        ? `✅ Unblock ${topLookupStatus.prettyPhone} Now`
+                        : `✅ Unblock / Whitelist ${topLookupStatus.prettyPhone}`}
+                    </span>
+                  </button>
+                )}
+
+                {topLookupStatus.matchedPrefix && (
+                  <button
+                    type="button"
+                    onClick={() => handleUnblockItem(topLookupStatus.matchedPrefix!, 'prefix')}
+                    className="px-3.5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-black text-xs cursor-pointer shadow-md transition-all"
+                  >
+                    Unblock Prefix ({topLookupStatus.matchedPrefix})
+                  </button>
+                )}
+
+                {topLookupStatus.cleanDigits.length >= 7 && !topLookupStatus.exactMatchedEntry && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleBlockItem(
+                        topLookupStatus.rawQuery,
+                        'number',
+                        `Blocked via Instant Lookup (${topLookupStatus.prettyPhone})`
+                      )
                     }
                     className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs cursor-pointer shadow-md transition-all flex items-center gap-1.5"
                   >
                     <PhoneOff className="w-4 h-4" />
-                    <span>🚫 Block {topLookupStatus.prettyPhone} Now</span>
+                    <span>🚫 Block {topLookupStatus.prettyPhone}</span>
                   </button>
-                )
-              )}
+                )}
+              </div>
             </div>
+
+            {/* Matching Numbers List Across All Blocked Lists & Call Logs — Each with a 1-Click UNBLOCK Button */}
+            {topLookupStatus.combinedMatches.length > 0 && (
+              <div className="pt-2.5 border-t border-slate-700/80 space-y-2">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-amber-300 flex items-center justify-between">
+                  <span>
+                    🔍 Matching Numbers Found ({topLookupStatus.combinedMatches.length}) — Click Unblock on Any Number:
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                  {topLookupStatus.combinedMatches.map((item) => (
+                    <div
+                      key={`${item.source}-${item.phone}`}
+                      className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-700 flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-black text-white text-sm">
+                            {item.pretty}
+                          </span>
+                          <span className="font-mono text-[11px] text-slate-400">
+                            ({item.phone})
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                              item.isBlocked
+                                ? 'bg-rose-600/30 text-rose-300 border border-rose-500/40'
+                                : 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40'
+                            }`}
+                          >
+                            {item.source}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-300 truncate mt-0.5">
+                          {item.label}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleUnblockItem(item.phone, 'number')}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shrink-0 shadow-md flex items-center gap-1"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Unblock</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1079,23 +1232,33 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
                   <div className="p-4 rounded-xl bg-emerald-950/60 border border-emerald-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                     <div>
                       <div className="font-black text-emerald-300 text-sm flex items-center gap-2">
-                        <span>✅ NOT BLOCKED: {formatPhonePretty(blockedNumberSearch)}</span>
+                        <span>✅ NOT IN BLOCKED NUMBERS LIST: {formatPhonePretty(blockedNumberSearch)}</span>
                       </div>
                       <p className="text-slate-300 mt-0.5">
-                        <code className="font-mono text-white">{blockedNumberSearch}</code> was not found in your Blocked Exact Numbers list.
+                        <code className="font-mono text-white">{blockedNumberSearch}</code> was not found in your Blocked Exact Numbers list. Click <strong>Unblock / Whitelist</strong> to ensure it is never blocked, or <strong>Block</strong> to add it.
                       </p>
                     </div>
                     {filterDigits.length >= 7 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleBlockItem(blockedNumberSearch.trim(), 'number', `Blocked from search (${formatPhonePretty(blockedNumberSearch)})`)
-                        }
-                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs cursor-pointer shrink-0 shadow-md flex items-center gap-1.5"
-                      >
-                        <PhoneOff className="w-3.5 h-3.5" />
-                        <span>🚫 Block {formatPhonePretty(blockedNumberSearch)} Now</span>
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleUnblockItem(blockedNumberSearch.trim(), 'number')}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer shrink-0 shadow-md flex items-center gap-1.5"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>✅ Unblock / Whitelist {formatPhonePretty(blockedNumberSearch)}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleBlockItem(blockedNumberSearch.trim(), 'number', `Blocked from search (${formatPhonePretty(blockedNumberSearch)})`)
+                          }
+                          className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs cursor-pointer shrink-0 shadow-md flex items-center gap-1.5"
+                        >
+                          <PhoneOff className="w-3.5 h-3.5" />
+                          <span>🚫 Block {formatPhonePretty(blockedNumberSearch)}</span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
