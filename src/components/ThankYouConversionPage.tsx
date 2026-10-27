@@ -92,8 +92,15 @@ export const ThankYouConversionPage: React.FC<ThankYouConversionPageProps> = ({
     try {
       const w = window as any;
       w.dataLayer = w.dataLayer || [];
+      if (typeof w.gtag === 'function') {
+        w.gtag('config', 'AW-18539302675', {
+          page_path: '/thank-you',
+          page_title: 'Thank You — Form Completed',
+        });
+      }
       w.dataLayer.push({
         event: 'thank_you_page_conversion',
+        google_ads_tag: 'AW-18539302675',
         page_path: '/thank-you',
         conversion_value: conversionVal,
         currency: 'CAD',

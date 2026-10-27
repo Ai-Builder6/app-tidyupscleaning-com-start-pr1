@@ -64,10 +64,17 @@ export function triggerGoogleAdsConversion(value = 1.0, currency = 'CAD') {
         // eslint-disable-next-line prefer-rest-params
         window.dataLayer!.push(arguments);
       };
+    const convVal = Number(value) > 0 ? Number(value) : 1.0;
+    const convCur = currency || 'CAD';
+    gtagFn('event', 'conversion', {
+      send_to: 'AW-18539302675',
+      value: convVal,
+      currency: convCur,
+    });
     gtagFn('event', 'conversion', {
       send_to: 'AW-18533917803/9UFlCKPg1KcdEOvI1IVF',
-      value: Number(value) > 0 ? Number(value) : 1.0,
-      currency: currency || 'CAD',
+      value: convVal,
+      currency: convCur,
     });
   } catch {
     // ignore

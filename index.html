@@ -10,6 +10,7 @@
     <!-- End Google Tag Manager -->
 
     <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18539302675"></script>
     <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18533917803"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -41,15 +42,23 @@
       })();
 
       gtag('js', new Date());
+      gtag('config', 'AW-18539302675');
       gtag('config', 'AW-18533917803');
 
-      // Reusable helper + automatic conversion trigger on /booking conversion page
+      // Reusable helper + automatic conversion trigger on /booking and /thank-you conversion page
       window.fireGoogleAdsBookingConversion = function(customValue, customCurrency) {
         try {
+          var convVal = typeof customValue === 'number' && customValue > 0 ? customValue : 1.0;
+          var convCur = customCurrency || 'CAD';
+          gtag('event', 'conversion', {
+            'send_to': 'AW-18539302675',
+            'value': convVal,
+            'currency': convCur
+          });
           gtag('event', 'conversion', {
             'send_to': 'AW-18533917803/9UFlCKPg1KcdEOvI1IVF',
-            'value': typeof customValue === 'number' && customValue > 0 ? customValue : 1.0,
-            'currency': customCurrency || 'CAD'
+            'value': convVal,
+            'currency': convCur
           });
         } catch (_) {}
       };
@@ -72,6 +81,11 @@
           search.indexOf('page=thank-you') !== -1 ||
           search.indexOf('booking=1') !== -1
         ) {
+          gtag('event', 'conversion', {
+            'send_to': 'AW-18539302675',
+            'value': 1.0,
+            'currency': 'CAD'
+          });
           gtag('event', 'conversion', {
             'send_to': 'AW-18533917803/9UFlCKPg1KcdEOvI1IVF',
             'value': 1.0,
