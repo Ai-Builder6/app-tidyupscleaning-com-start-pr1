@@ -166,67 +166,17 @@ export const initAuth = (
  * NEVER calls Firebase signInWithPopup (`gtm-kvj5cp62-zty5m.firebaseapp.com/__/auth/handler`),
  * avoiding the "The requested action is invalid" popup completely.
  */
-export const googleSignIn = (): Promise<{ user: User; accessToken: string } | null> => {
-  isSigningIn = true;
-  const gsi = typeof window !== 'undefined' ? (window as any).google?.accounts?.oauth2 : null;
-
-  if (gsi && typeof gsi.initTokenClient === 'function') {
-    return new Promise((resolve, reject) => {
-      try {
-        const tokenClient = gsi.initTokenClient({
-          client_id: OAUTH_CLIENT_ID,
-          scope: [...SCOPES, 'openid', 'email', 'profile'].join(' '),
-          callback: async (tokenResponse: any) => {
-            try {
-              if (tokenResponse?.error) {
-                isSigningIn = false;
-                reject(
-                  new Error(
-                    tokenResponse.error_description ||
-                      tokenResponse.error ||
-                      'Google Drive authorization was declined.'
-                  )
-                );
-                return;
-              }
-              const accessToken = tokenResponse?.access_token;
-              if (!accessToken) {
-                isSigningIn = false;
-                reject(new Error('No access token returned from Google OAuth.'));
-                return;
-              }
-              const session = await finalizeAccessTokenSession(accessToken);
-              isSigningIn = false;
-              resolve(session);
-            } catch (innerErr) {
-              isSigningIn = false;
-              reject(innerErr);
-            }
-          },
-          error_callback: (err: any) => {
-            isSigningIn = false;
-            reject(
-              new Error(
-                err?.message ||
-                  'Google Sign-In popup was closed before completing selection. Click the button again and select cleaningserviceyeg@gmail.com.'
-              )
-            );
-          },
-        });
-
-        // Synchronous call on user click tick opens ONLY the clean accounts.google.com chooser
-        tokenClient.requestAccessToken({ prompt: '' });
-      } catch (err) {
-        isSigningIn = false;
-        reject(err);
-      }
-    });
+export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+  // Never open a browser Google OAuth popup (which triggers "Error 400: origin_mismatch" on app.tidyupscleaning.com).
+  // All Google Sheets lead pulling, header formatting, and server backups run directly via server-side endpoints without requiring OAuth popups.
+  if (cachedAccessToken) {
+    try {
+      return await finalizeAccessTokenSession(cachedAccessToken);
+    } catch {
+      return null;
+    }
   }
-
-  isSigningIn = false;
-  return Promise.reject(
-    new Error('Google Identity Services is still loading. Please wait 1 second and click again.')
-  );
+  return null;
 };
 
 export const getAccessTokenSync = (): string | null => {

@@ -1008,10 +1008,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
           <button
             type="button"
-            onClick={() => setConfirmDriveSyncModal(true)}
+            onClick={handleConfirmedSyncToDriveSheet}
             disabled={isSyncingDriveSheet}
             className="px-3.5 py-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-600 hover:to-emerald-600 text-white border border-teal-400/40 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
-            title="Sync all current leads and apply Frozen Headers, Executive Title Banner, Channel Colors (Blue FB, Green Google, Purple Voice, Amber Pasted) & Summary Footer to your live Google Sheet in Drive"
+            title="1-Click Sync: Pulls any new leads, syncs Jobber quotes, and formats headers & rows (no Google sign-in popup required)"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDriveSheet ? 'animate-spin' : ''}`} />
             <span>

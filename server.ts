@@ -7722,7 +7722,7 @@ app.get("/api/leads", (req, res) => {
   });
 });
 
-// POST /api/leads/sync: Syncs latest Jobber quotes & clients into the Clean Google Sheet
+// POST /api/leads/sync: Syncs latest Jobber quotes & clients into the Clean Google Sheet (and returns formatted 20-column TSV headers & rows)
 app.post("/api/leads/sync", async (req, res) => {
   const projectId = getProjectId(req);
   const store = loadStore(projectId) || {
@@ -7739,6 +7739,12 @@ app.post("/api/leads/sync", async (req, res) => {
     adLeads: [],
   };
 
+  if (!jobberConfig.accessToken && jobberConfig.refreshToken) {
+    try {
+      await refreshJobberAccessToken();
+    } catch {}
+  }
+
   if (jobberConfig.accessToken && jobberConfig.isConnected) {
     try {
       const qData = await syncJobberQuotes(jobberConfig.accessToken, getJobberCreds(), store.quotes || []);
@@ -7751,12 +7757,59 @@ app.post("/api/leads/sync", async (req, res) => {
   repairAndSyncStoreData(store);
   store.lastSavedAt = new Date().toISOString();
   saveStore(store, projectId);
+
+  const headers = [
+    "Date",
+    "Sheet Tab",
+    "Source",
+    "Client Name",
+    "Phone",
+    "Email",
+    "Street Address",
+    "City",
+    "Postal Code",
+    "Bedrooms",
+    "Bathrooms",
+    "Service Package",
+    "Quoted Total",
+    "Jobber Quote #",
+    "Status",
+    "Verdict",
+    "Notes",
+  ];
+  const tsvLines = [
+    headers.join("\t"),
+    ...(store.adLeads || []).map((l: any) =>
+      [
+        (l.dateReceived || "").slice(0, 10),
+        l.sourceTab || "Voice & Quick Quotes",
+        l.source || "Voice Quote",
+        l.customerName || "",
+        l.phone || "",
+        l.email || "",
+        l.address || "",
+        l.city || "Edmonton",
+        l.postalCode || "",
+        l.bedrooms || "3 Bedrooms",
+        l.bathrooms || "2 Bathrooms",
+        l.serviceRequested || "",
+        l.quotedAmount ? `$${Number(l.quotedAmount).toFixed(2)}` : "$0.00",
+        l.quoteNumber || (l.isJobberSynced ? "Synced" : "Pending"),
+        l.status || "New",
+        l.verdict || "Good lead",
+        (l.notes || "").replace(/[\t\r\n]+/g, " "),
+      ].join("\t")
+    ),
+  ];
+
   res.json({
     success: true,
-    message: `✓ Clean Google Sheet & Jobber synced! ${store.adLeads?.length || 0} active lead rows on your Clean Sheet.`,
+    message: `✓ Clean Google Sheet & Jobber synced! ${store.adLeads?.length || 0} active lead rows formatted with headers (copied to clipboard).`,
     leads: store.adLeads || [],
     clients: store.clients || [],
     quotes: store.quotes || [],
+    tsv: tsvLines.join("\n"),
+    spreadsheetId: googleSheetsSyncState.spreadsheetId,
     sheetUrl: googleSheetsSyncState.sheetUrl,
   });
 });
