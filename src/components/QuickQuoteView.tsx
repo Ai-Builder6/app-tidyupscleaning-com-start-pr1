@@ -265,6 +265,12 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     crew: '1_CLEANER',
     notes: '',
   });
+  const userEditedFieldsRef = useRef<{
+    name?: boolean;
+    phone?: boolean;
+    email?: boolean;
+    address?: boolean;
+  }>({});
 
   useEffect(() => {
     const handleClickOutside = (ev: MouseEvent) => {
@@ -583,7 +589,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
       const lower = normalized.toLowerCase();
       const newlyHighlighted: string[] = [];
 
-      // 1. Live Customer Name detection
+      // 1. Live Customer Name detection (skip if manually edited by user)
       const stopWords = new Set([
         'calling', 'from', 'at', 'phone', 'number', 'needs', 'need', 'wants', 'want', 'looking', 'for',
         'okay', 'ok', 'and', 'what', 'whats', 'is', 'your', 'address', 'seven', 'two', 'one', 'three',
@@ -595,39 +601,60 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
         /(?:for|client|customer)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})/,
         /^([A-Z][a-z]+\s+[A-Z][a-z]+)\b/,
       ];
-      for (const pat of namePatterns) {
-        const m = normalized.match(pat) || t.match(pat);
-        if (m && m[1]) {
-          const rawTokens = m[1]
-            .trim()
-            .split(/\s+/)
-            .filter((w) => w.length >= 2 && !stopWords.has(w.toLowerCase()));
-          const deduped: string[] = [];
-          for (const tok of rawTokens) {
-            if (!deduped.some((ex) => ex.toLowerCase() === tok.toLowerCase())) {
-              deduped.push(tok.charAt(0).toUpperCase() + tok.slice(1));
+      if (!userEditedFieldsRef.current.name) {
+        for (const pat of namePatterns) {
+          const m = normalized.match(pat) || t.match(pat);
+          if (m && m[1]) {
+            const rawTokens = m[1]
+              .trim()
+              .split(/\s+/)
+              .filter((w) => w.length >= 2 && !stopWords.has(w.toLowerCase()));
+            const deduped: string[] = [];
+            for (const tok of rawTokens) {
+              if (!deduped.some((ex) => ex.toLowerCase() === tok.toLowerCase())) {
+                deduped.push(tok.charAt(0).toUpperCase() + tok.slice(1));
+              }
+              if (deduped.length >= 2) break;
             }
-            if (deduped.length >= 2) break;
+            const candidateName = deduped.join(' ');
+            if (candidateName && candidateName !== liveValuesRef.current.name) {
+              liveValuesRef.current.name = candidateName;
+              setCustomerName(candidateName);
+              triggerFieldHighlight('name', candidateName);
+              newlyHighlighted.push(`Name: ${candidateName}`);
+            }
+            break;
           }
-          const candidateName = deduped.join(' ');
-          if (candidateName && candidateName !== liveValuesRef.current.name) {
-            liveValuesRef.current.name = candidateName;
-            setCustomerName(candidateName);
-            triggerFieldHighlight('name', candidateName);
-            newlyHighlighted.push(`Name: ${candidateName}`);
-          }
-          break;
         }
       }
 
-      // 2. Live Phone Number detection
-      const phoneMatch =
-        normalized.match(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/) ||
-        t.match(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/) ||
-        normalized.match(/\b(780|587|825|403)[-.\s]?([0-9]{3})[-.\s]?([0-9]{3,4})\b/);
-      if (phoneMatch) {
-        const formattedPhone = `(${phoneMatch[1]}) ${phoneMatch[2]}-${phoneMatch[3]}`;
-        if (formattedPhone !== liveValuesRef.current.phone) {
+      // 2. Live Phone Number detection (handles split spoken digits like "587 7 12 7128" or "587 712 7128" and always takes the LAST spoken number)
+      if (!userEditedFieldsRef.current.phone) {
+        const extractLastSpokenPhone = (src: string): string => {
+          // Match any 10-digit phone (with optional leading 1), even if spoken with spaces between digit groups like "587 7 12 7128"
+          const abMatches = Array.from(
+            src.matchAll(/\b(?:\+?1[-.\s]*)?(780|587|825|403|368)(?:[-.\s()]*\d){7}\b/g)
+          );
+          if (abMatches.length > 0) {
+            const lastRaw = abMatches[abMatches.length - 1][0];
+            const digits = lastRaw.replace(/\D/g, '');
+            const d10 = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits.slice(-10);
+            if (d10.length === 10) {
+              return `(${d10.slice(0, 3)}) ${d10.slice(3, 6)}-${d10.slice(6, 10)}`;
+            }
+          }
+          const stdMatches = Array.from(
+            src.matchAll(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/g)
+          );
+          if (stdMatches.length > 0) {
+            const last = stdMatches[stdMatches.length - 1];
+            return `(${last[1]}) ${last[2]}-${last[3]}`;
+          }
+          return '';
+        };
+
+        const formattedPhone = extractLastSpokenPhone(normalized) || extractLastSpokenPhone(t);
+        if (formattedPhone && formattedPhone !== liveValuesRef.current.phone) {
           liveValuesRef.current.phone = formattedPhone;
           setCustomerPhone(formattedPhone);
           triggerFieldHighlight('phone', formattedPhone);
@@ -636,12 +663,14 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
       }
 
       // 3. Live Email detection
-      const emailMatch = t.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/);
-      if (emailMatch && emailMatch[0] !== liveValuesRef.current.email) {
-        liveValuesRef.current.email = emailMatch[0];
-        setCustomerEmail(emailMatch[0]);
-        triggerFieldHighlight('email', emailMatch[0]);
-        newlyHighlighted.push(`Email: ${emailMatch[0]}`);
+      if (!userEditedFieldsRef.current.email) {
+        const emailMatch = t.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/);
+        if (emailMatch && emailMatch[0] !== liveValuesRef.current.email) {
+          liveValuesRef.current.email = emailMatch[0];
+          setCustomerEmail(emailMatch[0]);
+          triggerFieldHighlight('email', emailMatch[0]);
+          newlyHighlighted.push(`Email: ${emailMatch[0]}`);
+        }
       }
 
       // 4. Live City detection
@@ -693,7 +722,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
           }
         }
       }
-      if (validAddrCandidates.length > 0) {
+      if (validAddrCandidates.length > 0 && !userEditedFieldsRef.current.address) {
         const bestStreet = validAddrCandidates[validAddrCandidates.length - 1];
         const fullAddr = `${bestStreet}, ${detectedCity}, AB`;
         if (fullAddr !== liveValuesRef.current.address) {
@@ -999,15 +1028,14 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
     async (rawText?: string, recordedAudioBlob?: Blob | null) => {
       const combinedCurrent = `${latestTranscriptRef.current || voiceTranscript} ${latestInterimRef.current || interimTranscript}`.trim();
       const textToParse = (rawText ?? combinedCurrent).trim();
-      if (!textToParse && !recordedAudioBlob) {
-        setVoiceStatusMsg('Please speak or type caller details first.');
+      // NEVER autofill if nothing was spoken!
+      if (!textToParse || textToParse.length < 3) {
+        setVoiceStatusMsg('No speech detected — form left unchanged.');
         return;
       }
 
       // Immediately run client-side live extraction so Address, Preferred Date, and all blocks light up right away
-      if (textToParse) {
-        applyLiveSpeechExtraction(textToParse, true);
-      }
+      applyLiveSpeechExtraction(textToParse, true);
 
       setIsParsingVoice(true);
       setVoiceStatusMsg(
@@ -1019,7 +1047,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
       try {
         let audioBase64 = '';
         let audioMimeType = 'audio/webm';
-        if (recordedAudioBlob && recordedAudioBlob.size > 0) {
+        if (recordedAudioBlob && recordedAudioBlob.size > 0 && textToParse.length >= 3) {
           audioMimeType = recordedAudioBlob.type || 'audio/webm';
           audioBase64 = await blobToBase64(recordedAudioBlob);
         }
@@ -1031,31 +1059,25 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
             transcript: textToParse,
             audioBase64: audioBase64 || undefined,
             audioMimeType,
-            currentForm: {
-              customerName: liveValuesRef.current.name || customerName,
-              customerPhone: liveValuesRef.current.phone || customerPhone,
-              serviceAddress: liveValuesRef.current.address || serviceAddress,
-              preferredDate: liveValuesRef.current.preferredDate || scheduledDate,
-              timeWindow: liveValuesRef.current.timeWindow || timeWindow,
-              bedrooms: liveValuesRef.current.bedrooms || bedrooms,
-              bathrooms: liveValuesRef.current.bathrooms || bathrooms,
-            },
+            currentForm: {},
           }),
         });
         const data = await res.json();
 
         if (data) {
-          if (data.customerName && data.customerName !== 'Residential Client') {
+          if (data.customerName && data.customerName !== 'Residential Client' && !userEditedFieldsRef.current.name) {
             liveValuesRef.current.name = data.customerName;
             setCustomerName(data.customerName);
             triggerFieldHighlight('name', data.customerName);
           }
-          if (data.phone) {
-            liveValuesRef.current.phone = data.phone;
-            setCustomerPhone(data.phone);
-            triggerFieldHighlight('phone', data.phone);
+          if (data.phone && !userEditedFieldsRef.current.phone) {
+            // Prefer the locally extracted last spoken phone if present so AI never alters digits like 587 712 7128
+            const verifiedPhone = liveValuesRef.current.phone || data.phone;
+            liveValuesRef.current.phone = verifiedPhone;
+            setCustomerPhone(verifiedPhone);
+            triggerFieldHighlight('phone', verifiedPhone);
           }
-          if (data.email) {
+          if (data.email && !userEditedFieldsRef.current.email) {
             liveValuesRef.current.email = data.email;
             setCustomerEmail(data.email);
             triggerFieldHighlight('email', data.email);
@@ -1065,7 +1087,7 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
             setCity(data.city);
             triggerFieldHighlight('city', data.city);
           }
-          if (data.address) {
+          if (data.address && !userEditedFieldsRef.current.address) {
             liveValuesRef.current.address = data.address;
             setServiceAddress(data.address);
             geocodeAddressOnQuickMap(data.address);
@@ -1243,13 +1265,33 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
 
       // Merge any remaining interim speech into final transcript so the last words (address/date) are never lost
       const fullFinalTranscript = `${latestTranscriptRef.current || voiceTranscript} ${latestInterimRef.current || interimTranscript}`.trim();
-      if (fullFinalTranscript) {
-        latestTranscriptRef.current = fullFinalTranscript;
-        latestInterimRef.current = '';
-        setVoiceTranscript(fullFinalTranscript);
+
+      // If the mic was turned on and immediately shut off with nothing spoken, stop recorder tracks and DO NOT autofill anything!
+      if (!fullFinalTranscript || fullFinalTranscript.length < 3) {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          const recorder = mediaRecorderRef.current;
+          recorder.onstop = () => {
+            try {
+              recorder.stream.getTracks().forEach((track) => track.stop());
+            } catch {}
+          };
+          try {
+            recorder.stop();
+          } catch {}
+        }
+        audioChunksRef.current = [];
+        setHasParallelAudio(false);
         setInterimTranscript('');
-        applyLiveSpeechExtraction(fullFinalTranscript, true);
+        latestInterimRef.current = '';
+        setVoiceStatusMsg('Mic stopped — no speech detected (nothing autofilled).');
+        return;
       }
+
+      latestTranscriptRef.current = fullFinalTranscript;
+      latestInterimRef.current = '';
+      setVoiceTranscript(fullFinalTranscript);
+      setInterimTranscript('');
+      applyLiveSpeechExtraction(fullFinalTranscript, true);
 
       // Stop parallel MediaRecorder and compare recorded audio + live transcript together
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -1268,11 +1310,9 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
         try {
           recorder.stop();
         } catch {
-          if (fullFinalTranscript) {
-            handleExtractFromTranscript(fullFinalTranscript, null);
-          }
+          handleExtractFromTranscript(fullFinalTranscript, null);
         }
-      } else if (fullFinalTranscript) {
+      } else {
         handleExtractFromTranscript(fullFinalTranscript, null);
       }
       return;
@@ -1420,36 +1460,8 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
           setLiveActiveCall(active);
           setLatestCompletedCall(active || recent);
         }
-        const target = active || recent;
-        if (target && target.status !== 'BLOCKED') {
-          const ageMs = Date.now() - new Date(target.timestamp || 0).getTime();
-          // If this call happened within the last 30 minutes and now has a transcript or summary, auto-fill the form boxes!
-          if (ageMs <= 30 * 60 * 1000 && (target.transcriptText || target.summary)) {
-            const sig = `${target.id}|${target.transcriptText || ''}|${target.summary || ''}`;
-            if (sig !== lastAutoExtractedCallSigRef.current) {
-              lastAutoExtractedCallSigRef.current = sig;
-              const combinedText = [target.transcriptText, target.summary].filter(Boolean).join('\n');
-              if (target.callerNumber && !liveValuesRef.current.phone) {
-                setCustomerPhone(target.callerNumber);
-                liveValuesRef.current.phone = target.callerNumber;
-                triggerFieldHighlight('phone', target.callerNumber);
-              }
-              if (
-                target.callerName &&
-                !target.callerName.includes('Inbound Caller') &&
-                !target.callerName.includes('Verified Customer') &&
-                !liveValuesRef.current.name
-              ) {
-                setCustomerName(target.callerName);
-                liveValuesRef.current.name = target.callerName;
-                triggerFieldHighlight('name', target.callerName);
-              }
-              setVoiceTranscript(combinedText);
-              applyLiveSpeechExtraction(combinedText, true);
-              handleExtractFromTranscript(combinedText);
-            }
-          }
-        }
+        // Only update live call banner state; NEVER silently overwrite the user's current form or phone number from old calls in the background!
+        // The user can click "Read Call Again" in the Phone Call tab whenever they want to pull a call into the form.
       } catch {
         // ignore transient network errors
       }
@@ -2015,6 +2027,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           depositRequired: depositAmount,
           lineItems,
           createRequestOnly,
+          forceNewQuote: !createdQuoteModalItem,
           notes: quoteSummaryNote,
         }),
       });
@@ -2074,6 +2087,24 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
   };
 
   const handleReset = () => {
+    shouldKeepRecordingRef.current = false;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {}
+    }
+    setIsRecording(false);
+    setCallCaptureElapsedSec(0);
+    setIsCallTimerStopped(false);
+    audioChunksRef.current = [];
+    setHasParallelAudio(false);
+    setCreatedQuoteModalItem(null);
+    userEditedFieldsRef.current = {};
     setCustomerName('');
     setCustomerPhone('');
     setCustomerEmail('');
@@ -2084,12 +2115,13 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
     setSelectedAddons([]);
     setQuoteNotes('');
     setVoiceTranscript('');
+    setInterimTranscript('');
     latestTranscriptRef.current = '';
     latestInterimRef.current = '';
     setDiscountAmount(0);
     setDepositAmount(50);
     setFeedbackNotice(null);
-    setVoiceStatusMsg(null);
+    setVoiceStatusMsg('✓ Cleared old dictation & form — Ready for a new caller!');
     setReconciliationNote(null);
     setFlashingFields({});
     setVoiceCapturedFields({});
@@ -2614,6 +2646,16 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
               <Wand2 className="w-4 h-4" />
               <span>{isParsingVoice ? 'Reading Call...' : 'Read It Again'}</span>
             </button>
+
+            <button
+              type="button"
+              onClick={handleReset}
+              className="px-4 py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm flex items-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95"
+              title="Clear old voice dictation and reset all form fields so previous job info is never mixed into a new job"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Clear &amp; Start Over</span>
+            </button>
           </div>
         </div>
 
@@ -2722,6 +2764,15 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                 <Wand2 className="w-3.5 h-3.5" />
                 <span>{isParsingVoice ? 'Comparing...' : 'Compare & Fill Blanks'}</span>
               </button>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95"
+                title="Clear old voice dictation and start over for a new client"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Clear &amp; Start Over</span>
+              </button>
             </div>
           </div>
 
@@ -2816,6 +2867,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                   placeholder="e.g. Rachel Macdonald"
                   value={customerName}
                   onChange={(e) => {
+                    userEditedFieldsRef.current.name = Boolean(e.target.value.trim());
                     setCustomerName(e.target.value);
                     liveValuesRef.current.name = e.target.value;
                   }}
@@ -2868,6 +2920,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                   placeholder="(780) 953-2409"
                   value={customerPhone}
                   onChange={(e) => {
+                    userEditedFieldsRef.current.phone = Boolean(e.target.value.trim());
                     setCustomerPhone(e.target.value);
                     liveValuesRef.current.phone = e.target.value;
                   }}
@@ -2905,6 +2958,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                 placeholder="client@gmail.com"
                 value={customerEmail}
                 onChange={(e) => {
+                  userEditedFieldsRef.current.email = Boolean(e.target.value.trim());
                   setCustomerEmail(e.target.value);
                   liveValuesRef.current.email = e.target.value;
                 }}
@@ -2944,11 +2998,13 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                     value={serviceAddress}
                     theme="dark"
                     onChange={(val) => {
+                      userEditedFieldsRef.current.address = Boolean(val.trim());
                       setServiceAddress(val);
                       liveValuesRef.current.address = val;
                     }}
                     onSelect={(pred) => {
                       const full = pred.description || pred.mainText;
+                      userEditedFieldsRef.current.address = true;
                       setServiceAddress(full);
                       liveValuesRef.current.address = full;
                       triggerFieldHighlight('address', full.split(',')[0]);

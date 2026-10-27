@@ -1429,7 +1429,9 @@ async function executePushQuoteToJobberInternal(
   };
   const targetStreetNorm = normalizeStreetForComparison(street1 || quote.serviceAddress);
 
-  // Check in-memory recent client cache first (only match if phone & address do NOT conflict!)
+  const targetEmailNorm = String(quote.clientEmail || "").trim().toLowerCase();
+
+  // Check in-memory recent client cache first (strictly require exact name + same phone, never merge different people!)
   for (const cached of recentJobberClientCache.values()) {
     if (Date.now() - cached.updatedAtMs > 30 * 60 * 1000) continue;
     const cachedPhone10 = normalizePhone10(cached.phoneDigits);
@@ -1443,19 +1445,16 @@ async function executePushQuoteToJobberInternal(
       continue;
     }
 
+    const cachedNormName = normalizePhoneticPersonName(cached.name);
+    const exactNameMatch = Boolean(targetNormName && cachedNormName && cachedNormName === targetNormName);
     const samePhone = isRealTargetPhone && isRealCachedPhone && cachedPhone10 === targetPhone10;
-    const hasFullName = targetNormName.split(" ").filter(Boolean).length >= 2;
-    const sameFullName =
-      hasFullName &&
-      normalizePhoneticPersonName(cached.name) === targetNormName &&
-      !isRealTargetPhone &&
-      !isRealCachedPhone;
 
-    if (samePhone || sameFullName) {
+    // Require BOTH exact name match AND matching phone to reuse from recent cache
+    if (exactNameMatch && samePhone) {
       if (!jobberClientId) jobberClientId = cached.clientId;
       if (!jobberClientWebUri) jobberClientWebUri = cached.clientWebUri;
       if (!propertyId && cached.propertyId) propertyId = cached.propertyId;
-      if (!liveQuoteId && cached.quoteId) {
+      if (!liveQuoteId && quote.existingJobberQuoteId && cached.quoteId === quote.existingJobberQuoteId) {
         liveQuoteId = cached.quoteId;
         liveQuoteNumber = cached.quoteNumber;
         liveJobberWebUri = cached.quoteWebUri;
@@ -1572,9 +1571,8 @@ async function executePushQuoteToJobberInternal(
       const allCandidates = Array.from(candidateMap.values());
 
       // Strict matching: NEVER merge two people if their phone numbers or street addresses differ!
+      // And if they don't have the exact same name, require 2 to 3 attributes in common.
       const matchingClients = allCandidates.filter((c: any) => {
-        if (jobberClientId && c.id === jobberClientId) return true;
-
         const cPhones: string[] = Array.isArray(c.defaultPhones)
           ? c.defaultPhones
           : c.defaultPhones
@@ -1593,7 +1591,7 @@ async function executePushQuoteToJobberInternal(
           validCandidatePhones.length > 0 &&
           !phoneMatched;
 
-        // If both records have real phone numbers and they DO NOT match, they are different customers!
+        // ABSOLUTE RULE 1: If both records have real phone numbers and they DO NOT match, NEVER merge them!
         if (phoneConflict) return false;
 
         const candidateStrokes = [
@@ -1612,21 +1610,34 @@ async function executePushQuoteToJobberInternal(
           candidateStrokes.length > 0 &&
           !addressMatched;
 
-        // If both records have street addresses and they DO NOT match, do not merge them!
-        if (addressConflict && !phoneMatched) return false;
+        // ABSOLUTE RULE 2: If both records have street addresses and they DO NOT match, NEVER merge them!
+        if (addressConflict) return false;
 
-        // Match if exact phone number matches (and either same name or no address conflict)
+        const cEmails: string[] = Array.isArray(c.defaultEmails)
+          ? c.defaultEmails.map((e: any) => String(e || "").trim().toLowerCase()).filter(Boolean)
+          : [];
+        const emailMatched = Boolean(targetEmailNorm && cEmails.includes(targetEmailNorm));
+        const emailConflict = Boolean(targetEmailNorm && cEmails.length > 0 && !emailMatched);
+        if (emailConflict) return false;
+
         const cNormName = normalizePhoneticPersonName(c.name);
-        if (phoneMatched && (!targetNormName || !cNormName || cNormName === targetNormName || !addressConflict)) {
-          return true;
+        const exactNameMatch = Boolean(targetNormName && cNormName && cNormName === targetNormName);
+
+        // Count how many non-name attributes match (phone, street address, email)
+        const matchingExtraCount = [phoneMatched, addressMatched, emailMatched].filter(Boolean).length;
+
+        if (exactNameMatch) {
+          // Exact name match + at least 1 matching attribute (phone, address, or email),
+          // OR exact full name (first + last) when neither side has conflicting phone/address
+          const hasFullName = targetNormName.split(" ").filter(Boolean).length >= 2;
+          if (matchingExtraCount >= 1) return true;
+          if (hasFullName && validCandidatePhones.length === 0 && candidateStrokes.length === 0) return true;
+          return false;
         }
 
-        // Only match by name if the name is an exact match AND there is no phone conflict or address conflict,
-        // AND either the address matches or it's a full first+last name with no phone on one side
-        const hasFullName = targetNormName.split(" ").filter(Boolean).length >= 2;
-        if (targetNormName && cNormName === targetNormName) {
-          if (addressMatched) return true;
-          if (hasFullName && validCandidatePhones.length === 0 && candidateStrokes.length === 0) return true;
+        // If NOT an exact name match, require at least 2 to 3 attributes in common (e.g. exact phone + exact street address, or exact phone + exact email)
+        if (matchingExtraCount >= 2) {
+          return true;
         }
 
         return false;
@@ -1648,6 +1659,7 @@ async function executePushQuoteToJobberInternal(
         propertyId = existingClient.clientProperties?.nodes?.[0]?.id || propertyId;
 
         // Reconcile & merge any missing bits of information onto this verified matching client
+        // IMPORTANT: Never overwrite an existing client's name if their name is already set to a real name!
         try {
           const existingPhones: string[] = Array.isArray(existingClient.defaultPhones)
             ? existingClient.defaultPhones
@@ -1663,9 +1675,21 @@ async function executePushQuoteToJobberInternal(
             !quote.clientEmail ||
             existingEmails.some((e) => String(e).toLowerCase() === quote.clientEmail!.trim().toLowerCase());
 
+          const existingNameNorm = normalizePhoneticPersonName(existingClient.name);
+          const isPlaceholderExistingName =
+            !existingNameNorm ||
+            existingNameNorm.startsWith("inbound") ||
+            existingNameNorm.startsWith("phone lead") ||
+            existingNameNorm === "customer" ||
+            existingNameNorm === "client";
+
           const clientEditInput: any = {
-            firstName,
-            ...(lastName ? { lastName } : {}),
+            ...(isPlaceholderExistingName || existingNameNorm === targetNormName
+              ? {
+                  firstName,
+                  ...(lastName ? { lastName } : {}),
+                }
+              : {}),
             billingAddress: addressInput,
           };
           if (!hasPhoneAlready && quote.clientPhone && existingPhones.length === 0) {
@@ -1698,15 +1722,10 @@ async function executePushQuoteToJobberInternal(
           // Non-fatal if propertyId edit isn't needed
         }
 
-        // Check if this client already has a quote created in the last 30 minutes (or matching existingJobberQuoteId)
+        // Only reuse an existing quote if quote.existingJobberQuoteId was explicitly supplied
         const recentClientQuotes: any[] = existingClient.quotes?.nodes || [];
         const matchedExistingQuote =
-          (liveQuoteId && recentClientQuotes.find((rq: any) => rq.id === liveQuoteId)) ||
-          recentClientQuotes.find((rq: any) => {
-            if (!rq?.createdAt) return false;
-            const ageMs = Date.now() - new Date(rq.createdAt).getTime();
-            return ageMs >= 0 && ageMs < 30 * 60 * 1000;
-          });
+          liveQuoteId ? recentClientQuotes.find((rq: any) => rq.id === liveQuoteId) : undefined;
 
         if (matchedExistingQuote?.id) {
           liveQuoteId = matchedExistingQuote.id;

@@ -637,7 +637,12 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({
     stopMicrophoneTracks();
 
     const fullText = (voiceTranscript + ' ' + interimTranscript).trim();
-    if (!fullText) return;
+    if (!fullText || fullText.length < 3) {
+      setInterimTranscript('');
+      setVoiceAppliedNotice('Mic stopped — no speech detected (nothing autofilled).');
+      setTimeout(() => setVoiceAppliedNotice(null), 3500);
+      return;
+    }
 
     if (voiceMode === 'description') {
       setIssueDescription((prev) => (prev ? `${prev} ${fullText}` : fullText));
@@ -649,12 +654,20 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({
     }
   }, [stopMicrophoneTracks, voiceTranscript, interimTranscript, voiceMode, addRecentVoiceCommand, processVoiceTranscript]);
 
-  // Reset voice transcription
+  // Reset voice transcription & form fields to start over
   const handleClearTranscript = useCallback(() => {
+    stopMicrophoneTracks();
     setVoiceTranscript('');
     setInterimTranscript('');
-    setVoiceAppliedNotice(null);
-  }, []);
+    setCustomerName('');
+    setPhone('');
+    setEmail('');
+    setCustomAddress('');
+    setIssueDescription('');
+    setAccessNotes('');
+    setVoiceAppliedNotice('Cleared old dictation & ticket fields — ready to start over.');
+    setTimeout(() => setVoiceAppliedNotice(null), 3500);
+  }, [stopMicrophoneTracks]);
 
   // Parse and Apply Lead Raw Text (Facebook Ads, Web Form, or SMS copy)
   const handleParseAndApplyLeadText = useCallback((textToParse?: string) => {
@@ -860,14 +873,24 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({
               </div>
 
               {!isListening ? (
-                <button
-                  type="button"
-                  onClick={() => startListening('full')}
-                  className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95 transition-all"
-                >
-                  <Mic className="w-3.5 h-3.5" />
-                  <span>Start Dictation</span>
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => startListening('full')}
+                    className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95 transition-all"
+                  >
+                    <Mic className="w-3.5 h-3.5" />
+                    <span>Start Dictation</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearTranscript}
+                    className="min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold text-xs flex items-center gap-1 cursor-pointer active:scale-95 transition-all"
+                    title="Clear old voice dictation and reset form fields"
+                  >
+                    <span>Clear &amp; Start Over</span>
+                  </button>
+                </div>
               ) : (
                 <div className="flex items-center gap-1.5">
                   <button

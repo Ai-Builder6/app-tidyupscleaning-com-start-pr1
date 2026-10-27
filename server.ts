@@ -1432,15 +1432,30 @@ function parseVoiceTicketHeuristic(transcript: string) {
   else if (lower.includes("deep")) faultCode = "DEEP-CLEAN";
   else if (lower.includes("weekly")) faultCode = "RECURRING";
 
-  // Phone number extraction (supports 10-digit or 9-digit partial spoken phone numbers)
+  // Phone number extraction (supports split spoken digits like "587 7 12 7128" and always takes the LAST phone number spoken)
   let phone = "";
-  const phoneMatch =
-    normalizedWords.match(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/) ||
-    t.match(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/) ||
-    normalizedWords.match(/\b(780|587|825|403)[-.\s]?([0-9]{3})[-.\s]?([0-9]{3,4})\b/);
-  if (phoneMatch) {
-    phone = `(${phoneMatch[1]}) ${phoneMatch[2]}-${phoneMatch[3]}`;
-  }
+  const extractLastPhone = (src: string): string => {
+    const abMatches = Array.from(
+      src.matchAll(/\b(?:\+?1[-.\s]*)?(780|587|825|403|368)(?:[-.\s()]*\d){7}\b/g)
+    );
+    if (abMatches.length > 0) {
+      const lastRaw = abMatches[abMatches.length - 1][0];
+      const digits = lastRaw.replace(/\D/g, "");
+      const d10 = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits.slice(-10);
+      if (d10.length === 10) {
+        return `(${d10.slice(0, 3)}) ${d10.slice(3, 6)}-${d10.slice(6, 10)}`;
+      }
+    }
+    const stdMatches = Array.from(
+      src.matchAll(/\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/g)
+    );
+    if (stdMatches.length > 0) {
+      const last = stdMatches[stdMatches.length - 1];
+      return `(${last[1]}) ${last[2]}-${last[3]}`;
+    }
+    return "";
+  };
+  phone = extractLastPhone(normalizedWords) || extractLastPhone(t);
 
   // Email extraction
   let email = "";
@@ -1752,8 +1767,23 @@ app.post("/api/dispatch/parse-voice-ticket", async (req, res) => {
     const audioMimeType = typeof req.body?.audioMimeType === "string" && req.body.audioMimeType ? req.body.audioMimeType : "audio/webm";
     const currentForm = req.body?.currentForm || {};
 
-    if (!transcript && !audioBase64) {
-      return res.status(400).json({ error: "Transcript text or audio recording is required" });
+    // NEVER autofill if nothing was spoken into the microphone!
+    if (!transcript || transcript.length < 3) {
+      return res.json({
+        customerName: "",
+        phone: "",
+        email: "",
+        address: "",
+        city: "",
+        preferredDate: "",
+        timeWindow: "",
+        bedrooms: "",
+        bathrooms: "",
+        serviceCategory: "",
+        specificInstructions: "",
+        comparedAudioAndTranscript: false,
+        reconciliationSummary: "No speech detected — form left unchanged.",
+      });
     }
 
     const heuristic = parseVoiceTicketHeuristic(transcript);
@@ -1899,7 +1929,8 @@ Extract and structure the combined Audio + Transcript into JSON with these field
       ...heuristic,
       ...parsed,
       customerName: parsed.customerName || heuristic.customerName,
-      phone: parsed.phone || heuristic.phone,
+      // Always prefer the exact spoken phone number from heuristic if present so AI never alters digits like 587 712 7128
+      phone: heuristic.phone || parsed.phone,
       address: parsed.address || heuristic.address,
       preferredDate: parsed.preferredDate || heuristic.preferredDate,
       timeWindow: parsed.timeWindow || heuristic.timeWindow,
@@ -2129,6 +2160,40 @@ function getJobberCreds() {
   };
 }
 
+// Automatically ensure a valid non-expired Jobber access token before syncing or when opening the live website
+async function ensureValidJobberToken(): Promise<string> {
+  if (jobberConfig.accessToken && !isJobberJwtExpired(jobberConfig.accessToken)) {
+    return jobberConfig.accessToken;
+  }
+  const envTok = resolveEnvJobberAccessToken();
+  if (envTok && !isJobberJwtExpired(envTok)) {
+    jobberConfig.accessToken = envTok;
+    jobberConfig.isConnected = true;
+    jobberConfig.lastSyncedAt = new Date().toISOString();
+    persistJobberConfigToDisk();
+    return envTok;
+  }
+  if (jobberConfig.refreshToken && jobberConfig.clientId && jobberConfig.clientSecret) {
+    try {
+      const refreshed = await refreshJobberAccessToken(
+        jobberConfig.clientId,
+        jobberConfig.clientSecret,
+        jobberConfig.refreshToken
+      );
+      if (refreshed) {
+        jobberConfig.accessToken = refreshed;
+        jobberConfig.isConnected = true;
+        jobberConfig.lastSyncedAt = new Date().toISOString();
+        persistJobberConfigToDisk();
+        return refreshed;
+      }
+    } catch {
+      // Ignore refresh error
+    }
+  }
+  return jobberConfig.accessToken || "";
+}
+
 function persistJobberConfigToDisk(_projectId?: string) {
   const cfg = {
     isConnected: jobberConfig.isConnected,
@@ -2182,14 +2247,15 @@ function persistJobberConfigToDisk(_projectId?: string) {
   }
 }
 
-// GET Jobber connection status & settings
-app.get("/api/jobber/config", (req, res) => {
+// GET Jobber connection status & settings (automatically refreshes token if expired when opening live website)
+app.get("/api/jobber/config", async (req, res) => {
+  await ensureValidJobberToken();
   const baseUrl = getAppBaseUrl(req);
   const canonicalCallback =
     (jobberConfig as any).canonicalRedirectUri ||
     "https://app.tidyupscleaning.com/api/jobber/oauth/callback";
   res.json({
-    isConnected: jobberConfig.isConnected,
+    isConnected: jobberConfig.isConnected && Boolean(jobberConfig.accessToken) && !isJobberJwtExpired(jobberConfig.accessToken),
     accountName: jobberConfig.accountName,
     clientId: jobberConfig.clientId,
     hasSecret: Boolean(jobberConfig.clientSecret),
@@ -4021,14 +4087,9 @@ function upsertJobberClientAndLeadFromQuote(
     quote.isLiveSynced || (jobberClientId && String(jobberClientId).startsWith("Z2lkOi8v"))
   );
 
+  const quoteEmail = String(quote.clientEmail || "").trim().toLowerCase();
+
   let matchedClient = store.clients.find((c: any) => {
-    if (
-      isLiveJobberClient &&
-      jobberClientId &&
-      (c.id === jobberClientId || c.jobberId === jobberClientId)
-    ) {
-      return true;
-    }
     const cPhone = (c.phone || "").replace(/\D/g, "").slice(-10);
     const isRealClientPhone =
       cPhone.length >= 7 && cPhone !== "7805550199" && cPhone !== "7805550100";
@@ -4039,20 +4100,46 @@ function upsertJobberClientAndLeadFromQuote(
     // NEVER merge if both have real street addresses and they are different!
     if (quoteStreet && cStreet && quoteStreet !== cStreet) return false;
 
-    if (isRealNormPhone && isRealClientPhone && cPhone === normPhone) return true;
+    const cEmail = String(c.email || "").trim().toLowerCase();
+    if (quoteEmail && cEmail && quoteEmail !== cEmail) return false;
 
-    const hasFullName = normName.split(/\s+/).filter(Boolean).length >= 2;
-    if (normName && c.name?.trim().toLowerCase() === normName) {
-      if (quoteStreet && cStreet && quoteStreet === cStreet) return true;
-      if (hasFullName && !isRealNormPhone && !isRealClientPhone && !quoteStreet && !cStreet) return true;
+    if (
+      isLiveJobberClient &&
+      jobberClientId &&
+      (c.id === jobberClientId || c.jobberId === jobberClientId)
+    ) {
+      return true;
     }
-    return false;
+
+    const phoneMatched = isRealNormPhone && isRealClientPhone && cPhone === normPhone;
+    const addressMatched = Boolean(quoteStreet && cStreet && quoteStreet === cStreet);
+    const emailMatched = Boolean(quoteEmail && cEmail && quoteEmail === cEmail);
+    const exactNameMatch = Boolean(normName && c.name?.trim().toLowerCase() === normName);
+    const matchingExtras = [phoneMatched, addressMatched, emailMatched].filter(Boolean).length;
+
+    if (exactNameMatch) {
+      if (matchingExtras >= 1) return true;
+      const hasFullName = normName.split(/\s+/).filter(Boolean).length >= 2;
+      if (hasFullName && !isRealNormPhone && !isRealClientPhone && !quoteStreet && !cStreet) return true;
+      return false;
+    }
+
+    // If NOT an exact name match, require at least 2 to 3 attributes in common (e.g. exact phone + exact address, or exact phone + exact email)
+    return matchingExtras >= 2;
   });
 
   if (matchedClient) {
     if (isLiveJobberClient) matchedClient.isJobberLinked = true;
     if (isLiveJobberClient && jobberClientId) matchedClient.jobberId = jobberClientId;
-    if (isRealCustomerName && (matchedClient.name?.startsWith("(") || matchedClient.name?.startsWith("+") || matchedClient.name?.toLowerCase().startsWith("inbound") || matchedClient.name !== cleanQuoteName)) {
+    // Only update name if the existing name was a placeholder ("Inbound Caller", "Phone Lead", etc.)
+    if (
+      isRealCustomerName &&
+      (matchedClient.name?.startsWith("(") ||
+        matchedClient.name?.startsWith("+") ||
+        matchedClient.name?.toLowerCase().startsWith("inbound") ||
+        matchedClient.name?.toLowerCase().startsWith("phone lead") ||
+        matchedClient.name?.toLowerCase() === "client")
+    ) {
       matchedClient.name = cleanQuoteName;
     }
     if (quote.serviceAddress && quote.serviceAddress !== "Edmonton, AB") {
@@ -4647,23 +4734,31 @@ app.post("/api/database/quotes", async (req, res) => {
     return cleaned;
   };
   const normTargetStreet = normalizeStreetKey(serviceAddress);
+  const normTargetEmail = String(clientEmail || "").trim().toLowerCase();
+  const forceNewQuote = Boolean(req.body?.forceNewQuote);
 
-  const existingRecentQuote = (currentStore.quotes || []).find((q: any) => {
-    const qName = normalizePersonKey(q.clientName);
-    const qPhone = (q.clientPhone || "").replace(/\D/g, "").slice(-10);
-    const isRealQPhone = qPhone.length >= 7 && qPhone !== "7805550199" && qPhone !== "7805550100";
-    // NEVER merge if phones differ or street addresses differ!
-    if (isRealTargetPhone && isRealQPhone && qPhone !== normClientPhone) return false;
-    const qStreet = normalizeStreetKey(q.serviceAddress);
-    if (normTargetStreet && qStreet && normTargetStreet !== qStreet) return false;
+  const existingRecentQuote = forceNewQuote
+    ? undefined
+    : (currentStore.quotes || []).find((q: any) => {
+        const qName = normalizePersonKey(q.clientName);
+        const qPhone = (q.clientPhone || "").replace(/\D/g, "").slice(-10);
+        const isRealQPhone = qPhone.length >= 7 && qPhone !== "7805550199" && qPhone !== "7805550100";
+        // NEVER merge if phones differ or street addresses differ!
+        if (isRealTargetPhone && isRealQPhone && qPhone !== normClientPhone) return false;
+        const qStreet = normalizeStreetKey(q.serviceAddress);
+        if (normTargetStreet && qStreet && normTargetStreet !== qStreet) return false;
 
-    const sameClient =
-      (isRealTargetPhone && isRealQPhone && qPhone === normClientPhone) ||
-      (normClientName && qName === normClientName && normTargetStreet && qStreet === normTargetStreet);
-    if (!sameClient) return false;
-    const ageMs = Date.now() - new Date(q.createdAt || 0).getTime();
-    return ageMs >= 0 && ageMs < 30 * 60 * 1000;
-  });
+        const exactName = Boolean(normClientName && qName === normClientName);
+        const phoneMatched = isRealTargetPhone && isRealQPhone && qPhone === normClientPhone;
+        const streetMatched = Boolean(normTargetStreet && qStreet && normTargetStreet === qStreet);
+
+        const sameClient =
+          (exactName && (phoneMatched || streetMatched)) ||
+          (!exactName && phoneMatched && streetMatched);
+        if (!sameClient) return false;
+        const ageMs = Date.now() - new Date(q.createdAt || 0).getTime();
+        return ageMs >= 0 && ageMs < 30 * 60 * 1000;
+      });
 
   const existingMatchedClient = (currentStore.clients || []).find((c: any) => {
     const cName = normalizePersonKey(c.name);
@@ -4673,12 +4768,24 @@ app.post("/api/database/quotes", async (req, res) => {
     if (isRealTargetPhone && isRealCPhone && cPhone !== normClientPhone) return false;
     const cStreet = normalizeStreetKey(c.address);
     if (normTargetStreet && cStreet && normTargetStreet !== cStreet) return false;
+    const cEmail = String(c.email || "").trim().toLowerCase();
+    if (normTargetEmail && cEmail && normTargetEmail !== cEmail) return false;
 
-    return (
-      (isRealTargetPhone && isRealCPhone && cPhone === normClientPhone) ||
-      (normClientName && cName === normClientName && normTargetStreet && cStreet === normTargetStreet)
-    );
+    const exactName = Boolean(normClientName && cName === normClientName);
+    const phoneMatched = isRealTargetPhone && isRealCPhone && cPhone === normClientPhone;
+    const streetMatched = Boolean(normTargetStreet && cStreet && normTargetStreet === cStreet);
+    const emailMatched = Boolean(normTargetEmail && cEmail && normTargetEmail === cEmail);
+    const extraCount = [phoneMatched, streetMatched, emailMatched].filter(Boolean).length;
+
+    if (exactName) {
+      return extraCount >= 1;
+    }
+    // If NOT an exact name match, require at least 2 to 3 attributes in common
+    return extraCount >= 2;
   });
+
+  // Automatically verify/refresh Jobber token before pushing so saving from the live website works first try!
+  const activeJobberToken = await ensureValidJobberToken();
 
   // STRICT ORDER: Step 1 Find or Update Single Client in Jobber -> Step 2 Create Service Property & Single Quote (or Request if createRequestOnly) in Jobber
   const existingRealJobberQuoteId =
@@ -4735,7 +4842,7 @@ app.post("/api/database/quotes", async (req, res) => {
       existingJobberPropertyId: existingRealJobberPropertyId,
       lineItems: defaultLineItems,
     },
-    jobberConfig.accessToken,
+    activeJobberToken,
     getJobberCreds()
   );
 
