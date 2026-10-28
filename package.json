@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "vite build \u0026\u0026 esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "dev": "tsx server.ts",
     "lint": "tsc --noEmit",
@@ -21,6 +21,7 @@
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.11",
     "drizzle-orm": "^0.45.3",
+    "exceljs": "^4.4.0",
     "express": "^4.22.3",
     "firebase": "^12.19.0",
     "firebase-admin": "^14.5.0",

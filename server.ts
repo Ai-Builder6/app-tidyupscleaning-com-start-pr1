@@ -3396,6 +3396,10 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       mutated = true;
     }
   }
+  const googleSheetUrl: string =
+    (store as any)?.cleanSheetConfig?.createdDriveSheetUrl ||
+    (store as any)?.cleanSheetConfig?.sheetUrl ||
+    "https://app.tidyupscleaning.com/clean-sheet";
 
   // 1. Keep store.adLeads strictly filtered to valid Edmonton leads within the last 14 days (<7 days if uncommunicated) with zero fake/simulated rows
   const obsoleteLeadPrefixes = ["lead-auto-", "lead-fb-10", "lead-goog-10", "lead-ig-10", "lead-web-10", "lead-sheet-mvmw", "lead-sheet-mvo"];

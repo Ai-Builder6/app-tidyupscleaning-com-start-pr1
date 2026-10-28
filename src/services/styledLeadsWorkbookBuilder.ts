@@ -618,7 +618,12 @@ function extractNumericJobberId(rawId?: string): string | null {
   const trimmed = String(rawId).trim();
   if (/^\d+$/.test(trimmed)) return trimmed;
   try {
-    const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+    const decoded =
+      typeof Buffer !== 'undefined'
+        ? Buffer.from(trimmed, 'base64').toString('utf8')
+        : typeof atob === 'function'
+        ? atob(trimmed)
+        : '';
     const m = decoded.match(/\/(\d+)$/);
     if (m) return m[1];
   } catch {
@@ -657,9 +662,11 @@ function styleWorksheetWithTheme(
   headerBgArgb: string,
   kpiBgArgb: string,
   rows: any[],
-  quotes: any[]
+  quotes: any[],
+  defaultTabName?: CleanSheetTabName
 ) {
   ws.columns = SHEET_COLUMNS.map((c) => ({ key: c.key, width: c.width }));
+  const defaultPalette = defaultTabName ? TAB_THEME_PALETTES[defaultTabName] : null;
 
   // Freeze top 3 rows (Row 1: Title Banner, Row 2: KPI & Archive Links Bar, Row 3: Column Headers) and first 4 columns
   ws.views = [
@@ -815,12 +822,83 @@ function styleWorksheetWithTheme(
     });
   });
 
+  // Pre-format clean alternating-shaded visual rows (up to at least 20 visible rows) so even a fresh 0-lead tab looks like a complete visual dashboard table
+  const minVisualDataRows = Math.max(20, rows.length);
+  for (let idx = rows.length; idx < minVisualDataRows; idx++) {
+    const rowNumber = idx + 4;
+    const isEven = idx % 2 === 0;
+    const evenArgb = defaultPalette ? defaultPalette.rowEvenBgArgb : 'FFF8FAFC';
+    const oddArgb = defaultPalette ? defaultPalette.rowOddBgArgb : 'FFF1F5F9';
+    const rowBgArgb = isEven ? evenArgb : oddArgb;
+
+    const row = ws.getRow(rowNumber);
+    row.values = [
+      '',
+      defaultPalette ? `${defaultPalette.icon} ${defaultPalette.tabName}` : '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'Edmonton',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'Good lead',
+      'New',
+      '',
+    ];
+    row.height = 22;
+
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF475569' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: rowBgArgb },
+      };
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal:
+          colNumber === 13
+            ? 'right'
+            : colNumber === 1 || colNumber === 2 || colNumber === 14 || colNumber === 17 || colNumber === 18
+            ? 'center'
+            : 'left',
+      };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      };
+
+      if (colNumber === 2 && defaultPalette) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: defaultPalette.badgeBgArgb },
+        };
+        cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: defaultPalette.badgeFgArgb } };
+      }
+
+      if (colNumber === 13) {
+        cell.numFmt = '$#,##0.00';
+      }
+    });
+  }
+
   // Summary Footer Row
-  const footerRowNum = Math.max(4, rows.length + 4);
+  const footerRowNum = Math.max(4, minVisualDataRows + 4);
   const footerRow = ws.getRow(footerRowNum);
   footerRow.values = [
     'TOTALS',
-    `${rows.length} Lead(s)`,
+    `${rows.length} Active Lead(s)`,
     '',
     '',
     '',
@@ -831,7 +909,7 @@ function styleWorksheetWithTheme(
     '',
     '',
     'Total Quoted Pipeline:',
-    rows.length > 0 ? { formula: `SUM(M4:M${rows.length + 3})`, result: totalQuoted } : 0,
+    { formula: `SUM(M4:M${footerRowNum - 1})`, result: totalQuoted },
     '',
     '',
     '',
@@ -930,7 +1008,8 @@ export async function generateStyledLeadsWorkbookBuffer(
       palette.headerBgArgb,
       palette.kpiBgArgb,
       tabRows,
-      quotes
+      quotes,
+      tabName
     );
   }
 

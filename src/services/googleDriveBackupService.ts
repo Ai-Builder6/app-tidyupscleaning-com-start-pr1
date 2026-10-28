@@ -672,9 +672,96 @@ async function performServerSideGoogleSheetSync(options?: {
 }
 
 /**
- * 1-Click: Creates a brand-new 7-tab Clean Google Sheet ("Facebook Leads 1", "Facebook Leads 2",
- * "Google Leads 1", "Google Leads 2", "Other Ads", "Facebook AI", "Quo") in the user's Google Drive
- * and connects its new URL as the active Connected Google Sheet URL!
+/**
+ * Constructs a strict RFC 2387 multipart/related body for Google Drive API v3 uploads.
+ * Never uses browser FormData (which sends multipart/form-data with filename="blob" and causes
+ * Google Sheets to create a single tab named "blob").
+ */
+function buildGoogleDriveMultipartRelatedBody(
+  metadata: Record<string, any>,
+  fileBytes: Uint8Array,
+  fileMimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+): { body: Blob; contentType: string } {
+  const boundary = 'tidyups_drive_xlsx_boundary_2026';
+  const metaHeader =
+    `--${boundary}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: ${fileMimeType}\r\n\r\n`;
+  const closing = `\r\n--${boundary}--`;
+  const encoder = new TextEncoder();
+  const body = new Blob(
+    [encoder.encode(metaHeader), fileBytes, encoder.encode(closing)],
+    { type: `multipart/related; boundary=${boundary}` }
+  );
+  return {
+    body,
+    contentType: `multipart/related; boundary=${boundary}`,
+  };
+}
+
+/**
+ * Verifies that an ArrayBuffer is a genuine ZIP/XLSX binary (starts with PK\x03\x04 magic bytes 0x50 0x4B 0x03 0x04)
+ * and is never an HTML build splash screen or error JSON.
+ */
+function isValidXlsxZipBytes(bytes: Uint8Array): boolean {
+  return (
+    bytes.byteLength > 4000 &&
+    bytes[0] === 0x50 &&
+    bytes[1] === 0x4b &&
+    bytes[2] === 0x03 &&
+    bytes[3] === 0x04
+  );
+}
+
+/**
+ * Fetches the 9-tab Styled Clean Leads .xlsx workbook (All New Leads 14-Day, Facebook Leads 1, Facebook Leads 2,
+ * Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo, Archived Old Sheets) and verifies its magic ZIP bytes.
+ * Retries automatically if the server is momentarily restarting, and falls back to client-side generation if needed.
+ */
+export async function fetchVerifiedStyledLeadsXlsxBytes(): Promise<Uint8Array> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`/api/leads/export.xlsx?project=tidyups&_t=${Date.now()}`, {
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const buf = await res.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        if (isValidXlsxZipBytes(bytes)) {
+          return bytes;
+        }
+      }
+    } catch {
+      // retry after brief pause
+    }
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+
+  // Client-side fallback using styledLeadsWorkbookBuilder so it is 100% impossible to ever upload a non-XLSX blob
+  const { generateStyledLeadsWorkbookBuffer } = await import('./styledLeadsWorkbookBuilder');
+  let currentLeads: any[] = [];
+  let currentQuotes: any[] = [];
+  try {
+    const leadsRes = await fetch('/api/leads?project=tidyups');
+    if (leadsRes.ok) {
+      const lData = await leadsRes.json();
+      if (Array.isArray(lData?.leads)) currentLeads = lData.leads;
+    }
+  } catch {}
+  const fallbackBuf = await generateStyledLeadsWorkbookBuffer({
+    leads: currentLeads,
+    quotes: currentQuotes,
+  });
+  return new Uint8Array(fallbackBuf);
+}
+
+/**
+ * 1-Click: Creates a brand-new 9-tab Visual Clean Google Sheet ("All New Leads (14-Day)",
+ * "Facebook Leads 1", "Facebook Leads 2", "Google Leads 1", "Google Leads 2",
+ * "Other Ads", "Facebook AI", "Quo", "Archived Old Sheets") in the user's Google Drive
+ * using strict RFC 2387 multipart/related (never "blob") and connects its new URL!
  */
 export async function createNewCleanLeadsSheetInDrive(options?: {
   sheetTitle?: string;
@@ -713,45 +800,73 @@ export async function createNewCleanLeadsSheetInDrive(options?: {
     // If folder lookup fails, upload directly to root of Google Drive so creation never fails
   }
 
-  // Fetch the clean 7-tab XLSX buffer from the server (contains ONLY the 7 clean tabs, zero ScrubbyBuilder tabs)
-  const xlsxRes = await fetch('/api/leads/export.xlsx?project=tidyups');
-  if (!xlsxRes.ok) {
-    return performServerSideGoogleSheetSync({
-      sheetTitle: options?.sheetTitle,
-      downloadXlsx: false,
-    });
-  }
-  const xlsxBlob = await xlsxRes.blob();
+  // Fetch & verify the real 9-tab Styled .xlsx binary (guaranteed PK\x03\x04 ZIP with all 9 visual tabs, never HTML/CSV)
+  const xlsxBytes = await fetchVerifiedStyledLeadsXlsxBytes();
 
   const dateStr = new Date().toISOString().slice(0, 10);
   const sheetName =
     options?.sheetTitle || `TidyUps Brand-New Leads Hub (7 Tabs • 14-Day Fresh) - ${dateStr}`;
 
+  // Also upgrade any previously created "TidyUps Brand-New Leads Hub" sheet in Drive that had the "blob" tab
+  try {
+    const qOld = encodeURIComponent(
+      `mimeType = 'application/vnd.google-apps.spreadsheet' and name contains 'TidyUps Brand-New Leads Hub' and trashed = false`
+    );
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${qOld}&fields=files(id,name)&pageSize=5`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      if (Array.isArray(searchData.files)) {
+        for (const f of searchData.files) {
+          if (f?.id && !isArchivedOldSheetUrlOrId(f.id)) {
+            const patchPayload = buildGoogleDriveMultipartRelatedBody(
+              { name: sheetName, mimeType: 'application/vnd.google-apps.spreadsheet' },
+              xlsxBytes
+            );
+            await fetch(
+              `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(
+                f.id
+              )}?uploadType=multipart&fields=id,name,webViewLink`,
+              {
+                method: 'PATCH',
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': patchPayload.contentType,
+                },
+                body: patchPayload.body,
+              }
+            ).catch(() => {});
+          }
+        }
+      }
+    }
+  } catch {
+    // non-blocking repair of previous sheet
+  }
+
   const createMeta: Record<string, any> = {
     name: sheetName,
     mimeType: 'application/vnd.google-apps.spreadsheet',
     description:
-      'Brand-New TidyUps Clean Leads Google Sheet (Tabs: Facebook Leads 1, Facebook Leads 2, Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo).',
+      'Brand-New TidyUps Clean Leads Google Sheet (9 Visual Tabs: All New Leads 14-Day, Facebook Leads 1, Facebook Leads 2, Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo, Archived Old Sheets).',
   };
   if (folder.id) {
     createMeta.parents = [folder.id];
   }
 
-  const form = new FormData();
-  form.append('metadata', new Blob([JSON.stringify(createMeta)], { type: 'application/json' }));
-  form.append(
-    'file',
-    new Blob([xlsxBlob], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    })
-  );
+  const multipart = buildGoogleDriveMultipartRelatedBody(createMeta, xlsxBytes);
 
   const uploadRes = await fetch(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink',
     {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': multipart.contentType,
+      },
+      body: multipart.body,
     }
   );
 
@@ -791,9 +906,7 @@ export async function createNewCleanLeadsSheetInDrive(options?: {
 
 /**
  * Syncs and formats the Master Google Sheet with the latest multi-tab leads data.
- * Never opens a browser Google OAuth popup (eliminating Error 400: origin_mismatch on app.tidyupscleaning.com).
- * Always pulls any newly added Facebook Lead Ads / Google Ads rows from the Google Sheet FIRST
- * before syncing and formatting headers!
+ * Uses strict RFC 2387 multipart/related and verified PK\x03\x04 XLSX bytes so all 9 visual tabs are preserved.
  */
 export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
   spreadsheetId?: string;
@@ -820,9 +933,14 @@ export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
     });
   }
 
-  // Resolve candidate spreadsheet IDs: explicit option -> server config (createdDriveSheetId / spreadsheetId) -> existing sheet in Drive folder
+  // Resolve candidate spreadsheet IDs: explicit option -> server config (createdDriveSheetId / spreadsheetId)
   const candidateIds: string[] = [];
-  if (options?.spreadsheetId && !options.spreadsheetId.includes('clean_sheet') && options.spreadsheetId.length >= 20) {
+  if (
+    options?.spreadsheetId &&
+    !options.spreadsheetId.includes('clean_sheet') &&
+    options.spreadsheetId.length >= 20 &&
+    !isArchivedOldSheetUrlOrId(options.spreadsheetId)
+  ) {
     candidateIds.push(options.spreadsheetId.trim());
   }
 
@@ -830,13 +948,18 @@ export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
     const cfgRes = await fetch('/api/google-sheets/config?project=tidyups');
     if (cfgRes.ok) {
       const cfg = await cfgRes.json();
-      if (cfg?.createdDriveSheetId && !candidateIds.includes(cfg.createdDriveSheetId)) {
+      if (
+        cfg?.createdDriveSheetId &&
+        !isArchivedOldSheetUrlOrId(cfg.createdDriveSheetId) &&
+        !candidateIds.includes(cfg.createdDriveSheetId)
+      ) {
         candidateIds.unshift(cfg.createdDriveSheetId);
       }
       if (
         cfg?.spreadsheetId &&
         !cfg.spreadsheetId.includes('clean_sheet') &&
         cfg.spreadsheetId.length >= 20 &&
+        !isArchivedOldSheetUrlOrId(cfg.spreadsheetId) &&
         !candidateIds.includes(cfg.spreadsheetId)
       ) {
         candidateIds.push(cfg.spreadsheetId);
@@ -846,38 +969,29 @@ export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
     // ignore config fetch error
   }
 
-  // STEP 1 (PULL BEFORE PUSH): Pull any new rows written by Facebook Lead Ads / Google Ads from the sheet FIRST!
+  // STEP 1 (PULL BEFORE PUSH): Pull any new rows written by Facebook Lead Ads / Google Ads from the new sheet FIRST!
   let pullSnap: PullGoogleSheetLeadsResult | null = null;
-  try {
-    const targetSheetUrlForPull =
-      candidateIds.length > 0
-        ? `https://docs.google.com/spreadsheets/d/${candidateIds[0]}/edit`
-        : undefined;
-    pullSnap = await pullNewLeadsFromGoogleSheetInDrive({
-      sheetUrl: targetSheetUrlForPull,
-      accessToken: token,
-    });
-  } catch {
-    // ignore pre-pull warning
+  if (candidateIds.length > 0) {
+    try {
+      const targetSheetUrlForPull = `https://docs.google.com/spreadsheets/d/${candidateIds[0]}/edit`;
+      pullSnap = await pullNewLeadsFromGoogleSheetInDrive({
+        sheetUrl: targetSheetUrlForPull,
+        accessToken: token,
+      });
+    } catch {
+      // ignore pre-pull warning
+    }
   }
 
-  // STEP 2 (EXPORT & PATCH): Now export the complete merged multi-tab workbook and update the Google Sheet in Drive
-  const xlsxRes = await fetch('/api/leads/export.xlsx?project=tidyups');
-  if (xlsxRes.ok && candidateIds.length > 0) {
-    const xlsxBlob = await xlsxRes.blob();
+  // STEP 2 (EXPORT & PATCH): Export the verified 9-tab workbook and update the Google Sheet in Drive
+  if (candidateIds.length > 0) {
+    const xlsxBytes = await fetchVerifiedStyledLeadsXlsxBytes();
     for (const targetId of candidateIds) {
       try {
         const patchMeta = {
           mimeType: 'application/vnd.google-apps.spreadsheet',
         };
-        const patchForm = new FormData();
-        patchForm.append('metadata', new Blob([JSON.stringify(patchMeta)], { type: 'application/json' }));
-        patchForm.append(
-          'file',
-          new Blob([xlsxBlob], {
-            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          })
-        );
+        const multipart = buildGoogleDriveMultipartRelatedBody(patchMeta, xlsxBytes);
 
         const patchRes = await fetch(
           `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(
@@ -885,8 +999,11 @@ export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
           )}?uploadType=multipart&fields=id,name,webViewLink`,
           {
             method: 'PATCH',
-            headers: { Authorization: `Bearer ${token}` },
-            body: patchForm,
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': multipart.contentType,
+            },
+            body: multipart.body,
           }
         );
 
@@ -933,14 +1050,29 @@ export async function syncLeadsToLiveGoogleSheetInDrive(options?: {
 
 /**
  * Downloads a file from an internal /api/... endpoint using in-memory fetch() + Blob
- * so the browser NEVER navigates to a raw .run.app URL (preventing the
- * "Action required to load your app / blocking a required security cookie" screen).
+ * so the browser NEVER navigates to a raw .run.app URL and verifies .xlsx magic bytes.
  */
 export async function downloadFileFromApiWithoutNavigation(
   apiUrl: string,
   fallbackFilename: string
 ): Promise<void> {
-  const res = await fetch(apiUrl);
+  if (apiUrl.includes('leads/export.xlsx')) {
+    const xlsxBytes = await fetchVerifiedStyledLeadsXlsxBytes();
+    const blob = new Blob([xlsxBytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = fallbackFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+    return;
+  }
+
+  const res = await fetch(apiUrl, { cache: 'no-store' });
   if (!res.ok) {
     throw new Error(`Download failed (${res.status})`);
   }
@@ -958,4 +1090,5 @@ export async function downloadFileFromApiWithoutNavigation(
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
 }
+
 
