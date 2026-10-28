@@ -67,6 +67,7 @@ import {
   isFalseOrCatalogLeadRow,
   isOutOfEdmontonOrFakeOrOutdatedLead,
   isAddressInGreaterEdmonton,
+  resolveCleanSheetTab as resolveCanonicalSheetTab,
 } from "./src/services/styledLeadsWorkbookBuilder";
 import { loadStore, saveStore, AppPersistentStore } from "./src/services/storeService";
 import { db } from "./src/db";
@@ -3244,59 +3245,37 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
   let mutated = false;
   const googleSheetUrl = `https://docs.google.com/spreadsheets/d/${googleSheetsSyncState?.spreadsheetId || LEADS_SPREADSHEET_ID}/edit`;
 
-  // 1. Keep store.adLeads as a CLEAN Google Sheet (preserve all webhook, sheet, and customer booking rows)
+  // 1. Keep store.adLeads strictly filtered to valid Edmonton leads within the last 14 days (<7 days if uncommunicated) with zero fake/simulated rows
   const obsoleteLeadPrefixes = ["lead-auto-", "lead-fb-10", "lead-goog-10", "lead-ig-10", "lead-web-10"];
   if (!Array.isArray(store.adLeads)) {
     store.adLeads = [];
     mutated = true;
   } else {
-    const cleanedLeads = store.adLeads.filter((l: any) => {
-      const lid = String(l.id || "");
-      if (obsoleteLeadPrefixes.some((p) => lid.startsWith(p))) return false;
-      if (l.customerName?.toLowerCase().includes("devon clark")) return false;
-      if (l.quoteId === "qt_4331" || l.quoteNumber === "QT-4331") return false;
-      return true;
-    });
+    const cleanedLeads = store.adLeads
+      .filter((l: any) => {
+        if (!l) return false;
+        const lid = String(l.id || "");
+        if (obsoleteLeadPrefixes.some((p) => lid.startsWith(p))) return false;
+        if (l.customerName?.toLowerCase().includes("devon clark")) return false;
+        if (l.quoteId === "qt_4331" || l.quoteNumber === "QT-4331") return false;
+        if (isOutOfEdmontonOrFakeOrOutdatedLead(l)) return false;
+        return true;
+      })
+      .map((l: any) => {
+        const mapped = resolveCleanSheetTab(l.sourceTab || l.source, l);
+        if (l.sourceTab !== mapped.sourceTab) {
+          mutated = true;
+          return { ...l, sourceTab: mapped.sourceTab };
+        }
+        return l;
+      });
     if (cleanedLeads.length !== store.adLeads.length) {
       store.adLeads = cleanedLeads;
       mutated = true;
     }
   }
 
-  // Ensure Rahum (Quote #4293) is present on the Clean Sheet if not explicitly cleared
-  if (store.adLeads.length === 0 && !(store as any).cleanSheetExplicitlyBlank) {
-    store.adLeads = [
-      {
-        id: "lead-clean-rahum-4293",
-        customerName: "Rahum (Raheem)",
-        phone: "416-560-1354",
-        email: "",
-        address: "7112 49 Street Northwest",
-        city: "Edmonton",
-        postalCode: "T6B 1K5",
-        serviceRequested: "3Bed 2Bath Basic Initial Cleaning (1 Pro Cleaner)",
-        bedrooms: "3 Bedrooms",
-        bathrooms: "2 Bathrooms",
-        dateOfServiceRequested: "2026-10-16",
-        source: "Voice / Quick Quote" as any,
-        sourceTab: "Voice & Quick Quotes",
-        campaignName: "Clean Sheet — Voice & Quick Quote",
-        dateReceived: "2026-10-15T23:46:55Z",
-        status: "New",
-        verdict: "Good lead",
-        isJobberSynced: true,
-        jobberClientId: "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTY0MjM1NDI=",
-        quoteId: "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzg5MjY3",
-        quoteNumber: "QT-4293",
-        quotedAmount: 221.07,
-        notes:
-          "3Bed 2Bath Basic Cleaning (4 hrs @ $48.50/hr = $194.00) + $12.50 Fuel Surcharge - $10.00 Google Ad Discount = $221.07 CAD (Deposit: $50.00). Synced with Jobber Quote #4293 (https://secure.getjobber.com/quotes/67389267).",
-      },
-    ];
-    mutated = true;
-  }
-
-  // 2. Clean fake Devon Clarke client and ensure real Jobber clients are in store.clients
+  // 2. Clean fake Devon Clarke & Rahum seed clients from store.clients
   if (!store.clients || store.clients.length === 0) {
     store.clients = [...INITIAL_CLIENTS];
     mutated = true;
@@ -3305,39 +3284,11 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       (c: any) =>
         c.id !== "cli-devon-clarke" &&
         !c.name?.toLowerCase().includes("devon clark") &&
+        !c.name?.toLowerCase().includes("rahum (raheem)") &&
         c.jobberId !== "jobber-cli-4315"
     );
     if (filteredClients.length !== store.clients.length) {
       store.clients = filteredClients;
-      mutated = true;
-    }
-    const hasRahum = store.clients.some(
-      (c: any) =>
-        c.id === "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTY0MjM1NDI=" ||
-        c.name?.toLowerCase().includes("rahum") ||
-        c.name?.toLowerCase().includes("raheem")
-    );
-    if (!hasRahum) {
-      store.clients.unshift({
-        id: "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTY0MjM1NDI=",
-        name: "Rahum (Raheem)",
-        phone: "416-560-1354",
-        email: "",
-        address: "7112 49 Street Northwest, Edmonton, AB, T6B 1K5",
-        city: "Edmonton",
-        province: "AB",
-        postalCode: "T6B 1K5",
-        verdict: "Good lead",
-        tags: ["jobber-sync", "quote-qt-4293"],
-        isJobberLinked: true,
-        jobberId: "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTY0MjM1NDI=",
-        totalJobs: 1,
-        latestServiceDate: "2026-10-16",
-        notes: "Synced with Jobber Client #156423542 & Quote #4293 ($221.07 CAD, Deposit $50.00).",
-        source: "Jobber",
-        createdAt: "2026-10-15T23:46:55Z",
-        updatedAt: "2026-10-15T23:47:06Z",
-      } as any);
       mutated = true;
     }
   }
@@ -3525,17 +3476,8 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       }
     }
 
-    // Ensure every recent/user-created quote is also linked into store.clients and store.adLeads (oldest-to-newest so newest ends up at index 0)
-    for (const q of [...store.quotes].reverse()) {
-      if (
-        q &&
-        (q.isLocal ||
-          String(q.id || "").startsWith("quote_local_") ||
-          String(q.createdAt || "") >= "2026-10-15")
-      ) {
-        upsertJobberClientAndLeadFromQuote(store, q, q.jobberClientId, q.source);
-      }
-    }
+    // Do NOT auto-convert historical or seeded Jobber quotes into adLeads on store repair
+    // Only user-initiated leads, webhooks, and live Quo calls appear in store.adLeads.
 
     // Ensure every adLead has a strictly unique ID and move local/recent quote leads to the front
     if (Array.isArray(store.adLeads)) {
@@ -4033,22 +3975,35 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
   return mutated;
 }
 
-// Helper: Maps any source label to one of the 4 Clean Google Sheet tabs
-function resolveCleanSheetTab(rawSource?: string): {
+// Helper: Maps any source label to one of the 7 Clean Google Sheet tabs
+function resolveCleanSheetTab(
+  rawSource?: string,
+  leadObj?: any
+): {
   source: string;
-  sourceTab: "FB Leads" | "Google Leads" | "Voice & Quick Quotes" | "Pasted Leads";
+  sourceTab:
+    | "Facebook Leads 1"
+    | "Facebook Leads 2"
+    | "Google Leads 1"
+    | "Google Leads 2"
+    | "Other Ads"
+    | "Facebook AI"
+    | "Quo";
 } {
-  const s = String(rawSource || "").toLowerCase();
-  if (s.includes("fb") || s.includes("facebook") || s.includes("instagram") || s.includes("meta") || s.includes("messenger")) {
-    return { source: "Facebook Lead", sourceTab: "FB Leads" };
+  const sourceTab = resolveCanonicalSheetTab(rawSource, leadObj);
+  if (sourceTab === "Facebook Leads 1" || sourceTab === "Facebook Leads 2") {
+    return { source: "Facebook Lead", sourceTab };
   }
-  if (s.includes("google") || s.includes("gmb") || s.includes("search")) {
-    return { source: "Google Lead", sourceTab: "Google Leads" };
+  if (sourceTab === "Facebook AI") {
+    return { source: "Facebook AI", sourceTab };
   }
-  if (s.includes("paste") || s.includes("table") || s.includes("csv") || s.includes("sms")) {
-    return { source: "Pasted message", sourceTab: "Pasted Leads" };
+  if (sourceTab === "Google Leads 1" || sourceTab === "Google Leads 2") {
+    return { source: "Google Lead", sourceTab };
   }
-  return { source: "Voice / Quick Quote", sourceTab: "Voice & Quick Quotes" };
+  if (sourceTab === "Quo") {
+    return { source: "Quo Call / Voice", sourceTab };
+  }
+  return { source: "Other Ads", sourceTab: "Other Ads" };
 }
 
 // Helper: Upserts a client into store.clients and links/creates a Clean Google Sheet lead in store.adLeads
@@ -6645,10 +6600,13 @@ app.get("/api/auth/me", requireAuth, async (req: AuthRequest, res) => {
 // Clean Google Sheets Lead Hub Endpoints (FB Leads, Google Leads, Voice & Quick Quotes, Pasted Leads)
 // ─────────────────────────────────────────────────────────────────────────────
 const CLEAN_SHEET_TABS = [
-  "FB Leads",
-  "Google Leads",
-  "Voice & Quick Quotes",
-  "Pasted Leads",
+  "Facebook Leads 1",
+  "Facebook Leads 2",
+  "Google Leads 1",
+  "Google Leads 2",
+  "Other Ads",
+  "Facebook AI",
+  "Quo",
 ] as const;
 
 function sanitizeSpreadsheetId(rawId?: string): string {
@@ -7184,12 +7142,14 @@ function extractLeadsFromSheetMatrix(params: {
 
     const { source, sourceTab } = resolveCleanSheetTab(inferredSourceInput);
 
-    const rawCreatedDate =
-      getByHeader("date", "created_time", "timestamp", "date_received") || new Date().toISOString();
+    const rawCreatedDate = getByHeader("date", "created_time", "timestamp", "date_received");
+    if (!rawCreatedDate) {
+      // Skip undated historical rows so nothing older than 14 days is ever imported
+      continue;
+    }
     const requestedDate =
       getByHeader("requested date", "date_of_service_requested", "preferred_date").slice(0, 10) ||
-      rawCreatedDate.slice(0, 10) ||
-      new Date().toISOString().slice(0, 10);
+      rawCreatedDate.slice(0, 10);
 
     const rawQuotedNum = parseFloat(
       String(getByHeader("quoted total", "quoted_amount", "total", "price") || "").replace(/[^0-9.]/g, "")
@@ -7225,10 +7185,10 @@ function extractLeadsFromSheetMatrix(params: {
       source: source as any,
       sourceTab,
       campaignName: `${sourceTab} — Google Sheet (${tabName || "Live Tab"})`,
-      dateReceived: rawCreatedDate.includes("T") ? rawCreatedDate : new Date().toISOString(),
+      dateReceived: rawCreatedDate,
       status: getByHeader("status") || "New",
       verdict: (getByHeader("verdict") || "Good lead") as any,
-      isJobberSynced: true,
+      isJobberSynced: Boolean(rowQuoteNumber),
       quoteNumber: rowQuoteNumber || undefined,
       quotedAmount,
       notes: rawNotes,
@@ -7365,14 +7325,22 @@ async function pullLeadsFromConnectedGoogleSheets(
     googleSheetsSyncState.spreadsheetId ||
     LEADS_SPREADSHEET_ID;
 
+  // Never auto-pull historical rows from the 2 archived old Google Sheets (LEADS_SPREADSHEET_ID / SECONDARY_LEADS_SPREADSHEET_ID)
+  const archivedOldIds = new Set([LEADS_SPREADSHEET_ID, SECONDARY_LEADS_SPREADSHEET_ID]);
   const sheetIdsSet = new Set<string>(
     [
       extractedId,
       googleSheetsSyncState.createdDriveSheetId,
       googleSheetsSyncState.spreadsheetId,
-      LEADS_SPREADSHEET_ID,
-      SECONDARY_LEADS_SPREADSHEET_ID,
-    ].filter((id) => Boolean(id && !String(id).includes("clean_sheet") && String(id).length >= 20))
+    ].filter(
+      (id) =>
+        Boolean(
+          id &&
+            !String(id).includes("clean_sheet") &&
+            String(id).length >= 20 &&
+            !archivedOldIds.has(String(id))
+        )
+    )
   );
 
   // 1. If a direct file buffer or CSV text was provided (e.g. uploaded or client-fetched), parse it immediately
@@ -8252,6 +8220,8 @@ app.patch("/api/leads/:id", (req, res) => {
     bathrooms,
     serviceRequested,
     sourceTab,
+    communicatedAt,
+    hasCommunicated,
   } = req.body || {};
   const store = loadStore(projectId);
   if (store) {
@@ -8267,8 +8237,10 @@ app.patch("/api/leads/:id", (req, res) => {
       if (bedrooms !== undefined) lead.bedrooms = bedrooms;
       if (bathrooms !== undefined) lead.bathrooms = bathrooms;
       if (serviceRequested !== undefined) lead.serviceRequested = serviceRequested;
+      if (communicatedAt !== undefined) lead.communicatedAt = communicatedAt;
+      if (hasCommunicated !== undefined) lead.hasCommunicated = Boolean(hasCommunicated);
       if (sourceTab !== undefined) {
-        const mapped = resolveCleanSheetTab(sourceTab);
+        const mapped = resolveCleanSheetTab(sourceTab, lead);
         lead.sourceTab = mapped.sourceTab;
         lead.source = mapped.source as any;
       }

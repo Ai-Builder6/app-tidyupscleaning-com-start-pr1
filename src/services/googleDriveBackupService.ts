@@ -708,14 +708,14 @@ export async function createNewCleanLeadsSheetInDrive(options?: {
 
   const dateStr = new Date().toISOString().slice(0, 10);
   const sheetName =
-    options?.sheetTitle || `TidyUps Clean Leads & Ads Hub (FB & Google Ads) - ${dateStr}`;
+    options?.sheetTitle || `TidyUps Brand-New Leads Hub (7 Tabs • 14-Day Fresh) - ${dateStr}`;
 
   const createMeta = {
     name: sheetName,
     mimeType: 'application/vnd.google-apps.spreadsheet',
     parents: [folder.id],
     description:
-      'Live TidyUps Clean Leads & Ads Google Sheet (Tabs: FB Leads, Google Leads, Voice & Quick Quotes, Pasted Leads, ScrubbyBuilder Leads). Ready for Facebook Lead Ads & Google Ads.',
+      'Brand-New TidyUps Clean Leads Google Sheet (Tabs: Facebook Leads 1, Facebook Leads 2, Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo + Archived Old Sheets Links).',
   };
 
   const form = new FormData();

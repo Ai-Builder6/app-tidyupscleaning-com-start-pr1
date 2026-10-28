@@ -11,7 +11,26 @@ export type LeadSource =
   | 'Instagram'
   | string;
 
-export type LeadStatus = 'New' | 'Converted' | 'Dismissed' | 'All';
+export type CleanSheetTabName =
+  | 'Facebook Leads 1'
+  | 'Facebook Leads 2'
+  | 'Google Leads 1'
+  | 'Google Leads 2'
+  | 'Other Ads'
+  | 'Facebook AI'
+  | 'Quo';
+
+export const CLEAN_SHEET_TABS: CleanSheetTabName[] = [
+  'Facebook Leads 1',
+  'Facebook Leads 2',
+  'Google Leads 1',
+  'Google Leads 2',
+  'Other Ads',
+  'Facebook AI',
+  'Quo',
+];
+
+export type LeadStatus = 'New' | 'Contacted' | 'Quoted' | 'Converted' | 'Dismissed' | 'All';
 
 export type LeadVerdict = 'Client' | 'Good lead' | 'Bad lead' | 'Spam' | 'Garbage';
 
@@ -34,13 +53,15 @@ export interface AdLeadItem {
   bathrooms?: number | string;
   dateOfServiceRequested?: string;
   source: LeadSource;
-  sourceTab?: string; // e.g. "FB Leads_V2", "Google Leads_V3", "Tidy FB Leads_V1", "Voice & Quick Quotes"
+  sourceTab?: CleanSheetTabName | string;
   campaignName?: string;
   formId?: string;
   adId?: string;
   createdAt?: string;
   dateReceived?: string;
-  status: 'New' | 'Converted' | 'Dismissed' | string;
+  communicatedAt?: string;
+  hasCommunicated?: boolean;
+  status: 'New' | 'Contacted' | 'Quoted' | 'Converted' | 'Dismissed' | string;
   verdict?: LeadVerdict;
   leadVerdict?: 'GOOD_LEAD' | 'POTENTIAL_JOB' | 'BAD_LEAD' | string;
   leadVerdictLabel?: string;

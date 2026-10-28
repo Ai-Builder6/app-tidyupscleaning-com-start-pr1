@@ -49,6 +49,7 @@ import { SpamShieldView } from './components/SpamShieldView';
 import { LiveCallScreenerHUD } from './components/LiveCallScreenerHUD';
 import { AdLeadItem } from './types/lead';
 import { INITIAL_AD_LEADS } from './data/adLeadsData';
+import { filterValidRecentLeads } from './services/styledLeadsWorkbookBuilder';
 import { LegalPagesView, LegalPageType } from './components/LegalPagesView';
 import { CustomerPortalView } from './components/CustomerPortalView';
 import { ThankYouConversionPage } from './components/ThankYouConversionPage';
@@ -580,19 +581,7 @@ export function App() {
   });
   const [leadsList, setLeadsList] = useState<AdLeadItem[]>(() => {
     const base = (storedData?.adLeads && storedData.adLeads.length > 0) ? storedData.adLeads : INITIAL_AD_LEADS;
-    return base.map((l: AdLeadItem) =>
-      l.customerName?.toLowerCase().includes('devon clark') || (l.phone || '').includes('802-4918')
-        ? {
-            ...l,
-            verdict: l.verdict || 'Good lead',
-            quotedAmount: l.quotedAmount || 186.9,
-            quoteId: l.quoteId || 'qt-devon-clarke-2410',
-            quoteNumber: l.quoteNumber || 'QT-2410',
-            jobberClientId: l.jobberClientId || 'jobber-client-devon-clarke',
-            isJobberSynced: true,
-          }
-        : l
-    );
+    return filterValidRecentLeads(base);
   });
   const [isQuickQuoteModalOpen, setIsQuickQuoteModalOpen] = useState<boolean>(false);
   const [selectedLeadForQuickQuote, setSelectedLeadForQuickQuote] = useState<AdLeadItem | null>(null);
@@ -887,25 +876,13 @@ export function App() {
     }
   }, []);
 
-  // Merge leads from backend Google Sheets / Ad Leads endpoint without ever overwriting newer local leads
+  // Sync leads from backend Google Sheets / Ad Leads endpoint with strict 14-day & 7-day uncommunicated filtering
   useEffect(() => {
     fetch(`/api/leads?project=${activeProjectId}`)
       .then((r) => r.json())
       .then((data) => {
-        if (data && Array.isArray(data.leads) && data.leads.length > 0) {
-          setLeadsList((prev) => {
-            const byId = new Map<string, AdLeadItem>();
-            for (const item of data.leads) {
-              if (item && item.id) byId.set(String(item.id), item);
-            }
-            for (const localItem of prev) {
-              if (localItem && localItem.id) {
-                const serverItem = byId.get(String(localItem.id));
-                byId.set(String(localItem.id), serverItem ? { ...localItem, ...serverItem } : localItem);
-              }
-            }
-            return Array.from(byId.values());
-          });
+        if (data && Array.isArray(data.leads)) {
+          setLeadsList(filterValidRecentLeads(data.leads));
         }
       })
       .catch((err) => console.warn('Leads fetch error:', err));
@@ -1454,23 +1431,12 @@ export function App() {
         });
         const data = await res.json();
         if (data?.success) {
-          if (Array.isArray(data.leads) && data.leads.length > 0) {
-            setLeadsList((prev) => {
-              const byId = new Map<string, AdLeadItem>();
-              for (const l of prev) {
-                if (l && l.id) byId.set(String(l.id), l);
-              }
-              for (const l of data.leads) {
-                if (l && l.id) {
-                  const existing = byId.get(String(l.id));
-                  if (!existing) {
-                    saveLeadToFirestore(l).catch(() => {});
-                  }
-                  byId.set(String(l.id), existing ? { ...existing, ...l } : l);
-                }
-              }
-              return Array.from(byId.values());
-            });
+          if (Array.isArray(data.leads)) {
+            const cleanLeads = filterValidRecentLeads(data.leads);
+            setLeadsList(cleanLeads);
+            for (const l of cleanLeads) {
+              saveLeadToFirestore(l).catch(() => {});
+            }
           }
           if (Array.isArray(data.quotes) && data.quotes.length > 0) {
             setQuotesList((prev) => dedupeQuotesList([...data.quotes, ...prev]));
@@ -2024,20 +1990,8 @@ export function App() {
           if (data.quoCallLogs && data.quoCallLogs.length > 0) setQuoCallsList(data.quoCallLogs);
           if (data.spamShieldConfig) setSpamShieldConfig(data.spamShieldConfig);
           if (data.blockedCallsHistory && data.blockedCallsHistory.length > 0) setBlockedCallsHistory(data.blockedCallsHistory);
-          if (data.adLeads && data.adLeads.length > 0) {
-            setLeadsList((prev) => {
-              const byId = new Map<string, AdLeadItem>();
-              for (const l of prev) {
-                if (l && l.id) byId.set(String(l.id), l);
-              }
-              for (const l of data.adLeads) {
-                if (l && l.id) {
-                  const existing = byId.get(String(l.id));
-                  byId.set(String(l.id), existing ? { ...existing, ...l } : l);
-                }
-              }
-              return Array.from(byId.values());
-            });
+          if (Array.isArray(data.adLeads)) {
+            setLeadsList(filterValidRecentLeads(data.adLeads));
           }
           if (data.serviceCatalog && data.serviceCatalog.length > 0) setServiceCatalog(data.serviceCatalog);
           if (Array.isArray(data.headerNavOrder) && data.headerNavOrder.length > 0) {
@@ -2113,15 +2067,16 @@ export function App() {
   // Incremental Delta Persistence whenever Leads or Quotes are added/edited in any view
   const handleLeadsUpdated = useCallback(
     (updatedLeads: AdLeadItem[]) => {
-      setLeadsList(updatedLeads);
+      const cleanUpdated = filterValidRecentLeads(updatedLeads);
+      setLeadsList(cleanUpdated);
       setLastSyncedAllAt(new Date().toISOString());
       fetch(`/api/store/save?project=${activeProjectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-project-id': activeProjectId },
-        body: JSON.stringify({ adLeads: updatedLeads }),
+        body: JSON.stringify({ adLeads: cleanUpdated }),
       }).catch(() => {});
       // Delta-sync top changed leads to Firestore
-      updatedLeads.slice(0, 15).forEach((lead) => {
+      cleanUpdated.slice(0, 15).forEach((lead) => {
         saveLeadToFirestore(lead).catch(() => {});
       });
     },

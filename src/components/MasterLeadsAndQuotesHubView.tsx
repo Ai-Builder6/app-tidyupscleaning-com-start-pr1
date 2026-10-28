@@ -32,7 +32,14 @@ import {
   ArrowRight,
   Upload,
 } from 'lucide-react';
-import { AdLeadItem } from '../types/lead';
+import { AdLeadItem, CleanSheetTabName, CLEAN_SHEET_TABS } from '../types/lead';
+import {
+  ARCHIVED_OLD_GOOGLE_SHEETS,
+  TAB_THEME_PALETTES,
+  resolveCleanSheetTab,
+  filterValidRecentLeads,
+  isFakeOrSimulatedLead,
+} from '../services/styledLeadsWorkbookBuilder';
 import { Technician, ServiceTicket } from '../types/dispatch';
 import { ScheduledJobItem } from './ScheduledJobsView';
 import { getEdmontonToday, getCleanerColor } from '../data/jobberCalendarData';
@@ -51,10 +58,7 @@ export type MasterHubFocusBlock = 'ALL' | 'PASTE_TABLE' | 'MASTER_TABLE' | 'SCHE
 
 export type MasterCategoryFilter =
   | 'ALL'
-  | 'FB Leads'
-  | 'Google Leads'
-  | 'Voice & Quick Quotes'
-  | 'Pasted Leads'
+  | CleanSheetTabName
   | 'Jobber Quotes';
 
 interface MasterLeadsAndQuotesHubViewProps {
@@ -112,7 +116,7 @@ interface PasteDraftRow {
   bathrooms: string;
   serviceRequested: string;
   quotedAmount: number;
-  sourceTab: 'Pasted Leads' | 'FB Leads' | 'Google Leads' | 'Voice & Quick Quotes';
+  sourceTab: CleanSheetTabName;
   notes: string;
 }
 
@@ -165,13 +169,19 @@ function parseSmartPasteText(rawText: string): PasteDraftRow[] {
       serviceRequested = 'Carpet & Upholstery Steam Cleaning';
     }
 
-    let sourceTab: PasteDraftRow['sourceTab'] = 'Pasted Leads';
-    if (/\b(fb|facebook|meta|instagram)\b/i.test(line)) {
-      sourceTab = 'FB Leads';
+    let sourceTab: PasteDraftRow['sourceTab'] = 'Other Ads';
+    if (/\b(facebook\s*ai|fb\s*ai|messenger\s*ai)\b/i.test(line)) {
+      sourceTab = 'Facebook AI';
+    } else if (/\b(fb\s*2|facebook\s*2)\b/i.test(line)) {
+      sourceTab = 'Facebook Leads 2';
+    } else if (/\b(fb|facebook|meta|instagram)\b/i.test(line)) {
+      sourceTab = 'Facebook Leads 1';
+    } else if (/\b(google\s*2)\b/i.test(line)) {
+      sourceTab = 'Google Leads 2';
     } else if (/\b(google|gmb|lsa)\b/i.test(line)) {
-      sourceTab = 'Google Leads';
+      sourceTab = 'Google Leads 1';
     } else if (/\b(voice|call|quo|sona)\b/i.test(line)) {
-      sourceTab = 'Voice & Quick Quotes';
+      sourceTab = 'Quo';
     }
 
     if (!quotedAmount) {
@@ -484,7 +494,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
         bathrooms: '2 Bathrooms',
         serviceRequested: 'Residential Standard Cleaning',
         quotedAmount: 221.07,
-        sourceTab: 'Pasted Leads',
+        sourceTab: 'Other Ads',
         notes: 'Added via Paste Table',
       },
     ]);
@@ -502,14 +512,10 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
         body: JSON.stringify({
           leads: validRows.map((r) => ({
             ...r,
-            customerName: r.customerName.trim() || 'Pasted Quote Lead',
-            source: r.sourceTab === 'FB Leads'
-              ? 'Facebook Lead'
-              : r.sourceTab === 'Google Leads'
-              ? 'Google Lead'
-              : r.sourceTab === 'Voice & Quick Quotes'
-              ? 'Voice / Quick Quote'
-              : 'Pasted message',
+            customerName: r.customerName.trim() || 'New Lead',
+            source: r.sourceTab,
+            hasCommunicated: true,
+            communicatedAt: new Date().toISOString(),
           })),
           syncToJobber: syncToJobberAndQuotes,
         }),
@@ -642,7 +648,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
     }
   };
 
-  // Unified Master Rows combining all Clean Sheet Leads (FB, Google, Voice/Quo, Pasted) + Jobber Quotes
+  // Unified Master Rows combining all 7 Clean Sheet Tabs + Jobber Quotes (strictly last 14 days & zero fake leads)
   const categorizedMasterData = useMemo(() => {
     const qLower = masterSearchQuery.trim().toLowerCase();
 
@@ -670,8 +676,10 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
       );
     };
 
+    // Enforce strict 14-day hard cutoff, 7-day uncommunicated cutoff, and zero fake/simulated leads
+    const validRecentLeads = filterValidRecentLeads(leads);
     const seenLeadIds = new Set<string>();
-    const uniqueLeads = leads.filter((l) => {
+    const uniqueLeads = validRecentLeads.filter((l) => {
       if (!l || !l.id) return false;
       if (seenLeadIds.has(l.id)) return false;
       if (!l.quoteId && !l.quoteNumber && !(l as any).isJobberSynced && isCallerPhoneBlocked(l.phone)) {
@@ -681,29 +689,36 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
       return filterLead(l);
     });
 
-    const fbLeads: AdLeadItem[] = [];
-    const googleLeads: AdLeadItem[] = [];
-    const pastedLeads: AdLeadItem[] = [];
-    const voiceLeads: AdLeadItem[] = [];
+    const byTab: Record<CleanSheetTabName, AdLeadItem[]> = {
+      'Facebook Leads 1': [],
+      'Facebook Leads 2': [],
+      'Google Leads 1': [],
+      'Google Leads 2': [],
+      'Other Ads': [],
+      'Facebook AI': [],
+      'Quo': [],
+    };
 
     for (const l of uniqueLeads) {
-      const tab = String(l.sourceTab || '');
-      const src = String(l.source || '').toLowerCase();
-      if (tab === 'FB Leads' || (!tab && (src.includes('fb') || src.includes('facebook')))) {
-        fbLeads.push(l);
-      } else if (tab === 'Google Leads' || (!tab && src.includes('google'))) {
-        googleLeads.push(l);
-      } else if (tab === 'Pasted Leads' || (!tab && src.includes('paste'))) {
-        pastedLeads.push(l);
-      } else {
-        voiceLeads.push(l);
-      }
+      const tab = resolveCleanSheetTab(l);
+      byTab[tab].push({ ...l, sourceTab: tab });
     }
 
     const seenQuoteIds = new Set<string>();
     const seenQuoteNumbers = new Set<string>();
+    const cutoff14DaysMs = 14 * 24 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+
     const jobberQuotesFiltered = quotes.filter((q) => {
       if (!q) return false;
+      if (isFakeOrSimulatedLead(q)) return false;
+      const rawDate = String(q.createdAt || (q as any).scheduledAt || (q as any).date || '').trim();
+      const parsedMs = rawDate ? Date.parse(rawDate) : NaN;
+      if (Number.isNaN(parsedMs)) return false;
+      const ageMs = nowMs - parsedMs;
+      // Only show quotes from the last 14 days (excludes the ~2,200 historical archive rows)
+      if (ageMs > cutoff14DaysMs) return false;
+
       const id = String(q.id || '').trim();
       const num = String(q.quoteNumber || '').trim();
       if ((id && seenQuoteIds.has(id)) || (num && seenQuoteNumbers.has(num))) return false;
@@ -712,18 +727,14 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
       return filterQuote(q);
     });
 
+    const totalLeadsCount = Object.values(byTab).reduce((acc, arr) => acc + arr.length, 0);
+
     return {
-      fbLeads,
-      googleLeads,
-      voiceLeads,
-      pastedLeads,
+      byTab,
+      pastedLeads: byTab['Other Ads'],
       jobberQuotes: jobberQuotesFiltered,
-      totalCount:
-        fbLeads.length +
-        googleLeads.length +
-        voiceLeads.length +
-        pastedLeads.length +
-        jobberQuotesFiltered.length,
+      totalLeadsCount,
+      totalCount: totalLeadsCount + jobberQuotesFiltered.length,
     };
   }, [leads, quotes, masterSearchQuery, spamShieldConfig]);
 
@@ -844,7 +855,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
     }
   };
 
-  // Clickable Category Header definitions matching our Google Sheet colors
+  // Clickable Category Header definitions matching our 7 brand-new Google Sheet tabs
   const categoryHeaders: Array<{
     id: MasterCategoryFilter;
     label: string;
@@ -857,58 +868,40 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
   }> = [
     {
       id: 'ALL',
-      label: 'All Master Leads & Quotes',
-      shortLabel: 'All Master Rows',
+      label: 'All Fresh Leads & Quotes (Last 14d)',
+      shortLabel: 'All 7 Tabs + Quotes',
       count: categorizedMasterData.totalCount,
       bgHeader: 'from-slate-800 to-slate-900',
       badgeBg: 'bg-emerald-500 text-white',
       borderCol: 'border-slate-700',
       icon: '📊',
     },
-    {
-      id: 'FB Leads',
-      label: 'Facebook Ads & Messenger Leads',
-      shortLabel: 'Facebook Leads',
-      count: categorizedMasterData.fbLeads.length,
-      bgHeader: 'from-[#1877F2] to-[#1558B0]',
-      badgeBg: 'bg-blue-100 text-blue-900',
-      borderCol: 'border-blue-500',
-      icon: '🔵',
-    },
-    {
-      id: 'Google Leads',
-      label: 'Google Ads & Local Search Leads',
-      shortLabel: 'Google Leads',
-      count: categorizedMasterData.googleLeads.length,
-      bgHeader: 'from-[#0F9D58] to-[#0B8043]',
-      badgeBg: 'bg-emerald-100 text-emerald-900',
-      borderCol: 'border-emerald-500',
-      icon: '🟢',
-    },
-    {
-      id: 'Voice & Quick Quotes',
-      label: 'Voice Quotes & Sona AI Call Transcripts',
-      shortLabel: 'Voice & Quick Quotes',
-      count: categorizedMasterData.voiceLeads.length,
-      bgHeader: 'from-[#7C3AED] to-[#5B21B6]',
-      badgeBg: 'bg-purple-100 text-purple-900',
-      borderCol: 'border-purple-500',
-      icon: '🟣',
-    },
-    {
-      id: 'Pasted Leads',
-      label: 'Pasted Leads & Pasted Quotes',
-      shortLabel: 'Pasted Leads',
-      count: categorizedMasterData.pastedLeads.length,
-      bgHeader: 'from-[#D97706] to-[#B45309]',
-      badgeBg: 'bg-amber-100 text-amber-950',
-      borderCol: 'border-amber-500',
-      icon: '🟠',
-    },
+    ...CLEAN_SHEET_TABS.map((tabName) => {
+      const palette = TAB_THEME_PALETTES[tabName];
+      const bgMap: Record<CleanSheetTabName, string> = {
+        'Facebook Leads 1': 'from-[#1877F2] to-[#1558B0]',
+        'Facebook Leads 2': 'from-[#2563EB] to-[#1D4ED8]',
+        'Google Leads 1': 'from-[#0F9D58] to-[#0B8043]',
+        'Google Leads 2': 'from-[#0D9488] to-[#0F766E]',
+        'Other Ads': 'from-[#D97706] to-[#B45309]',
+        'Facebook AI': 'from-[#4F46E5] to-[#3730A3]',
+        'Quo': 'from-[#7C3AED] to-[#5B21B6]',
+      };
+      return {
+        id: tabName as MasterCategoryFilter,
+        label: palette.subtitle,
+        shortLabel: tabName,
+        count: categorizedMasterData.byTab[tabName]?.length || 0,
+        bgHeader: bgMap[tabName],
+        badgeBg: 'bg-white/95 text-slate-900',
+        borderCol: 'border-white/30',
+        icon: palette.emoji,
+      };
+    }),
     {
       id: 'Jobber Quotes',
-      label: 'Synced Jobber Quotes Ledger',
-      shortLabel: 'Jobber Quotes',
+      label: 'Jobber Quotes (Last 14 Days)',
+      shortLabel: 'Jobber Quotes (14d)',
       count: categorizedMasterData.jobberQuotes.length,
       bgHeader: 'from-[#0284C7] to-[#0369A1]',
       badgeBg: 'bg-sky-100 text-sky-950',
@@ -924,6 +917,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
         (lead.notes && (lead.notes.includes('Transcript:') || lead.notes.includes('AI Summary:')))
     );
     const isExpanded = expandedTranscriptRowId === lead.id;
+    const resolvedTab = resolveCleanSheetTab(lead);
 
     return (
       <React.Fragment key={`lead-row-${lead.id}`}>
@@ -931,25 +925,15 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
           <td className="px-3 py-2.5 whitespace-nowrap">
             <button
               type="button"
-              onClick={() =>
-                setActiveCategory(
-                  lead.sourceTab === 'FB Leads'
-                    ? 'FB Leads'
-                    : lead.sourceTab === 'Google Leads'
-                    ? 'Google Leads'
-                    : lead.sourceTab === 'Pasted Leads'
-                    ? 'Pasted Leads'
-                    : 'Voice & Quick Quotes'
-                )
-              }
+              onClick={() => setActiveCategory(resolvedTab)}
               className={`px-2.5 py-1 rounded-lg text-[11px] font-black inline-flex items-center gap-1 shadow-2xs cursor-pointer hover:opacity-90 ${theme.badgeClass}`}
-              title="Click to filter by this source category"
+              title="Click to filter by this Google Sheet tab"
             >
               <span>{theme.iconLabel}</span>
             </button>
           </td>
           <td className="px-3 py-2.5 text-xs font-mono font-bold text-slate-700 whitespace-nowrap">
-            {String(lead.dateOfServiceRequested || lead.dateReceived || '').slice(0, 10) || '2026-10-16'}
+            {String(lead.dateOfServiceRequested || lead.dateReceived || '').slice(0, 10) || '2026-10-27'}
           </td>
           <td className="px-3 py-2.5">
             <div className="font-black text-slate-900 text-xs sm:text-sm">{lead.customerName}</div>
@@ -1434,6 +1418,33 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
             </span>
           </div>
         </div>
+
+        {/* ARCHIVED OLD GOOGLE SHEETS REFERENCE LINKS */}
+        <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+          <div className="flex items-center gap-2 text-slate-300">
+            <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-black">
+              ✨ FRESH START ACTIVE (14-Day Cutoff • 7-Day Uncommunicated Cutoff • Zero Fake Leads)
+            </span>
+            <span className="hidden md:inline text-slate-400">
+              Need older historical leads? Log directly into your archived sheets:
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {ARCHIVED_OLD_GOOGLE_SHEETS.map((oldSheet) => (
+              <a
+                key={oldSheet.id}
+                href={oldSheet.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 border border-amber-400/30 font-bold flex items-center gap-1"
+                title={oldSheet.notes}
+              >
+                <span>🗄️ {oldSheet.name}</span>
+                <ExternalLink className="w-3 h-3 text-amber-300" />
+              </a>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* ───────────────────────────────────────────────────────────────────────
@@ -1572,10 +1583,13 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                                 }}
                                 className="rounded-lg border border-slate-300 px-1.5 py-1 text-[11px] font-bold bg-white"
                               >
-                                <option value="Pasted Leads">🟠 Pasted</option>
-                                <option value="FB Leads">🔵 Facebook</option>
-                                <option value="Google Leads">🟢 Google</option>
-                                <option value="Voice & Quick Quotes">🟣 Voice</option>
+                                <option value="Facebook Leads 1">🔵 Facebook Leads 1</option>
+                                <option value="Facebook Leads 2">🔷 Facebook Leads 2</option>
+                                <option value="Google Leads 1">🟢 Google Leads 1</option>
+                                <option value="Google Leads 2">🌲 Google Leads 2</option>
+                                <option value="Other Ads">🟠 Other Ads</option>
+                                <option value="Facebook AI">🤖 Facebook AI</option>
+                                <option value="Quo">🟣 Quo</option>
                               </select>
                             </td>
                             <td className="p-1.5">
@@ -1767,8 +1781,8 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
             </div>
           </div>
 
-          {/* CLICKABLE COLOR-CODED CATEGORY HEADERS (Facebook, Google, Voice Quotes, Pasted Leads, Jobber Quotes) */}
-          <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+          {/* CLICKABLE COLOR-CODED CATEGORY HEADERS (All 7 Brand-New Google Sheet Tabs + Jobber Quotes) */}
+          <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2">
             {categoryHeaders.map((cat) => {
               const isSelected = activeCategory === cat.id;
               return (
@@ -1802,7 +1816,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
             <table className="w-full text-left border-collapse">
               <thead className="bg-slate-900 text-white text-[11px] font-black uppercase tracking-wider sticky top-0 z-20 shadow-sm">
                 <tr>
-                  <th className="px-3 py-3 border-r border-slate-700">Source Tab (Clickable)</th>
+                  <th className="px-3 py-3 border-r border-slate-700">Sheet Tab (Clickable)</th>
                   <th className="px-3 py-3 border-r border-slate-700">Date</th>
                   <th className="px-3 py-3 border-r border-slate-700">Customer Name</th>
                   <th className="px-3 py-3 border-r border-slate-700">Phone</th>
@@ -1814,121 +1828,84 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                 </tr>
               </thead>
               <tbody>
-                {/* 1. FACEBOOK LEADS SECTION */}
-                {(activeCategory === 'ALL' || activeCategory === 'FB Leads') && (
-                  <>
-                    <tr
-                      onClick={() => setActiveCategory(activeCategory === 'FB Leads' ? 'ALL' : 'FB Leads')}
-                      className="bg-gradient-to-r from-[#1877F2] to-[#1558B0] text-white cursor-pointer hover:opacity-95"
-                      title="Click header to toggle Facebook Leads view"
-                    >
-                      <td colSpan={9} className="px-4 py-2 text-xs font-black tracking-wide">
-                        <div className="flex items-center justify-between">
-                          <span>🔵 FACEBOOK ADS &amp; MESSENGER LEADS ({categorizedMasterData.fbLeads.length}) — Click Header to Filter</span>
-                          <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-md font-mono">
-                            {activeCategory === 'FB Leads' ? 'Showing Only Facebook Leads (Click to Show All)' : 'Click to Isolate Facebook Leads'}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    {categorizedMasterData.fbLeads.map((lead) =>
-                      renderLeadRow(lead, {
-                        rowBg: 'bg-blue-50/60 hover:bg-blue-100/70',
-                        badgeClass: 'bg-[#1877F2] text-white',
-                        iconLabel: '🔵 FB Lead',
-                      })
-                    )}
-                  </>
-                )}
+                {/* ALL 7 BRAND-NEW VISUALLY APPEALING GOOGLE SHEET TABS */}
+                {CLEAN_SHEET_TABS.map((tabName) => {
+                  if (activeCategory !== 'ALL' && activeCategory !== tabName) return null;
+                  const rowsForTab = categorizedMasterData.byTab[tabName] || [];
+                  const palette = TAB_THEME_PALETTES[tabName];
+                  const headerGradientMap: Record<CleanSheetTabName, string> = {
+                    'Facebook Leads 1': 'from-[#1877F2] to-[#1558B0]',
+                    'Facebook Leads 2': 'from-[#2563EB] to-[#1D4ED8]',
+                    'Google Leads 1': 'from-[#0F9D58] to-[#0B8043]',
+                    'Google Leads 2': 'from-[#0D9488] to-[#0F766E]',
+                    'Other Ads': 'from-[#D97706] to-[#B45309]',
+                    'Facebook AI': 'from-[#4F46E5] to-[#3730A3]',
+                    'Quo': 'from-[#7C3AED] to-[#5B21B6]',
+                  };
+                  const rowThemeMap: Record<CleanSheetTabName, { rowBg: string; badgeClass: string; iconLabel: string }> = {
+                    'Facebook Leads 1': {
+                      rowBg: 'bg-blue-50/60 hover:bg-blue-100/70',
+                      badgeClass: 'bg-[#1877F2] text-white',
+                      iconLabel: '🔵 Facebook Leads 1',
+                    },
+                    'Facebook Leads 2': {
+                      rowBg: 'bg-blue-50/40 hover:bg-blue-100/60',
+                      badgeClass: 'bg-[#2563EB] text-white',
+                      iconLabel: '🔷 Facebook Leads 2',
+                    },
+                    'Google Leads 1': {
+                      rowBg: 'bg-emerald-50/60 hover:bg-emerald-100/70',
+                      badgeClass: 'bg-[#0F9D58] text-white',
+                      iconLabel: '🟢 Google Leads 1',
+                    },
+                    'Google Leads 2': {
+                      rowBg: 'bg-teal-50/60 hover:bg-teal-100/70',
+                      badgeClass: 'bg-[#0D9488] text-white',
+                      iconLabel: '🌲 Google Leads 2',
+                    },
+                    'Other Ads': {
+                      rowBg: 'bg-amber-50/60 hover:bg-amber-100/70',
+                      badgeClass: 'bg-[#D97706] text-white',
+                      iconLabel: '🟠 Other Ads',
+                    },
+                    'Facebook AI': {
+                      rowBg: 'bg-indigo-50/60 hover:bg-indigo-100/70',
+                      badgeClass: 'bg-[#4F46E5] text-white',
+                      iconLabel: '🤖 Facebook AI',
+                    },
+                    'Quo': {
+                      rowBg: 'bg-purple-50/60 hover:bg-purple-100/70',
+                      badgeClass: 'bg-[#7C3AED] text-white',
+                      iconLabel: '🟣 Quo',
+                    },
+                  };
 
-                {/* 2. GOOGLE LEADS SECTION */}
-                {(activeCategory === 'ALL' || activeCategory === 'Google Leads') && (
-                  <>
-                    <tr
-                      onClick={() => setActiveCategory(activeCategory === 'Google Leads' ? 'ALL' : 'Google Leads')}
-                      className="bg-gradient-to-r from-[#0F9D58] to-[#0B8043] text-white cursor-pointer hover:opacity-95"
-                      title="Click header to toggle Google Leads view"
-                    >
-                      <td colSpan={9} className="px-4 py-2 text-xs font-black tracking-wide">
-                        <div className="flex items-center justify-between">
-                          <span>🟢 GOOGLE ADS &amp; LOCAL SEARCH LEADS ({categorizedMasterData.googleLeads.length}) — Click Header to Filter</span>
-                          <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-md font-mono">
-                            {activeCategory === 'Google Leads' ? 'Showing Only Google Leads (Click to Show All)' : 'Click to Isolate Google Leads'}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    {categorizedMasterData.googleLeads.map((lead) =>
-                      renderLeadRow(lead, {
-                        rowBg: 'bg-emerald-50/60 hover:bg-emerald-100/70',
-                        badgeClass: 'bg-[#0F9D58] text-white',
-                        iconLabel: '🟢 Google Lead',
-                      })
-                    )}
-                  </>
-                )}
+                  return (
+                    <React.Fragment key={`section-${tabName}`}>
+                      <tr
+                        onClick={() => setActiveCategory(activeCategory === tabName ? 'ALL' : tabName)}
+                        className={`bg-gradient-to-r ${headerGradientMap[tabName]} text-white cursor-pointer hover:opacity-95`}
+                        title={`Click header to toggle ${tabName} view`}
+                      >
+                        <td colSpan={9} className="px-4 py-2 text-xs font-black tracking-wide">
+                          <div className="flex items-center justify-between">
+                            <span>
+                              {palette.emoji} {tabName.toUpperCase()} — {palette.subtitle} ({rowsForTab.length})
+                            </span>
+                            <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-md font-mono">
+                              {activeCategory === tabName
+                                ? `Showing Only ${tabName} (Click to Show All)`
+                                : `Click to Isolate ${tabName}`}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {rowsForTab.map((lead) => renderLeadRow(lead, rowThemeMap[tabName]))}
+                    </React.Fragment>
+                  );
+                })}
 
-                {/* 3. VOICE & QUICK QUOTES (QUO / SONA AI) SECTION */}
-                {(activeCategory === 'ALL' || activeCategory === 'Voice & Quick Quotes') && (
-                  <>
-                    <tr
-                      onClick={() =>
-                        setActiveCategory(activeCategory === 'Voice & Quick Quotes' ? 'ALL' : 'Voice & Quick Quotes')
-                      }
-                      className="bg-gradient-to-r from-[#7C3AED] to-[#5B21B6] text-white cursor-pointer hover:opacity-95"
-                      title="Click header to toggle Voice & Quick Quotes view"
-                    >
-                      <td colSpan={9} className="px-4 py-2 text-xs font-black tracking-wide">
-                        <div className="flex items-center justify-between">
-                          <span>
-                            🟣 VOICE &amp; QUICK QUOTES • QUO / SONA AI SCREENED CALLS ({categorizedMasterData.voiceLeads.length}) — Click Header to Filter
-                          </span>
-                          <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-md font-mono">
-                            {activeCategory === 'Voice & Quick Quotes'
-                              ? 'Showing Only Voice Quotes (Click to Show All)'
-                              : 'Click to Isolate Voice Quotes'}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    {categorizedMasterData.voiceLeads.map((lead) =>
-                      renderLeadRow(lead, {
-                        rowBg: 'bg-purple-50/60 hover:bg-purple-100/70',
-                        badgeClass: 'bg-[#7C3AED] text-white',
-                        iconLabel: '🟣 Voice Quote',
-                      })
-                    )}
-                  </>
-                )}
-
-                {/* 4. PASTED LEADS & QUOTES SECTION */}
-                {(activeCategory === 'ALL' || activeCategory === 'Pasted Leads') && (
-                  <>
-                    <tr
-                      onClick={() => setActiveCategory(activeCategory === 'Pasted Leads' ? 'ALL' : 'Pasted Leads')}
-                      className="bg-gradient-to-r from-[#D97706] to-[#B45309] text-white cursor-pointer hover:opacity-95"
-                      title="Click header to toggle Pasted Leads view"
-                    >
-                      <td colSpan={9} className="px-4 py-2 text-xs font-black tracking-wide">
-                        <div className="flex items-center justify-between">
-                          <span>🟠 PASTED LEADS &amp; PASTED QUOTES ({categorizedMasterData.pastedLeads.length}) — Click Header to Filter</span>
-                          <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-md font-mono">
-                            {activeCategory === 'Pasted Leads' ? 'Showing Only Pasted Leads (Click to Show All)' : 'Click to Isolate Pasted Leads'}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    {categorizedMasterData.pastedLeads.map((lead) =>
-                      renderLeadRow(lead, {
-                        rowBg: 'bg-amber-50/60 hover:bg-amber-100/70',
-                        badgeClass: 'bg-[#D97706] text-white',
-                        iconLabel: '🟠 Pasted Lead',
-                      })
-                    )}
-                  </>
-                )}
-
-                {/* 5. JOBBER QUOTES LEDGER SECTION */}
+                {/* JOBBER QUOTES LEDGER SECTION (LAST 14 DAYS) */}
                 {(activeCategory === 'ALL' || activeCategory === 'Jobber Quotes') && (
                   <>
                     <tr
@@ -1938,7 +1915,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                     >
                       <td colSpan={9} className="px-4 py-2 text-xs font-black tracking-wide">
                         <div className="flex items-center justify-between">
-                          <span>🩵 SYNCED JOBBER QUOTES LEDGER ({categorizedMasterData.jobberQuotes.length}) — Click Header to Filter</span>
+                          <span>🩵 SYNCED JOBBER QUOTES LEDGER • LAST 14 DAYS ({categorizedMasterData.jobberQuotes.length}) — Click Header to Filter</span>
                           <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-md font-mono">
                             {activeCategory === 'Jobber Quotes' ? 'Showing Only Jobber Quotes (Click to Show All)' : 'Click to Isolate Jobber Quotes'}
                           </span>

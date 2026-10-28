@@ -13,6 +13,11 @@ import { ScheduledJobItem, UnscheduledJobItem } from '../data/jobberCalendarData
 import { JobberQuote, JobberInvoice } from './jobberSyncModules';
 import { Technician } from '../types/dispatch';
 import { JobberStaffMember } from './staffRosterService';
+import {
+  isOutOfEdmontonOrFakeOrOutdatedLead,
+  resolveCleanSheetTab,
+  filterValidRecentLeads,
+} from './styledLeadsWorkbookBuilder';
 
 // Target Firestore Database ID
 export const FIRESTORE_DATABASE_ID = 'ai-studio-cleaningserviced-8a2493ab-cb9d-4c28-a60b-c28e7d08d30e';
@@ -694,9 +699,11 @@ export async function deleteBlockedNumberFromFirestore(
 export function toFirestoreLead(lead: any): Record<string, unknown> {
   const cleanId = sanitizeDocId(lead.id || `lead_${lead.phone || Date.now()}`, 'lead');
   const now = new Date().toISOString();
+  const normalizedTab = resolveCleanSheetTab(lead.sourceTab, lead);
   const payload: Record<string, unknown> = {
     id: cleanId,
     customerName: String(lead.customerName || lead.clientName || 'Cleaning Lead').substring(0, 150),
+    sourceTab: normalizedTab,
     updatedAt: now,
   };
 
@@ -709,7 +716,6 @@ export function toFirestoreLead(lead: any): Record<string, unknown> {
   if (lead.bedrooms) payload.bedrooms = String(lead.bedrooms).substring(0, 60);
   if (lead.bathrooms) payload.bathrooms = String(lead.bathrooms).substring(0, 60);
   if (lead.source) payload.source = String(lead.source).substring(0, 100);
-  if (lead.sourceTab) payload.sourceTab = String(lead.sourceTab).substring(0, 100);
   if (lead.verdict) payload.verdict = String(lead.verdict).substring(0, 50);
   if (lead.status) payload.status = String(lead.status).substring(0, 50);
   if (lead.quoteId) payload.quoteId = String(lead.quoteId).substring(0, 128);
@@ -719,12 +725,14 @@ export function toFirestoreLead(lead: any): Record<string, unknown> {
   }
   if (lead.notes) payload.notes = String(lead.notes).substring(0, 2500);
   if (lead.dateReceived) payload.dateReceived = String(lead.dateReceived).substring(0, 60);
+  if (lead.communicatedAt) payload.communicatedAt = String(lead.communicatedAt).substring(0, 60);
+  if (typeof lead.hasCommunicated === 'boolean') payload.hasCommunicated = lead.hasCommunicated;
 
   return stripUndefinedFields(payload);
 }
 
 export async function saveLeadToFirestore(lead: any): Promise<void> {
-  if (!lead) return;
+  if (!lead || isOutOfEdmontonOrFakeOrOutdatedLead(lead)) return;
   const docId = sanitizeDocId(lead.id || `lead_${lead.phone || Date.now()}`, 'lead');
   const payload = toFirestoreLead(lead);
   try {
@@ -754,13 +762,19 @@ export async function fetchLeadsFromFirestore(): Promise<any[]> {
     snap.forEach((d) => {
       const data = d.data();
       if (data && data.customerName) {
-        list.push({
+        const candidate = {
           ...data,
           id: data.id || d.id,
-        });
+        };
+        if (!isOutOfEdmontonOrFakeOrOutdatedLead(candidate)) {
+          list.push({
+            ...candidate,
+            sourceTab: resolveCleanSheetTab(candidate.sourceTab, candidate),
+          });
+        }
       }
     });
-    return list;
+    return filterValidRecentLeads(list);
   } catch (err) {
     console.warn('Could not read leads from Firestore:', err);
     return [];

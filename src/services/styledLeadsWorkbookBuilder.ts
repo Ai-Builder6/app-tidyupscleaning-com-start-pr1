@@ -1,1336 +1,937 @@
-import JSZip from 'jszip';
+import type ExcelJS from 'exceljs';
+import { CleanSheetTabName, CLEAN_SHEET_TABS, AdLeadItem } from '../types/lead';
 
-export interface StyledWorkbookLead {
-  id?: string;
-  dateReceived?: string;
-  sourceTab?: string;
-  source?: string;
-  customerName?: string;
-  phone?: string;
-  email?: string;
-  address?: string;
-  city?: string;
-  postalCode?: string;
-  serviceRequested?: string;
-  bedrooms?: string;
-  bathrooms?: string;
-  dateOfServiceRequested?: string;
-  quotedAmount?: number | string;
-  quoteId?: string;
-  quoteNumber?: string;
-  jobberClientId?: string;
-  verdict?: string;
-  status?: string;
-  notes?: string;
-  campaignName?: string;
-  isJobberSynced?: boolean;
+export { CLEAN_SHEET_TABS };
+export type { CleanSheetTabName };
+
+export const ARCHIVED_OLD_GOOGLE_SHEETS = [
+  {
+    id: '1TifULi7n2BylQdvla-8DRvYHul_A1wXXzypUdBJwEeA',
+    name: 'Archived Old Leads Sheet #1 (Historical Pre-Reset)',
+    url: 'https://docs.google.com/spreadsheets/d/1TifULi7n2BylQdvla-8DRvYHul_A1wXXzypUdBJwEeA/edit',
+    description: 'Previous Primary Google Sheet (Archived for historical reference only — no old rows pulled into new sheet)',
+    notes: 'Previous Primary Google Sheet (Archived for historical reference only — no old rows pulled into new sheet)',
+  },
+  {
+    id: '1-1palHco2hOEKDh8ivnLYX6-PuzeQtHhLQGkaD_Dp4I',
+    name: 'Archived Old Leads Sheet #2 (Secondary Historical Sheet)',
+    url: 'https://docs.google.com/spreadsheets/d/1-1palHco2hOEKDh8ivnLYX6-PuzeQtHhLQGkaD_Dp4I/edit',
+    description: 'Previous Secondary Google Sheet (Archived for historical reference only)',
+    notes: 'Previous Secondary Google Sheet (Archived for historical reference only)',
+  },
+];
+
+export interface TabThemePalette {
+  tabName: CleanSheetTabName;
+  shortLabel: string;
+  subtitle: string;
+  icon: string;
+  emoji: string;
+  tabColorArgb: string;
+  bannerBgArgb: string;
+  headerBgArgb: string;
+  kpiBgArgb: string;
+  badgeBgArgb: string;
+  badgeFgArgb: string;
+  rowEvenBgArgb: string;
+  rowOddBgArgb: string;
+  accentHex: string;
+  tailwindHeaderGradient: string;
+  tailwindBadge: string;
+  tailwindRowBg: string;
+  tailwindDarkRowBg: string;
 }
 
-export interface StyledWorkbookQuote {
-  id?: string;
-  quoteNumber?: string;
-  jobberWebUri?: string;
-  jobberClientWebUri?: string;
-}
+export const TAB_THEME_PALETTES: Record<CleanSheetTabName, TabThemePalette> = {
+  'Facebook Leads 1': {
+    tabName: 'Facebook Leads 1',
+    shortLabel: 'Facebook Leads 1',
+    subtitle: 'Primary Facebook Lead Ads & Instant Forms',
+    icon: '🔵',
+    emoji: '🔵',
+    tabColorArgb: 'FF1877F2',
+    bannerBgArgb: 'FF0F172A',
+    headerBgArgb: 'FF1877F2',
+    kpiBgArgb: 'FFDBEAFE',
+    badgeBgArgb: 'FF1877F2',
+    badgeFgArgb: 'FFFFFFFF',
+    rowEvenBgArgb: 'FFEFF6FF',
+    rowOddBgArgb: 'FFDBEAFE',
+    accentHex: '#1877F2',
+    tailwindHeaderGradient: 'from-[#1877F2] to-[#1558B0]',
+    tailwindBadge: 'bg-[#1877F2] text-white',
+    tailwindRowBg: 'bg-blue-50/70 hover:bg-blue-100/80',
+    tailwindDarkRowBg: 'border-l-4 border-l-[#1877F2] bg-blue-950/30 hover:bg-blue-900/40',
+  },
+  'Facebook Leads 2': {
+    tabName: 'Facebook Leads 2',
+    shortLabel: 'Facebook Leads 2',
+    subtitle: 'Secondary Facebook Ad Campaigns & Retargeting',
+    icon: '🔷',
+    emoji: '🔷',
+    tabColorArgb: 'FF0A66C2',
+    bannerBgArgb: 'FF0F172A',
+    headerBgArgb: 'FF0A66C2',
+    kpiBgArgb: 'FFE0F2FE',
+    badgeBgArgb: 'FF0A66C2',
+    badgeFgArgb: 'FFFFFFFF',
+    rowEvenBgArgb: 'FFF0F9FF',
+    rowOddBgArgb: 'FFE0F2FE',
+    accentHex: '#0A66C2',
+    tailwindHeaderGradient: 'from-[#0A66C2] to-[#034EA2]',
+    tailwindBadge: 'bg-[#0A66C2] text-white',
+    tailwindRowBg: 'bg-sky-50/70 hover:bg-sky-100/80',
+    tailwindDarkRowBg: 'border-l-4 border-l-[#0A66C2] bg-sky-950/30 hover:bg-sky-900/40',
+  },
+  'Google Leads 1': {
+    tabName: 'Google Leads 1',
+    shortLabel: 'Google Leads 1',
+    subtitle: 'Primary Google Search Ads & Local Services',
+    icon: '🟢',
+    emoji: '🟢',
+    tabColorArgb: 'FF0F9D58',
+    bannerBgArgb: 'FF0F172A',
+    headerBgArgb: 'FF0F9D58',
+    kpiBgArgb: 'FFD1FAE5',
+    badgeBgArgb: 'FF0F9D58',
+    badgeFgArgb: 'FFFFFFFF',
+    rowEvenBgArgb: 'FFECFDF5',
+    rowOddBgArgb: 'FFD1FAE5',
+    accentHex: '#0F9D58',
+    tailwindHeaderGradient: 'from-[#0F9D58] to-[#0B8043]',
+    tailwindBadge: 'bg-[#0F9D58] text-white',
+    tailwindRowBg: 'bg-emerald-50/70 hover:bg-emerald-100/80',
+    tailwindDarkRowBg: 'border-l-4 border-l-[#0F9D58] bg-emerald-950/30 hover:bg-emerald-900/40',
+  },
+  'Google Leads 2': {
+    tabName: 'Google Leads 2',
+    shortLabel: 'Google Leads 2',
+    subtitle: 'Secondary Google Ads, Maps & Website Forms',
+    icon: '🌲',
+    emoji: '🌲',
+    tabColorArgb: 'FF0D9488',
+    bannerBgArgb: 'FF0F172A',
+    headerBgArgb: 'FF0D9488',
+    kpiBgArgb: 'FFCCFBF1',
+    badgeBgArgb: 'FF0D9488',
+    badgeFgArgb: 'FFFFFFFF',
+    rowEvenBgArgb: 'FFF0FDFA',
+    rowOddBgArgb: 'FFCCFBF1',
+    accentHex: '#0D9488',
+    tailwindHeaderGradient: 'from-[#0D9488] to-[#0F766E]',
+    tailwindBadge: 'bg-[#0D9488] text-white',
+    tailwindRowBg: 'bg-teal-50/70 hover:bg-teal-100/80',
+    tailwindDarkRowBg: 'border-l-4 border-l-[#0D9488] bg-teal-950/30 hover:bg-teal-900/40',
+  },
+  'Other Ads': {
+    tabName: 'Other Ads',
+    shortLabel: 'Other Ads',
+    subtitle: 'Other Ad Channels, Referrals & Pasted Inquiries',
+    icon: '🟠',
+    emoji: '🟠',
+    tabColorArgb: 'FFD97706',
+    bannerBgArgb: 'FF0F172A',
+    headerBgArgb: 'FFD97706',
+    kpiBgArgb: 'FFFEF3C7',
+    badgeBgArgb: 'FFD97706',
+    badgeFgArgb: 'FFFFFFFF',
+    rowEvenBgArgb: 'FFFFFBEB',
+    rowOddBgArgb: 'FFFEF3C7',
+    accentHex: '#D97706',
+    tailwindHeaderGradient: 'from-[#D97706] to-[#B45309]',
+    tailwindBadge: 'bg-[#D97706] text-white',
+    tailwindRowBg: 'bg-amber-50/70 hover:bg-amber-100/80',
+    tailwindDarkRowBg: 'border-l-4 border-l-[#D97706] bg-amber-950/30 hover:bg-amber-900/40',
+  },
+  'Facebook AI': {
+    tabName: 'Facebook AI',
+    shortLabel: 'Facebook AI',
+    subtitle: 'Facebook Messenger AI & Automated Chat Leads',
+    icon: '💬',
+    emoji: '🤖',
+    tabColorArgb: 'FF4F46E5',
+    bannerBgArgb: 'FF0F172A',
+    headerBgArgb: 'FF4F46E5',
+    kpiBgArgb: 'FFE0E7FF',
+    badgeBgArgb: 'FF4F46E5',
+    badgeFgArgb: 'FFFFFFFF',
+    rowEvenBgArgb: 'FFEEF2FF',
+    rowOddBgArgb: 'FFE0E7FF',
+    accentHex: '#4F46E5',
+    tailwindHeaderGradient: 'from-[#4F46E5] to-[#3730A3]',
+    tailwindBadge: 'bg-[#4F46E5] text-white',
+    tailwindRowBg: 'bg-indigo-50/70 hover:bg-indigo-100/80',
+    tailwindDarkRowBg: 'border-l-4 border-l-[#4F46E5] bg-indigo-950/30 hover:bg-indigo-900/40',
+  },
+  Quo: {
+    tabName: 'Quo',
+    shortLabel: 'Quo',
+    subtitle: 'Quo / OpenPhone & Real Voice Call Quotes',
+    icon: '🟣',
+    emoji: '🟣',
+    tabColorArgb: 'FF7C3AED',
+    bannerBgArgb: 'FF0F172A',
+    headerBgArgb: 'FF7C3AED',
+    kpiBgArgb: 'FFEDE9FE',
+    badgeBgArgb: 'FF7C3AED',
+    badgeFgArgb: 'FFFFFFFF',
+    rowEvenBgArgb: 'FFF5F3FF',
+    rowOddBgArgb: 'FFEDE9FE',
+    accentHex: '#7C3AED',
+    tailwindHeaderGradient: 'from-[#7C3AED] to-[#5B21B6]',
+    tailwindBadge: 'bg-[#7C3AED] text-white',
+    tailwindRowBg: 'bg-purple-50/70 hover:bg-purple-100/80',
+    tailwindDarkRowBg: 'border-l-4 border-l-[#7C3AED] bg-purple-950/30 hover:bg-purple-900/40',
+  },
+};
 
-type SourceCategory = 'FACEBOOK' | 'GOOGLE' | 'VOICE' | 'PASTED';
+/**
+ * Resolves any raw source string, campaign name, or legacy tab name into one of the 7 canonical tabs:
+ * - Facebook Leads 1
+ * - Facebook Leads 2
+ * - Google Leads 1
+ * - Google Leads 2
+ * - Other Ads
+ * - Facebook AI
+ * - Quo
+ */
+export function resolveCleanSheetTab(rawSourceOrTab?: string, leadObj?: any): CleanSheetTabName {
+  const exact = String(rawSourceOrTab || leadObj?.sourceTab || '').trim();
+  if ((CLEAN_SHEET_TABS as string[]).includes(exact)) {
+    return exact as CleanSheetTabName;
+  }
 
-function detectSourceCategory(sourceTab?: string, source?: string): SourceCategory {
-  const combined = `${sourceTab || ''} ${source || ''}`.toLowerCase();
-  if (combined.includes('fb') || combined.includes('facebook') || combined.includes('meta') || combined.includes('instagram')) {
-    return 'FACEBOOK';
-  }
-  if (combined.includes('google') || combined.includes('lsa') || combined.includes('adwords')) {
-    return 'GOOGLE';
-  }
-  if (combined.includes('paste') || combined.includes('manual') || combined.includes('csv') || combined.includes('import')) {
-    return 'PASTED';
-  }
-  return 'VOICE';
-}
+  const combined = `${exact} ${leadObj?.source || ''} ${leadObj?.campaignName || ''}`.toLowerCase();
 
-function xmlEscape(val: unknown): string {
-  return String(val ?? '')
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function colLetter(colIndex1Based: number): string {
-  let n = colIndex1Based;
-  let s = '';
-  while (n > 0) {
-    const m = (n - 1) % 26;
-    s = String.fromCharCode(65 + m) + s;
-    n = Math.floor((n - 1) / 26);
+  if (
+    combined.includes('facebook ai') ||
+    combined.includes('fb ai') ||
+    combined.includes('messenger') ||
+    combined.includes('manychat') ||
+    combined.includes('dm ai')
+  ) {
+    return 'Facebook AI';
   }
-  return s;
+
+  if (
+    combined.includes('facebook leads 2') ||
+    combined.includes('fb leads 2') ||
+    combined.includes('fb_leads_2') ||
+    combined.includes('fb leads_v2') ||
+    combined.includes('facebook 2')
+  ) {
+    return 'Facebook Leads 2';
+  }
+
+  if (
+    combined.includes('facebook') ||
+    combined.includes('fb ') ||
+    combined.startsWith('fb') ||
+    combined.includes('meta')
+  ) {
+    return 'Facebook Leads 1';
+  }
+
+  if (
+    combined.includes('google leads 2') ||
+    combined.includes('google_leads_2') ||
+    combined.includes('google leads_v2') ||
+    combined.includes('google leads_v3') ||
+    combined.includes('google 2') ||
+    combined.includes('lsa')
+  ) {
+    return 'Google Leads 2';
+  }
+
+  if (combined.includes('google') || combined.includes('gmb') || combined.includes('adwords')) {
+    return 'Google Leads 1';
+  }
+
+  if (
+    combined.includes('quo') ||
+    combined.includes('openphone') ||
+    combined.includes('sonia') ||
+    combined.includes('sona') ||
+    combined.includes('phone') ||
+    combined.includes('call') ||
+    combined.includes('voice') ||
+    Boolean(leadObj?.quoCallId) ||
+    Boolean(leadObj?.callTranscript)
+  ) {
+    return 'Quo';
+  }
+
+  return 'Other Ads';
 }
 
 /**
- * Style indices (cellXfs in xl/styles.xml):
- * 0: Default cell
- * 1: Executive Banner Navy (#0F172A), White 13pt Bold, Left/VCenter
- * 2: Executive Banner Facebook Blue (#1877F2), White 13pt Bold, Left/VCenter
- * 3: Executive Banner Google Green (#0F9D58), White 13pt Bold, Left/VCenter
- * 4: Executive Banner Voice Purple (#7C3AED), White 13pt Bold, Left/VCenter
- * 5: Executive Banner Pasted Amber (#D97706), White 13pt Bold, Left/VCenter
- * 6: KPI Block Slate (#1E293B), White 10pt Bold, Center/VCenter
- * 7: KPI Block Facebook Blue (#1877F2), White 10pt Bold, Center/VCenter
- * 8: KPI Block Google Green (#0F9D58), White 10pt Bold, Center/VCenter
- * 9: KPI Block Voice Purple (#7C3AED), White 10pt Bold, Center/VCenter
- * 10: KPI Block Pasted Amber (#D97706), White 10pt Bold, Center/VCenter
- * 11: Frozen Table Column Header (#0F172A), White 10pt Bold, Center/VCenter, Border
- * 12: Source Badge Pill — FACEBOOK (#1877F2 fill, White Bold Center)
- * 13: Source Badge Pill — GOOGLE (#0F9D58 fill, White Bold Center)
- * 14: Source Badge Pill — VOICE (#7C3AED fill, White Bold Center)
- * 15: Source Badge Pill — PASTED (#D97706 fill, White Bold Center)
- * 16: Row Cell — FACEBOOK Odd (#EFF6FF fill, Navy text, Border)
- * 17: Row Cell — FACEBOOK Even (#DBEAFE fill, Navy text, Border)
- * 18: Row Cell — GOOGLE Odd (#ECFDF5 fill, Forest text, Border)
- * 19: Row Cell — GOOGLE Even (#D1FAE5 fill, Forest text, Border)
- * 20: Row Cell — VOICE Odd (#F5F3FF fill, Purple text, Border)
- * 21: Row Cell — VOICE Even (#EDE9FE fill, Purple text, Border)
- * 22: Row Cell — PASTED Odd (#FFFBEB fill, Amber text, Border)
- * 23: Row Cell — PASTED Even (#FEF3C7 fill, Amber text, Border)
- * 24: Client Name Bold — FACEBOOK (#EFF6FF fill, Bold Dark text)
- * 25: Client Name Bold — GOOGLE (#ECFDF5 fill, Bold Dark text)
- * 26: Client Name Bold — VOICE (#F5F3FF fill, Bold Dark text)
- * 27: Client Name Bold — PASTED (#FFFBEB fill, Bold Dark text)
- * 28: Currency Quoted Total ($) — Soft Mint (#D1FAE5 fill, Emerald Bold, $#,##0.00)
- * 29: Hyperlink Cell — Soft Blue/White, Blue Bold Underlined
- * 30: Verdict Badge — GOOD LEAD (#A7F3D0 fill, Dark Green Bold Center)
- * 31: Verdict Badge — SPAM / GARBAGE (#FECDD3 fill, Dark Red Bold Center)
- * 32: Table Totals Footer Bar (#0F172A fill, White 11pt Bold, Double Top Border)
- * 33: Table Totals Footer Currency (#0F172A fill, Bright Emerald 11pt Bold, $#,##0.00, Double Top Border)
- * 34: Section Subheader Bar (#E2E8F0 fill, Dark Slate 10pt Bold)
- * 35: Template Hint Row Cell (Italic muted gray, soft tint)
+ * Checks if the user has communicated with a lead (called/texted, marked communicated, quoted, synced to Jobber, or converted).
  */
-function buildStylesXml(): string {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <numFmts count="1">
-    <numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00"/>
-  </numFmts>
-  <fonts count="16">
-    <font><sz val="10"/><color rgb="FF0F172A"/><name val="Arial"/></font>
-    <font><b/><sz val="13"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>
-    <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>
-    <font><b/><sz val="10"/><color rgb="FF0F172A"/><name val="Arial"/></font>
-    <font><sz val="10"/><color rgb="FF1E3A8A"/><name val="Arial"/></font>
-    <font><sz val="10"/><color rgb="FF064E3B"/><name val="Arial"/></font>
-    <font><sz val="10"/><color rgb="FF3B0764"/><name val="Arial"/></font>
-    <font><sz val="10"/><color rgb="FF451A03"/><name val="Arial"/></font>
-    <font><b/><sz val="10"/><color rgb="FF047857"/><name val="Arial"/></font>
-    <font><b/><u/><sz val="10"/><color rgb="FF1D4ED8"/><name val="Arial"/></font>
-    <font><b/><sz val="10"/><color rgb="FF065F46"/><name val="Arial"/></font>
-    <font><b/><sz val="10"/><color rgb="FF991B1B"/><name val="Arial"/></font>
-    <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>
-    <font><b/><sz val="11"/><color rgb="FF34D399"/><name val="Arial"/></font>
-    <font><i/><sz val="10"/><color rgb="FF64748B"/><name val="Arial"/></font>
-    <font><b/><sz val="10"/><color rgb="FF1E293B"/><name val="Arial"/></font>
-  </fonts>
-  <fills count="21">
-    <fill><patternFill patternType="none"/></fill>
-    <fill><patternFill patternType="gray125"/></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FF0F172A"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FF1877F2"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FF0F9D58"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FF7C3AED"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFD97706"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FF1E293B"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFEFF6FF"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFDBEAFE"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFECFDF5"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFD1FAE5"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFF5F3FF"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFEDE9FE"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFFFFBEB"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFFEF3C7"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFA7F3D0"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFFECDD3"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFE2E8F0"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFF8FAFC"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFE0F2FE"/><bgColor indexed="64"/></patternFill></fill>
-  </fills>
-  <borders count="4">
-    <border><left/><right/><top/><bottom/><diagonal/></border>
-    <border>
-      <left style="thin"><color rgb="FFCBD5E1"/></left>
-      <right style="thin"><color rgb="FFCBD5E1"/></right>
-      <top style="thin"><color rgb="FFCBD5E1"/></top>
-      <bottom style="thin"><color rgb="FFCBD5E1"/></bottom>
-      <diagonal/>
-    </border>
-    <border>
-      <left style="thin"><color rgb="FF334155"/></left>
-      <right style="thin"><color rgb="FF334155"/></right>
-      <top style="thin"><color rgb="FF334155"/></top>
-      <bottom style="medium"><color rgb="FF10B981"/></bottom>
-      <diagonal/>
-    </border>
-    <border>
-      <left style="thin"><color rgb="FF334155"/></left>
-      <right style="thin"><color rgb="FF334155"/></right>
-      <top style="double"><color rgb="FF10B981"/></top>
-      <bottom style="medium"><color rgb="FF0F172A"/></bottom>
-      <diagonal/>
-    </border>
-  </borders>
-  <cellStyleXfs count="1">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
-  </cellStyleXfs>
-  <cellXfs count="36">
-    <!-- 0: Default -->
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <!-- 1..5: Executive Banners (Navy, FB Blue, Google Green, Voice Purple, Pasted Amber) -->
-    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" indent="1"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" indent="1"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" indent="1"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" indent="1"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" indent="1"/></xf>
-    <!-- 6..10: Row 2 KPI / Color Legend Blocks (Slate, FB Blue, Google Green, Voice Purple, Pasted Amber) -->
-    <xf numFmtId="0" fontId="2" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <!-- 11: Frozen Table Column Header -->
-    <xf numFmtId="0" fontId="2" fillId="2" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
-    <!-- 12..15: Solid Source Badge Pills (FB Blue, Google Green, Voice Purple, Pasted Amber) -->
-    <xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <!-- 16..23: Source-Colored Data Cells (Odd/Even for FB, Google, Voice, Pasted) -->
-    <xf numFmtId="0" fontId="4" fillId="8" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="4" fillId="9" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="5" fillId="10" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="5" fillId="11" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="6" fillId="12" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="6" fillId="13" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="7" fillId="14" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="7" fillId="15" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
-    <!-- 24..27: Bold Client Name Cells per Source -->
-    <xf numFmtId="0" fontId="3" fillId="8" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="3" fillId="10" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="3" fillId="12" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="3" fillId="14" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <!-- 28: Currency Quoted Total ($) Cell -->
-    <xf numFmtId="164" fontId="8" fillId="11" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
-    <!-- 29: Clickable Link Cell -->
-    <xf numFmtId="0" fontId="9" fillId="20" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <!-- 30..31: Verdict Pills (Good Lead Emerald vs Spam Rose) -->
-    <xf numFmtId="0" fontId="10" fillId="16" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="11" fillId="17" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <!-- 32..33: Totals Footer Row & Footer Currency -->
-    <xf numFmtId="0" fontId="12" fillId="2" borderId="3" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <xf numFmtId="164" fontId="13" fillId="2" borderId="3" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
-    <!-- 34: Section Subheader Bar -->
-    <xf numFmtId="0" fontId="15" fillId="18" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-    <!-- 35: Template Hint Cell -->
-    <xf numFmtId="0" fontId="14" fillId="19" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
-  </cellXfs>
-  <cellStyles count="1">
-    <cellStyle name="Normal" xfId="0" builtinId="0"/>
-  </cellStyles>
-</styleSheet>`;
-}
+export function hasLeadBeenCommunicatedWith(lead: any): boolean {
+  if (!lead || typeof lead !== 'object') return false;
+  if (lead.communicatedAt || lead.hasCommunicated) return true;
+  if (lead.isJobberSynced || lead.quoteId || lead.quoteNumber || lead.convertedJobId) return true;
 
-interface CellSpec {
-  value: string | number;
-  style: number;
-  type?: 'str' | 'num' | 'formula';
-  formula?: string;
-}
-
-function renderCellXml(colIdx1: number, rowIdx1: number, spec: CellSpec): string {
-  const ref = `${colLetter(colIdx1)}${rowIdx1}`;
-  if (spec.type === 'formula' && spec.formula) {
-    const isNum = typeof spec.value === 'number';
-    if (isNum) {
-      return `<c r="${ref}" s="${spec.style}"><f>${xmlEscape(spec.formula)}</f><v>${spec.value}</v></c>`;
-    }
-    return `<c r="${ref}" t="str" s="${spec.style}"><f>${xmlEscape(spec.formula)}</f><v>${xmlEscape(spec.value)}</v></c>`;
-  }
-  if (spec.type === 'num' || typeof spec.value === 'number') {
-    const numVal = Number(spec.value) || 0;
-    return `<c r="${ref}" s="${spec.style}"><v>${numVal}</v></c>`;
-  }
-  return `<c r="${ref}" t="inlineStr" s="${spec.style}"><is><t xml:space="preserve">${xmlEscape(spec.value)}</t></is></c>`;
-}
-
-function getSourceStyles(cat: SourceCategory, isEven: boolean) {
-  switch (cat) {
-    case 'FACEBOOK':
-      return {
-        badgeStyle: 12,
-        rowStyle: isEven ? 17 : 16,
-        nameStyle: 24,
-        badgePrefix: '🔵 ',
-      };
-    case 'GOOGLE':
-      return {
-        badgeStyle: 13,
-        rowStyle: isEven ? 19 : 18,
-        nameStyle: 25,
-        badgePrefix: '🟢 ',
-      };
-    case 'PASTED':
-      return {
-        badgeStyle: 15,
-        rowStyle: isEven ? 23 : 22,
-        nameStyle: 27,
-        badgePrefix: '🟠 ',
-      };
-    case 'VOICE':
-    default:
-      return {
-        badgeStyle: 14,
-        rowStyle: isEven ? 21 : 20,
-        nameStyle: 26,
-        badgePrefix: '🟣 ',
-      };
-  }
-}
-
-const VISUAL_HEADERS = [
-  'Date',
-  'Sheet Tab',
-  'Lead Source (Color-Coded)',
-  'Client Name',
-  'Phone Number',
-  'Email Address',
-  'Street Address',
-  'City',
-  'Postal Code',
-  'Service Requested',
-  'Bedrooms',
-  'Bathrooms',
-  'Date Requested',
-  'Quoted Total ($)',
-  'Jobber Quote #',
-  'Jobber Quote Link',
-  'Jobber Client Link',
-  'Lead Verdict',
-  'Sync Status',
-  'Notes & Pricing Breakdown',
-];
-
-const VISUAL_COL_WIDTHS = [
-  14, // A: Date
-  23, // B: Sheet Tab
-  25, // C: Lead Source
-  24, // D: Client Name
-  17, // E: Phone
-  24, // F: Email
-  30, // G: Street Address
-  14, // H: City
-  13, // I: Postal Code
-  30, // J: Service Requested
-  15, // K: Bedrooms
-  15, // L: Bathrooms
-  15, // M: Date Requested
-  18, // N: Quoted Total ($)
-  16, // O: Jobber Quote #
-  22, // P: Jobber Quote Link
-  22, // Q: Jobber Client Link
-  16, // R: Verdict
-  16, // S: Status
-  52, // T: Notes
-];
-
-function buildVisualWorksheetXml(options: {
-  title: string;
-  bannerStyle: number;
-  tabColorRgb: string;
-  leads: StyledWorkbookLead[];
-  allLeadsForSummary: StyledWorkbookLead[];
-  quotes: StyledWorkbookQuote[];
-  defaultCategory: SourceCategory;
-  isMasterSheet?: boolean;
-  resolveJobberWebUri: (type: 'quotes' | 'clients', id?: string) => string;
-}): string {
-  const {
-    title,
-    bannerStyle,
-    tabColorRgb,
-    leads,
-    allLeadsForSummary,
-    quotes,
-    defaultCategory,
-    isMasterSheet = false,
-    resolveJobberWebUri,
-  } = options;
-
-  const fbCount = allLeadsForSummary.filter(
-    (l) => detectSourceCategory(l.sourceTab, l.source) === 'FACEBOOK'
-  ).length;
-  const googleCount = allLeadsForSummary.filter(
-    (l) => detectSourceCategory(l.sourceTab, l.source) === 'GOOGLE'
-  ).length;
-  const voiceCount = allLeadsForSummary.filter(
-    (l) => detectSourceCategory(l.sourceTab, l.source) === 'VOICE'
-  ).length;
-  const pastedCount = allLeadsForSummary.filter(
-    (l) => detectSourceCategory(l.sourceTab, l.source) === 'PASTED'
-  ).length;
-  const totalQuoted = leads.reduce((sum, l) => sum + (Number(l.quotedAmount) || 0), 0);
-
-  const rowsXml: string[] = [];
-  const mergeRefs: string[] = [];
-
-  // ── ROW 1: EXECUTIVE HEADER BANNER (Merged A1:T1, Frozen) ──
-  const row1Cells: string[] = [];
-  for (let c = 1; c <= 20; c++) {
-    row1Cells.push(
-      renderCellXml(c, 1, {
-        value: c === 1 ? title : '',
-        style: bannerStyle,
-      })
-    );
-  }
-  rowsXml.push(`<row r="1" ht="36" customHeight="1">${row1Cells.join('')}</row>`);
-  mergeRefs.push('A1:T1');
-
-  // ── ROW 2: 5-COLOR CHANNEL LEGEND & LIVE KPI SUMMARY BAR (Frozen) ──
-  const row2Blocks: { start: number; end: number; style: number; text: string }[] = [
-    {
-      start: 1,
-      end: 4,
-      style: 6,
-      text: `📊 TAB LEADS: ${leads.length}  |  TOTAL: $${totalQuoted.toFixed(2)}`,
-    },
-    {
-      start: 5,
-      end: 8,
-      style: 7,
-      text: `🔵 FACEBOOK LEADS: ${fbCount} ROW(S)`,
-    },
-    {
-      start: 9,
-      end: 12,
-      style: 8,
-      text: `🟢 GOOGLE LEADS: ${googleCount} ROW(S)`,
-    },
-    {
-      start: 13,
-      end: 16,
-      style: 9,
-      text: `🟣 VOICE & QUICK QUOTES: ${voiceCount} ROW(S)`,
-    },
-    {
-      start: 17,
-      end: 20,
-      style: 10,
-      text: `🟠 PASTED & OTHER LEADS: ${pastedCount} ROW(S)`,
-    },
-  ];
-  const row2Cells: string[] = [];
-  for (const blk of row2Blocks) {
-    for (let c = blk.start; c <= blk.end; c++) {
-      row2Cells.push(
-        renderCellXml(c, 2, {
-          value: c === blk.start ? blk.text : '',
-          style: blk.style,
-        })
-      );
-    }
-    mergeRefs.push(`${colLetter(blk.start)}2:${colLetter(blk.end)}2`);
-  }
-  rowsXml.push(`<row r="2" ht="26" customHeight="1">${row2Cells.join('')}</row>`);
-
-  // ── ROW 3: FROZEN TABLE COLUMN HEADERS (A3:T3) ──
-  const row3Cells = VISUAL_HEADERS.map((h, i) =>
-    renderCellXml(i + 1, 3, { value: h, style: 11 })
-  );
-  rowsXml.push(`<row r="3" ht="30" customHeight="1">${row3Cells.join('')}</row>`);
-
-  // ── ROWS 4+: COLOR-CODED DATA ROWS ──
-  let currentRow = 4;
-  const starterTemplates: { cat: SourceCategory; tab: string; src: string; hint: string }[] = [
-    {
-      cat: 'FACEBOOK',
-      tab: 'Facebook Leads',
-      src: 'Facebook Lead Ads',
-      hint: '[Facebook Lead Row — Auto-Colored in Facebook Blue]',
-    },
-    {
-      cat: 'GOOGLE',
-      tab: 'Google Leads',
-      src: 'Google Ads / LSA',
-      hint: '[Google Lead Row — Auto-Colored in Google Green]',
-    },
-    {
-      cat: 'VOICE',
-      tab: 'Voice & Quick Quotes',
-      src: 'Voice / Quick Quote',
-      hint: '[Voice & Quick Quote Row — Auto-Colored in Royal Purple]',
-    },
-    {
-      cat: 'PASTED',
-      tab: 'Pasted Leads',
-      src: 'Pasted / Manual Table',
-      hint: '[Pasted Lead Row — Auto-Colored in Warm Amber]',
-    },
-  ];
-
-  const renderStarterTemplateRow = (
-    tpl: { cat: SourceCategory; tab: string; src: string; hint: string },
-    idx: number
-  ) => {
-    const s = getSourceStyles(tpl.cat, idx % 2 === 1);
-    const cells: string[] = [
-      renderCellXml(1, currentRow, { value: new Date().toISOString().slice(0, 10), style: s.rowStyle }),
-      renderCellXml(2, currentRow, { value: `${s.badgePrefix}${tpl.tab}`, style: s.badgeStyle }),
-      renderCellXml(3, currentRow, { value: `${s.badgePrefix}${tpl.src}`, style: s.badgeStyle }),
-      renderCellXml(4, currentRow, { value: tpl.hint, style: s.nameStyle }),
-      renderCellXml(5, currentRow, { value: '(780) —', style: s.rowStyle }),
-      renderCellXml(6, currentRow, { value: '—', style: s.rowStyle }),
-      renderCellXml(7, currentRow, { value: 'Edmonton, AB', style: s.rowStyle }),
-      renderCellXml(8, currentRow, { value: 'Edmonton', style: s.rowStyle }),
-      renderCellXml(9, currentRow, { value: '—', style: s.rowStyle }),
-      renderCellXml(10, currentRow, { value: 'Residential Standard Cleaning', style: s.rowStyle }),
-      renderCellXml(11, currentRow, { value: '3 Bedrooms', style: s.rowStyle }),
-      renderCellXml(12, currentRow, { value: '2 Bathrooms', style: s.rowStyle }),
-      renderCellXml(13, currentRow, { value: '—', style: s.rowStyle }),
-      renderCellXml(14, currentRow, { value: 0, type: 'num', style: 28 }),
-      renderCellXml(15, currentRow, { value: 'Ready', style: s.rowStyle }),
-      renderCellXml(16, currentRow, {
-        value: 'Open Jobber Quotes ↗',
-        type: 'formula',
-        formula: 'HYPERLINK("https://secure.getjobber.com/quotes","Open Jobber Quotes ↗")',
-        style: 29,
-      }),
-      renderCellXml(17, currentRow, {
-        value: 'Open Jobber Clients ↗',
-        type: 'formula',
-        formula: 'HYPERLINK("https://secure.getjobber.com/clients","Open Jobber Clients ↗")',
-        style: 29,
-      }),
-      renderCellXml(18, currentRow, { value: 'Good lead', style: 30 }),
-      renderCellXml(19, currentRow, { value: 'READY FOR LEADS', style: s.rowStyle }),
-      renderCellXml(20, currentRow, {
-        value: `Color-coded ${tpl.tab} table row — new ${tpl.src} leads appear in this color automatically.`,
-        style: s.rowStyle,
-      }),
-    ];
-    rowsXml.push(`<row r="${currentRow}" ht="26" customHeight="1">${cells.join('')}</row>`);
-    currentRow++;
-  };
-
-  if (leads.length === 0) {
-    const templatesToShow = isMasterSheet
-      ? starterTemplates
-      : defaultCategory === 'FACEBOOK'
-      ? [starterTemplates[0]]
-      : defaultCategory === 'GOOGLE'
-      ? [starterTemplates[1]]
-      : defaultCategory === 'PASTED'
-      ? [starterTemplates[3]]
-      : [starterTemplates[2]];
-
-    templatesToShow.forEach((tpl, idx) => renderStarterTemplateRow(tpl, idx));
-  } else {
-    leads.forEach((l, idx) => {
-      const cat = detectSourceCategory(l.sourceTab, l.source);
-      const s = getSourceStyles(cat, idx % 2 === 1);
-      const matchedQ = quotes.find(
-        (q) => q.id === l.quoteId || (l.quoteNumber && q.quoteNumber === l.quoteNumber)
-      );
-      const quoteUrl =
-        matchedQ?.jobberWebUri ||
-        (l.quoteId && String(l.quoteId).startsWith('Z2lkOi8v')
-          ? resolveJobberWebUri('quotes', l.quoteId)
-          : 'https://secure.getjobber.com/quotes');
-      const clientUrl =
-        matchedQ?.jobberClientWebUri ||
-        (l.jobberClientId && String(l.jobberClientId).startsWith('Z2lkOi8v')
-          ? resolveJobberWebUri('clients', l.jobberClientId)
-          : 'https://secure.getjobber.com/clients');
-
-      const tabLabel = l.sourceTab || 'Voice & Quick Quotes';
-      const srcLabel = l.source || 'Voice / Quick Quote';
-      const amountNum = Number(l.quotedAmount ?? 221.07) || 0;
-      const verdictVal = l.verdict || 'Good lead';
-      const isBadVerdict = verdictVal === 'Spam' || verdictVal === 'Garbage';
-      const statusText = l.isJobberSynced
-        ? `✅ SYNCED (${l.quoteNumber || 'Jobber'})`
-        : String(l.status || 'New').toUpperCase();
-
-      const cells: string[] = [
-        renderCellXml(1, currentRow, {
-          value: (l.dateReceived || new Date().toISOString()).slice(0, 10),
-          style: s.rowStyle,
-        }),
-        renderCellXml(2, currentRow, {
-          value: `${s.badgePrefix}${tabLabel}`,
-          style: s.badgeStyle,
-        }),
-        renderCellXml(3, currentRow, {
-          value: `${s.badgePrefix}${srcLabel}`,
-          style: s.badgeStyle,
-        }),
-        renderCellXml(4, currentRow, {
-          value: l.customerName || 'Client',
-          style: s.nameStyle,
-        }),
-        renderCellXml(5, currentRow, {
-          value: l.phone || '',
-          style: s.rowStyle,
-        }),
-        renderCellXml(6, currentRow, {
-          value: l.email || '',
-          style: s.rowStyle,
-        }),
-        renderCellXml(7, currentRow, {
-          value: l.address || '',
-          style: s.rowStyle,
-        }),
-        renderCellXml(8, currentRow, {
-          value: l.city || 'Edmonton',
-          style: s.rowStyle,
-        }),
-        renderCellXml(9, currentRow, {
-          value: l.postalCode || '',
-          style: s.rowStyle,
-        }),
-        renderCellXml(10, currentRow, {
-          value: l.serviceRequested || 'Residential Standard Cleaning',
-          style: s.rowStyle,
-        }),
-        renderCellXml(11, currentRow, {
-          value: l.bedrooms || '3 Bedrooms',
-          style: s.rowStyle,
-        }),
-        renderCellXml(12, currentRow, {
-          value: l.bathrooms || '2 Bathrooms',
-          style: s.rowStyle,
-        }),
-        renderCellXml(13, currentRow, {
-          value: l.dateOfServiceRequested || '',
-          style: s.rowStyle,
-        }),
-        renderCellXml(14, currentRow, {
-          value: Number(amountNum.toFixed(2)),
-          type: 'num',
-          style: 28,
-        }),
-        renderCellXml(15, currentRow, {
-          value: l.quoteNumber || 'Pending',
-          style: s.nameStyle,
-        }),
-        renderCellXml(16, currentRow, {
-          value: l.quoteNumber ? `Open ${l.quoteNumber} ↗` : 'Open Jobber Quotes ↗',
-          type: 'formula',
-          formula: `HYPERLINK("${quoteUrl.replace(/"/g, '""')}","${
-            l.quoteNumber ? `Open ${l.quoteNumber} ↗` : 'Open Jobber Quotes ↗'
-          }")`,
-          style: 29,
-        }),
-        renderCellXml(17, currentRow, {
-          value: 'Open Jobber Client ↗',
-          type: 'formula',
-          formula: `HYPERLINK("${clientUrl.replace(/"/g, '""')}","Open Jobber Client ↗")`,
-          style: 29,
-        }),
-        renderCellXml(18, currentRow, {
-          value: verdictVal,
-          style: isBadVerdict ? 31 : 30,
-        }),
-        renderCellXml(19, currentRow, {
-          value: statusText,
-          style: s.rowStyle,
-        }),
-        renderCellXml(20, currentRow, {
-          value: l.notes || '',
-          style: s.rowStyle,
-        }),
-      ];
-      rowsXml.push(`<row r="${currentRow}" ht="26" customHeight="1">${cells.join('')}</row>`);
-      currentRow++;
-    });
-  }
-
-  const lastDataRow = currentRow - 1;
-
-  // ── TABLE TOTALS FOOTER ROW (Dark Slate #0F172A + Live =SUM Formula) ──
-  const footerRow = currentRow++;
-  const footerCells: string[] = [];
-  for (let c = 1; c <= 20; c++) {
-    if (c === 1) {
-      footerCells.push(
-        renderCellXml(c, footerRow, {
-          value: '📊 TABLE SUMMARY & TOTALS',
-          style: 32,
-        })
-      );
-    } else if (c === 4) {
-      footerCells.push(
-        renderCellXml(c, footerRow, {
-          value: `${leads.length} Active Lead Row(s)`,
-          style: 32,
-        })
-      );
-    } else if (c === 7) {
-      footerCells.push(
-        renderCellXml(c, footerRow, {
-          value: `🔵 FB: ${fbCount}  |  🟢 Google: ${googleCount}  |  🟣 Voice: ${voiceCount}  |  🟠 Pasted: ${pastedCount}`,
-          style: 32,
-        })
-      );
-    } else if (c === 14) {
-      footerCells.push(
-        renderCellXml(c, footerRow, {
-          value: Number(totalQuoted.toFixed(2)),
-          type: 'formula',
-          formula: `SUM(N4:N${lastDataRow})`,
-          style: 33,
-        })
-      );
-    } else if (c === 15) {
-      footerCells.push(
-        renderCellXml(c, footerRow, {
-          value: 'Jobber Order: 1. Client → 2. Quote',
-          style: 32,
-        })
-      );
-    } else {
-      footerCells.push(renderCellXml(c, footerRow, { value: '', style: 32 }));
-    }
-  }
-  rowsXml.push(`<row r="${footerRow}" ht="30" customHeight="1">${footerCells.join('')}</row>`);
-  mergeRefs.push(`A${footerRow}:C${footerRow}`);
-  mergeRefs.push(`D${footerRow}:F${footerRow}`);
-  mergeRefs.push(`G${footerRow}:M${footerRow}`);
-  mergeRefs.push(`O${footerRow}:T${footerRow}`);
-
-  // ── FOOTER CHANNEL COLOR LEGEND & SUMMARY MINI-TABLE (So all 4 source colors are always visible!) ──
-  const legendHeaderRow = currentRow + 1;
-  const legendHeaderCells: string[] = [];
-  for (let c = 1; c <= 10; c++) {
-    legendHeaderCells.push(
-      renderCellXml(c, legendHeaderRow, {
-        value:
-          c === 1
-            ? '🎨 LEAD CHANNEL COLOR LEGEND & BREAKDOWN TABLE (Facebook • Google • Voice Quotes • Pasted)'
-            : '',
-        style: 34,
-      })
-    );
-  }
-  rowsXml.push(
-    `<row r="${legendHeaderRow}" ht="25" customHeight="1">${legendHeaderCells.join('')}</row>`
-  );
-  mergeRefs.push(`A${legendHeaderRow}:J${legendHeaderRow}`);
-
-  const channelBreakdownRows: {
-    cat: SourceCategory;
-    channelLabel: string;
-    tabName: string;
-    count: number;
-    amount: number;
-    desc: string;
-  }[] = [
-    {
-      cat: 'FACEBOOK',
-      channelLabel: '🔵 Facebook Lead Ads',
-      tabName: 'FB Leads / Facebook Leads',
-      count: fbCount,
-      amount: allLeadsForSummary
-        .filter((l) => detectSourceCategory(l.sourceTab, l.source) === 'FACEBOOK')
-        .reduce((acc, l) => acc + (Number(l.quotedAmount) || 0), 0),
-      desc: 'Royal Blue (#1877F2) badge + Soft Sky-Blue rows — Connected to Meta Lead Ads & Webhook',
-    },
-    {
-      cat: 'GOOGLE',
-      channelLabel: '🟢 Google Ads & Local Services',
-      tabName: 'Google Leads',
-      count: googleCount,
-      amount: allLeadsForSummary
-        .filter((l) => detectSourceCategory(l.sourceTab, l.source) === 'GOOGLE')
-        .reduce((acc, l) => acc + (Number(l.quotedAmount) || 0), 0),
-      desc: 'Google Emerald Green (#0F9D58) badge + Soft Mint rows — Connected to Google Ads Lead Form Webhook',
-    },
-    {
-      cat: 'VOICE',
-      channelLabel: '🟣 Voice Dictation & Quick Quotes',
-      tabName: 'Voice & Quick Quotes',
-      count: voiceCount,
-      amount: allLeadsForSummary
-        .filter((l) => detectSourceCategory(l.sourceTab, l.source) === 'VOICE')
-        .reduce((acc, l) => acc + (Number(l.quotedAmount) || 0), 0),
-      desc: 'Royal Purple (#7C3AED) badge + Soft Lavender rows — Synced from Voice Dictation & Quick Quote Builder',
-    },
-    {
-      cat: 'PASTED',
-      channelLabel: '🟠 Pasted & Manual Table Imports',
-      tabName: 'Pasted Leads',
-      count: pastedCount,
-      amount: allLeadsForSummary
-        .filter((l) => detectSourceCategory(l.sourceTab, l.source) === 'PASTED')
-        .reduce((acc, l) => acc + (Number(l.quotedAmount) || 0), 0),
-      desc: 'Warm Amber (#D97706) badge + Soft Gold rows — Bulk pasted from spreadsheets or manual entry',
-    },
-  ];
-
-  channelBreakdownRows.forEach((ch, idx) => {
-    const r = legendHeaderRow + 1 + idx;
-    const st = getSourceStyles(ch.cat, false);
-    const cells: string[] = [
-      renderCellXml(1, r, { value: ch.channelLabel, style: st.badgeStyle }),
-      renderCellXml(2, r, { value: ch.channelLabel, style: st.badgeStyle }),
-      renderCellXml(3, r, { value: `Tab: ${ch.tabName}`, style: st.rowStyle }),
-      renderCellXml(4, r, { value: `${ch.count} Lead(s)`, style: st.nameStyle }),
-      renderCellXml(5, r, { value: Number(ch.amount.toFixed(2)), type: 'num', style: 28 }),
-      renderCellXml(6, r, { value: ch.desc, style: st.rowStyle }),
-      renderCellXml(7, r, { value: '', style: st.rowStyle }),
-      renderCellXml(8, r, { value: '', style: st.rowStyle }),
-      renderCellXml(9, r, { value: '', style: st.rowStyle }),
-      renderCellXml(10, r, { value: '', style: st.rowStyle }),
-    ];
-    rowsXml.push(`<row r="${r}" ht="24" customHeight="1">${cells.join('')}</row>`);
-    mergeRefs.push(`A${r}:B${r}`);
-    mergeRefs.push(`F${r}:J${r}`);
-  });
-
-  const colsXml = VISUAL_COL_WIDTHS.map(
-    (w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`
-  ).join('');
-
-  const mergeCellsXml =
-    mergeRefs.length > 0
-      ? `<mergeCells count="${mergeRefs.length}">${mergeRefs
-          .map((ref) => `<mergeCell ref="${ref}"/>`)
-          .join('')}</mergeCells>`
-      : '';
-
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetPr>
-    <tabColor rgb="${tabColorRgb}"/>
-  </sheetPr>
-  <sheetViews>
-    <sheetView workbookViewId="0" showGridLines="1">
-      <pane ySplit="3" topLeftCell="A4" activePane="bottomLeft" state="frozen"/>
-      <selection pane="bottomLeft" activeCell="A4" sqref="A4"/>
-    </sheetView>
-  </sheetViews>
-  <sheetFormatPr defaultRowHeight="24" customHeight="1"/>
-  <cols>${colsXml}</cols>
-  <sheetData>${rowsXml.join('')}</sheetData>
-  <autoFilter ref="A3:T${lastDataRow}"/>
-  ${mergeCellsXml}
-  <headerFooter>
-    <oddHeader>&amp;L&amp;B✨ TidyUps Cleaning — Clean Leads &amp; Jobber Hub&amp;R&amp;D</oddHeader>
-    <oddFooter>&amp;LJobber Sync Order: 1. Create Client → 2. Create Request / Quote&amp;RPage &amp;P of &amp;N</oddFooter>
-  </headerFooter>
-</worksheet>`;
-}
-
-function buildTwentyColumnWebhookSheetXml(
-  headers: readonly string[],
-  leads: StyledWorkbookLead[]
-): string {
-  // Keep Row 1 as the exact 20 headers (frozen via ySplit="1") so Zapier/Make/Facebook Lead Ads/Google Ads read Row 1 directly
-  const rowsXml: string[] = [];
-  const headerCells = headers.map((h, i) => renderCellXml(i + 1, 1, { value: h, style: 11 }));
-  rowsXml.push(`<row r="1" ht="30" customHeight="1">${headerCells.join('')}</row>`);
-
-  leads.forEach((l, idx) => {
-    const r = idx + 2;
-    const cat = detectSourceCategory(l.sourceTab, l.source);
-    const st = getSourceStyles(cat, idx % 2 === 1);
-    const nameParts = String(l.customerName || '')
-      .trim()
-      .split(/\s+/);
-    const firstName = nameParts[0] || '';
-    const lastName = nameParts.slice(1).join(' ') || '';
-    const values = [
-      l.id || '',
-      l.dateReceived || new Date().toISOString(),
-      l.source || 'facebook_lead_ads',
-      l.sourceTab || 'FB Leads',
-      firstName,
-      lastName,
-      l.phone || '',
-      l.email || '',
-      l.address || '',
-      l.city || 'Edmonton',
-      'AB',
-      l.postalCode || '',
-      l.serviceRequested || 'Residential Standard Cleaning',
-      l.bedrooms || '3 Bedrooms',
-      l.bathrooms || '2 Bathrooms',
-      l.dateOfServiceRequested || '',
-      l.campaignName || 'FB / Google Ads',
-      l.notes || '',
-      `https://app.tidyupscleaning.com/?lead=${encodeURIComponent(l.id || '')}`,
-      'booked',
-    ];
-    const cells = values.map((val, cIdx) => {
-      const col1 = cIdx + 1;
-      const cellStyle = col1 === 3 || col1 === 4 ? st.badgeStyle : col1 === 5 || col1 === 6 ? st.nameStyle : st.rowStyle;
-      return renderCellXml(col1, r, { value: val, style: cellStyle });
-    });
-    rowsXml.push(`<row r="${r}" ht="24" customHeight="1">${cells.join('')}</row>`);
-  });
-
-  const lastRow = Math.max(1, leads.length + 1);
-  const colsXml = headers
-    .map((_, i) => `<col min="${i + 1}" max="${i + 1}" width="20" customWidth="1"/>`)
-    .join('');
-
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetPr>
-    <tabColor rgb="FF0D9488"/>
-  </sheetPr>
-  <sheetViews>
-    <sheetView workbookViewId="0" showGridLines="1">
-      <pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>
-      <selection pane="bottomLeft" activeCell="A2" sqref="A2"/>
-    </sheetView>
-  </sheetViews>
-  <sheetFormatPr defaultRowHeight="24" customHeight="1"/>
-  <cols>${colsXml}</cols>
-  <sheetData>${rowsXml.join('')}</sheetData>
-  <autoFilter ref="A1:T${lastRow}"/>
-  <headerFooter>
-    <oddHeader>&amp;L&amp;BTidyUps Cleaning — 20-Column Ad Webhook Schema&amp;R&amp;D</oddHeader>
-    <oddFooter>&amp;LFacebook Lead Ads &amp; Google Ads Lead Form Integration&amp;RPage &amp;P of &amp;N</oddFooter>
-  </headerFooter>
-</worksheet>`;
-}
-
-const CORRUPTED_AD_ID_PHONES = new Set([
-  '5526108796',
-  '9527272744',
-  '8018242991',
-  '5827707945',
-  '8675440779',
-  '8276700165',
-  '2632050097',
-  '7807185092', // TidyUps own number
-  '7805550199',
-  '7805550148',
-  '7805550188',
-  '7805550100',
-]);
-
-const EDMONTON_AREA_CODES = new Set(['780', '587', '825', '368']);
-
-export function isAddressInGreaterEdmonton(address?: string, city?: string, postalCode?: string): boolean {
-  const combined = `${address || ''} ${city || ''} ${postalCode || ''}`.toLowerCase();
-
-  // Explicit out-of-province or out-of-service-area cities/provinces/streets
+  const statusLower = String(lead.status || '').trim().toLowerCase();
   if (
-    /\b(red\s*deer|wetaskiwin|calgary|lethbridge|medicine\s*hat|fort\s*mcmurray|grande\s*prairie|banff|canmore|airdrie|okotoks|cochrane|camrose|lloydminster|barrie|surrey|vancouver|burnaby|victoria|kelowna|saskatoon|regina|winnipeg|toronto|ottawa|mississauga|brampton|hamilton|london|montreal|laval|quebec|halifax|mountain\s*view|california|texas|florida|new\s*york|ontario|british\s*columbia|saskatchewan|manitoba|nova\s*scotia|bibby\s*crt|willis\s*crescent|13485\s*71\s*ave|123\s*main\s*st|100\s*test\s*street)\b/i.test(
-      combined
-    )
-  ) {
-    return false;
-  }
-
-  // Check Canadian postal code if present
-  const postalMatch = combined.match(/\b([a-z]\d[a-z])\s*(\d[a-z]\d)\b/i);
-  if (postalMatch) {
-    const fsa = postalMatch[1].toUpperCase();
-    // Greater Edmonton FSAs: T5*, T6*, T7X (Spruce Grove), T7Y (Parkland/Spruce Grove), T7Z (Stony Plain),
-    // T8A/T8B/T8C/T8E/T8G/T8H (Sherwood Park / Strathcona County), T8L (Fort Saskatchewan), T8N (St. Albert),
-    // T8R (Morinville), T8T (Sturgeon County), T9E (Leduc/Nisku), T9G (Devon), T4X (Beaumont), T0C (Calmar), T0A (Gibbons/Bon Accord)
-    const isGreaterEdmontonFsa =
-      fsa.startsWith('T5') ||
-      fsa.startsWith('T6') ||
-      fsa === 'T7X' ||
-      fsa === 'T7Y' ||
-      fsa === 'T7Z' ||
-      fsa === 'T8A' ||
-      fsa === 'T8B' ||
-      fsa === 'T8C' ||
-      fsa === 'T8E' ||
-      fsa === 'T8G' ||
-      fsa === 'T8H' ||
-      fsa === 'T8L' ||
-      fsa === 'T8N' ||
-      fsa === 'T8R' ||
-      fsa === 'T8T' ||
-      fsa === 'T9E' ||
-      fsa === 'T9G' ||
-      fsa === 'T4X' ||
-      fsa === 'T0C' ||
-      fsa === 'T0A';
-    if (!isGreaterEdmontonFsa) {
-      return false;
-    }
-  }
-
-  // US 5-digit ZIP codes (like 94043)
-  if (/\b94043\b|\bca\s+9\d{4}\b/i.test(combined)) {
-    return false;
-  }
-
-  // Check city if specified
-  const cleanCity = String(city || '').trim().toLowerCase();
-  if (cleanCity) {
-    const allowedCities = [
-      'edmonton',
-      'st. albert',
-      'st albert',
-      'saint albert',
-      'sherwood park',
-      'strathcona county',
-      'leduc',
-      'leduc county',
-      'spruce grove',
-      'stony plain',
-      'parkland county',
-      'beaumont',
-      'fort saskatchewan',
-      'devon',
-      'morinville',
-      'calmar',
-      'nisku',
-      'acheson',
-      'gibbons',
-      'bon accord',
-      'sturgeon county',
-      'ardrossan',
-      'rolly view',
-      'cooking lake',
-      'enoch',
-      'ab',
-      'alberta',
-    ];
-    if (!allowedCities.some((ac) => cleanCity.includes(ac))) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-export function isFalseOrCatalogLeadRow(name?: string): boolean {
-  const s = String(name || '').trim();
-  if (!s) return true;
-  if (/^\d+$/.test(s)) return true;
-  if (/^\d+\s*lead\(s\)/i.test(s)) return true;
-  if (/^\[.*\]$/i.test(s)) return true;
-  if (/^\[facebook|^\[google|^\[pasted|^\[voice/i.test(s)) return true;
-  if (/^(as:|ag:|c:|f:|l:)/i.test(s)) return true;
-  if (/^(potential\s+job\s+caller|cleaning\s+caller|inbound\s+caller|phone\s+caller|phone\s+lead|inbound\s+ad\s+lead)/i.test(s)) {
-    return true;
-  }
-  if (
-    /\b\d\s*bed\b|\bmove\s*out\b|\bmovein\b|\bmove-in\b|\bdeep\s*clean|\binitial\s*basic|\bbi-weekly|\bweekly\s*home|\bmonthly\s*maintenance|\bhourly\s*rate|\btandem\s*crew|\binside\s*(oven|refrigerator|fridge|kitchen|cabinets)|\bbaseboards\b|\binterior\s*windows|\bfinished\s*basement|\bfull\s*basement|\bpet\s*hair|\bblinds\b|\bbalcony\b|\bfuel\b|\bdiscount\b|\bwall\s*washing|\bceiling\s*fan|\bgarage\s*sweep|\bcarpet\s*steam|\bupholstery|\bcommercial\s*office|\bpost-renovation|\bairbnb\b|test\s*lead|dummy\s*data|fb\s*leads|engagement\s*ads|june\s*lead\s*ads|sample\s*(ad|campaign|row)|sync\s*verification|lead\(s\)|auto-colored|github\.com|dispatch\s*geeni|book\s*my\s*cleaning|easy-cleans|sarah\s*\(fb\s*ad\s*test\)|new\s*app\s*leads|app\s*booking\s*v\d|tidyups\s*cleaning|richard\s*penny|joey\s*penny|joseph\s*henny|leicester\s*smith|sync\s*test|john\s*doe|what\s*\(phone\s*lead\)|sadhin\s*sorkar|shirley\s*k\s*chavez|jessie\s*vachon|diane\s*bogner|cassandra.*avon|agunbiade.*samuel|sonia\s*jordon\s*otoole|darlene\s*turnbull|venessa\s*azure/i.test(
-      s
-    )
+    statusLower === 'contacted' ||
+    statusLower === 'communicated' ||
+    statusLower === 'quoted' ||
+    statusLower === 'converted' ||
+    statusLower === 'booked' ||
+    statusLower === 'client' ||
+    statusLower === 'approved' ||
+    statusLower === 'scheduled' ||
+    statusLower === 'replied'
   ) {
     return true;
   }
-  const singleTokenGarbage = new Set([
-    'move',
-    '5bed',
-    '1bed',
-    '2bed',
-    '3bed',
-    '4bed',
-    'movein',
-    'bi-weekly',
-    'standard',
-    'tandem',
-    'inside',
-    'baseboards',
-    'interior',
-    'finished',
-    'full',
-    'pet',
-    'blinds',
-    'balcony',
-    'fuel',
-    'discount',
-    'pending',
-    'ready',
-    'synced',
-    'good',
-    'new',
-    'client name',
-    'full_name',
-    'fb',
-    'facebook',
-    'engagement',
-    'june',
-    'sample',
-    'sync',
-    'sarah',
-    'book',
-    'dispatch',
-    'joey',
-    'what',
-    'client',
-  ]);
-  return singleTokenGarbage.has(s.toLowerCase());
+
+  const verdictLower = String(lead.verdict || '').trim().toLowerCase();
+  if (verdictLower === 'client') return true;
+
+  return false;
 }
 
-export function isOutOfEdmontonOrFakeOrOutdatedLead(lead: any): boolean {
+/**
+ * Strictly detects any fake, simulated, sample, or auto-generated seed lead so it is permanently deleted and never shown.
+ */
+export function isFakeOrSimulatedLead(lead: any): boolean {
   if (!lead || typeof lead !== 'object') return true;
-  const id = String(lead.id || '').trim();
-  if (id.startsWith('lead-sheet-mvmwt') || id.startsWith('lead-sheet-mvo') || id.startsWith('lead-quo-')) {
+
+  const id = String(lead.id || '').trim().toLowerCase();
+  const quoteId = String(lead.quoteId || '').trim().toLowerCase();
+  const name = String(lead.customerName || lead.clientName || '').trim().toLowerCase();
+  const email = String(lead.email || '').trim().toLowerCase();
+  const phone = String(lead.phone || lead.clientPhone || '').trim().toLowerCase();
+  const notes = String(lead.notes || '').trim().toLowerCase();
+  const campaign = String(lead.campaignName || '').trim().toLowerCase();
+
+  // Block all legacy hardcoded/seed IDs & auto-converted historical quote seeds
+  if (
+    id === 'lead-clean-rahum-4293' ||
+    id.startsWith('lead-quote-qt-2026-') ||
+    id.startsWith('qt-2026-') ||
+    id.startsWith('lead-quo-2026') ||
+    id.startsWith('lead-fb-1') ||
+    id.startsWith('lead-fb-2') ||
+    id.startsWith('lead-fb-3') ||
+    id.startsWith('lead-ig-1') ||
+    id.startsWith('lead-g-1') ||
+    id.startsWith('lead-g-2') ||
+    id.startsWith('lead-web-1') ||
+    quoteId.startsWith('qt-2026-') ||
+    quoteId === 'qt-devon-clarke-2410'
+  ) {
     return true;
   }
 
-  const name = String(lead.customerName || lead.clientName || lead.name || '').trim();
-  if (isFalseOrCatalogLeadRow(name)) return true;
-
-  const email = String(lead.email || lead.clientEmail || '').trim().toLowerCase();
-  if (email.includes('test@meta.com') || email.includes('example.com') || email.includes('dummy')) {
+  // Block known fake/sample names & test webhook rows
+  const fakeNames = [
+    'rahum',
+    'raheem',
+    'sarah jenkins',
+    'david chen',
+    'amanda kowalski',
+    'sarah (fb ad test)',
+    'david (google ad test)',
+    'test customer',
+    'simulation',
+    'fake',
+    'sample',
+    'demo lead',
+    'marcus vance',
+    'elena rostova',
+    'alistair finch',
+    'chloe bennett',
+    'heritage pointe',
+    'lindqvist',
+    'kestrel ridge',
+    'al-mansoor',
+  ];
+  if (fakeNames.some((fn) => name.includes(fn))) {
     return true;
   }
 
-  const phoneDigits = String(lead.phone || lead.clientPhone || '').replace(/\D/g, '').slice(-10);
-  if (phoneDigits && CORRUPTED_AD_ID_PHONES.has(phoneDigits)) {
-    return true;
-  }
-  if (phoneDigits.length === 10 && phoneDigits.slice(3, 6) === '555') {
-    return true;
-  }
-
-  const address = String(lead.address || lead.serviceAddress || '').trim();
-  const city = String(lead.city || '').trim();
-  const postalCode = String(lead.postalCode || '').trim();
-  const notes = String(lead.notes || '').trim();
-
-  if (!isAddressInGreaterEdmonton(`${address} ${notes}`, city, postalCode)) {
+  // Block fake sample emails / phones
+  if (
+    email.includes('@example.com') ||
+    email === 'leadtest@tidyupscleaning.com' ||
+    phone.includes('555-0148') ||
+    phone.includes('555-0194') ||
+    phone.includes('555-0271') ||
+    phone.includes('555-0100')
+  ) {
     return true;
   }
 
-  // If the address is just a generic placeholder ("Edmonton, AB" or empty) with no street or postal code,
-  // require a valid Greater Edmonton area code (780, 587, 825, 368) or a real Jobber quote ID
-  const isGenericAddress =
-    !address ||
-    /^(edmonton(\s*,\s*ab|\s*,\s*alberta)?|st\.?\s*albert(\s*,\s*ab)?|sherwood\s*park(\s*,\s*ab)?|10405\s*jasper\s*ave.*)$/i.test(
-      address
-    );
-  const hasRealJobberQuote = String(lead.quoteId || lead.id || '').startsWith('Z2lkOi8v');
-
-  if (isGenericAddress && !postalCode && !hasRealJobberQuote) {
-    const areaCode = phoneDigits.slice(0, 3);
-    if (!areaCode || !EDMONTON_AREA_CODES.has(areaCode)) {
-      return true;
-    }
+  // Block test/simulation notes or campaigns
+  if (
+    notes.includes('test inbound lead') ||
+    notes.includes('simulation') ||
+    campaign.includes('direct webhook') && name.includes('test')
+  ) {
+    return true;
   }
 
-  // Check if outdated: any unbooked/unconverted lead received before Oct 1, 2026 or requesting a past month (Jan-Sept 2026)
-  const isConvertedClient =
-    lead.status === 'Converted' ||
-    lead.status === 'Booked' ||
-    lead.quoteStatus === 'CONVERTED' ||
-    lead.quoteStatus === 'APPROVED' ||
-    lead.verdict === 'Client';
-
-  const dateReceived = String(lead.dateReceived || lead.createdAt || '').slice(0, 10);
-  const reqDate = String(lead.dateOfServiceRequested || lead.requestedDate || lead.scheduledDate || '').toLowerCase();
-
-  if (!isConvertedClient) {
-    if (dateReceived && dateReceived < '2026-09-30') {
-      return true;
-    }
-    if (
-      /\b(january|february|march|april|may|june|july|august|september|sept|aug|jul|jun|2025|2026-0[1-9])\b/i.test(
-        reqDate
-      )
-    ) {
-      return true;
-    }
+  // Block legacy "Voice & Quick Quotes" entries that were auto-created from base seed quotes without user action
+  const rawTab = String(lead.sourceTab || '').toLowerCase();
+  const rawSource = String(lead.source || '').toLowerCase();
+  if (
+    (rawTab.includes('voice') || rawSource.includes('voice') || rawSource.includes('quick quote')) &&
+    !lead.quoCallId &&
+    !lead.callTranscript &&
+    !lead.isManualVoiceQuote &&
+    (id.startsWith('lead-quote-') || id.startsWith('lead-clean-'))
+  ) {
+    return true;
   }
 
   return false;
 }
 
-export async function generateStyledLeadsWorkbookBuffer(params: {
-  leads: StyledWorkbookLead[];
-  quotes: StyledWorkbookQuote[];
-  appLeadHeaders: readonly string[];
-  resolveJobberWebUri: (type: 'quotes' | 'clients', id?: string) => string;
-}): Promise<Buffer> {
-  const { leads: rawLeads, quotes, appLeadHeaders, resolveJobberWebUri } = params;
-  const leads = (rawLeads || []).filter((l) => !isOutOfEdmontonOrFakeOrOutdatedLead(l));
+/**
+ * Enforces:
+ * 1. No fake / simulated / sample leads (especially in Voice & Quick Quotes)
+ * 2. Edmonton & Capital Region service area filter
+ * 3. Hard 14-Day Cutoff: Nothing older than 14 days (2 weeks ago) is allowed on any Leads table or Google Sheet
+ * 4. 7-Day Uncommunicated Cutoff: Any lead > 7 days old without communication is automatically excluded
+ */
+export function isOutOfEdmontonOrFakeOrOutdatedLead(lead: any): boolean {
+  if (!lead || typeof lead !== 'object') return true;
 
-  const fbLeads = leads.filter(
-    (l) => detectSourceCategory(l.sourceTab, l.source) === 'FACEBOOK'
-  );
-  const googleLeads = leads.filter(
-    (l) => detectSourceCategory(l.sourceTab, l.source) === 'GOOGLE'
-  );
-  const voiceLeads = leads.filter(
-    (l) => detectSourceCategory(l.sourceTab, l.source) === 'VOICE'
-  );
-  const pastedLeads = leads.filter(
-    (l) => detectSourceCategory(l.sourceTab, l.source) === 'PASTED'
-  );
+  // 1. Fake / Simulated check
+  if (isFakeOrSimulatedLead(lead)) {
+    return true;
+  }
 
-  const sheetsConfig: { name: string; xml: string }[] = [
+  // 2. Out-of-Edmonton check
+  const combinedLocation = `${lead.address || ''} ${lead.city || ''} ${lead.postalCode || ''}`.toLowerCase();
+  const outOfServiceTerms = [
+    'wetaskiwin',
+    'red deer',
+    'calgary',
+    'toronto',
+    'vancouver',
+    'montreal',
+    'ottawa',
+    'winnipeg',
+    't9a',
+    't4n',
+    't4r',
+  ];
+  if (outOfServiceTerms.some((term) => combinedLocation.includes(term))) {
+    return true;
+  }
+
+  // 3. Parse lead date for 14-day & 7-day rules
+  const rawDateStr = String(
+    lead.dateReceived || lead.createdAt || lead.dateOfServiceRequested || lead.scheduledDate || ''
+  ).trim();
+
+  if (!rawDateStr) {
+    return true;
+  }
+
+  const parsedMs = Date.parse(rawDateStr);
+  if (isNaN(parsedMs)) {
+    return true;
+  }
+
+  const nowMs = Date.now();
+  const ageMs = nowMs - parsedMs;
+  const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+  // Hard 14-Day Cutoff: Anything older than 14 days is excluded everywhere
+  if (ageMs > FOURTEEN_DAYS_MS) {
+    return true;
+  }
+
+  // 7-Day Uncommunicated Cutoff: Anything older than 7 days that hasn't been communicated with is excluded
+  if (ageMs > SEVEN_DAYS_MS && !hasLeadBeenCommunicatedWith(lead)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Detects false/header/catalog rows in spreadsheet imports so they are never imported as customer leads.
+ */
+export function isFalseOrCatalogLeadRow(rawName?: string): boolean {
+  const n = String(rawName || '').trim().toLowerCase();
+  if (!n || n.length < 2) return true;
+  const banned = [
+    'client name',
+    'customer name',
+    'full_name',
+    'full name',
+    'first_name',
+    'service package',
+    'move-out cleaning',
+    'deep cleaning',
+    'standard cleaning',
+    'basic cleaning',
+    'carpet cleaning',
+    'window cleaning',
+    'appliance cleaning',
+    'inside fridge',
+    'inside oven',
+    'hourly rate',
+    'totals',
+    'summary',
+    'channel color key',
+    'test lead',
+    'dummy',
+    'simulation',
+    'sample',
+  ];
+  return banned.some((b) => n === b || n.startsWith('✨') || n.startsWith('📊'));
+}
+
+/**
+ * Checks if an address/city/postal code is within Greater Edmonton & Capital Region.
+ */
+export function isAddressInGreaterEdmonton(
+  address?: string,
+  city?: string,
+  postalCode?: string
+): boolean {
+  const combined = `${address || ''} ${city || ''} ${postalCode || ''}`.toLowerCase();
+  const outOfServiceTerms = [
+    'wetaskiwin',
+    'red deer',
+    'calgary',
+    'toronto',
+    'vancouver',
+    'montreal',
+    'ottawa',
+    'winnipeg',
+    't9a',
+    't4n',
+    't4r',
+  ];
+  if (outOfServiceTerms.some((term) => combined.includes(term))) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Filters a list of leads to only valid, non-fake Edmonton leads from the last 14 days
+ * (and < 7 days if uncommunicated), normalizing each lead's `sourceTab` to one of the 7 new tabs.
+ */
+export function filterValidRecentLeads(rawLeads: any[]): AdLeadItem[] {
+  if (!Array.isArray(rawLeads)) return [];
+  const seenIds = new Set<string>();
+  const result: AdLeadItem[] = [];
+
+  for (const item of rawLeads) {
+    if (!item || isOutOfEdmontonOrFakeOrOutdatedLead(item)) continue;
+    const id = String(item.id || '').trim();
+    if (!id || seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    const normalizedTab = resolveCleanSheetTab(item.sourceTab, item);
+    result.push({
+      ...item,
+      sourceTab: normalizedTab,
+    });
+  }
+
+  return result;
+}
+
+function extractNumericJobberId(rawId?: string): string | null {
+  if (!rawId) return null;
+  const trimmed = String(rawId).trim();
+  if (/^\d+$/.test(trimmed)) return trimmed;
+  try {
+    const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+    const m = decoded.match(/\/(\d+)$/);
+    if (m) return m[1];
+  } catch {
+    // ignore
+  }
+  const tailMatch = trimmed.match(/(\d{6,})$/);
+  return tailMatch ? tailMatch[1] : null;
+}
+
+const SHEET_COLUMNS = [
+  { header: 'Date Received', key: 'date', width: 14 },
+  { header: 'Sheet Tab', key: 'sheetTab', width: 20 },
+  { header: 'Source / Campaign', key: 'source', width: 24 },
+  { header: 'Client Name', key: 'customerName', width: 24 },
+  { header: 'Phone Number', key: 'phone', width: 18 },
+  { header: 'Email Address', key: 'email', width: 25 },
+  { header: 'Street Address', key: 'address', width: 28 },
+  { header: 'City', key: 'city', width: 14 },
+  { header: 'Postal Code', key: 'postalCode', width: 13 },
+  { header: 'Bedrooms', key: 'bedrooms', width: 14 },
+  { header: 'Bathrooms', key: 'bathrooms', width: 14 },
+  { header: 'Service Requested', key: 'serviceRequested', width: 28 },
+  { header: 'Quoted Total ($)', key: 'quotedAmount', width: 16 },
+  { header: 'Communicated?', key: 'communicated', width: 16 },
+  { header: 'Jobber Quote #', key: 'quoteNumber', width: 16 },
+  { header: 'Jobber Quote Link', key: 'quoteLink', width: 24 },
+  { header: 'Verdict', key: 'verdict', width: 15 },
+  { header: 'Lead Status', key: 'status', width: 15 },
+  { header: 'Notes & AI Call Summary', key: 'notes', width: 46 },
+];
+
+function styleWorksheetWithTheme(
+  ws: ExcelJS.Worksheet,
+  title: string,
+  subtitle: string,
+  headerBgArgb: string,
+  kpiBgArgb: string,
+  rows: any[],
+  quotes: any[]
+) {
+  ws.columns = SHEET_COLUMNS.map((c) => ({ key: c.key, width: c.width }));
+
+  // Freeze top 3 rows (Row 1: Title Banner, Row 2: KPI & Archive Links Bar, Row 3: Column Headers) and first 4 columns
+  ws.views = [
     {
-      name: 'All Clean Leads',
-      xml: buildVisualWorksheetXml({
-        title:
-          '✨ TIDYUPS CLEANING — MASTER LEADS & QUOTES TABLE (ALL CHANNELS: FACEBOOK • GOOGLE • VOICE • PASTED)',
-        bannerStyle: 1,
-        tabColorRgb: 'FF059669',
-        leads,
-        allLeadsForSummary: leads,
-        quotes,
-        defaultCategory: 'VOICE',
-        isMasterSheet: true,
-        resolveJobberWebUri,
-      }),
-    },
-    {
-      name: 'FB Leads',
-      xml: buildVisualWorksheetXml({
-        title:
-          '🔵 TIDYUPS CLEANING — FACEBOOK LEAD ADS TABLE  •  JOBBER ORDER: 1. CREATE CLIENT → 2. CREATE QUOTE',
-        bannerStyle: 2,
-        tabColorRgb: 'FF1877F2',
-        leads: fbLeads,
-        allLeadsForSummary: leads,
-        quotes,
-        defaultCategory: 'FACEBOOK',
-        resolveJobberWebUri,
-      }),
-    },
-    {
-      name: 'Google Leads',
-      xml: buildVisualWorksheetXml({
-        title:
-          '🟢 TIDYUPS CLEANING — GOOGLE ADS & LOCAL SERVICES LEADS TABLE  •  JOBBER ORDER: 1. CLIENT → 2. QUOTE',
-        bannerStyle: 3,
-        tabColorRgb: 'FF0F9D58',
-        leads: googleLeads,
-        allLeadsForSummary: leads,
-        quotes,
-        defaultCategory: 'GOOGLE',
-        resolveJobberWebUri,
-      }),
-    },
-    {
-      name: 'Voice & Quick Quotes',
-      xml: buildVisualWorksheetXml({
-        title:
-          '🟣 TIDYUPS CLEANING — VOICE DICTATION & QUICK QUOTES TABLE  •  JOBBER ORDER: 1. CLIENT → 2. QUOTE',
-        bannerStyle: 4,
-        tabColorRgb: 'FF7C3AED',
-        leads: voiceLeads,
-        allLeadsForSummary: leads,
-        quotes,
-        defaultCategory: 'VOICE',
-        resolveJobberWebUri,
-      }),
-    },
-    {
-      name: 'Pasted Leads',
-      xml: buildVisualWorksheetXml({
-        title:
-          '🟠 TIDYUPS CLEANING — PASTED & MANUAL LEADS TABLE  •  JOBBER ORDER: 1. CLIENT → 2. QUOTE',
-        bannerStyle: 5,
-        tabColorRgb: 'FFD97706',
-        leads: pastedLeads,
-        allLeadsForSummary: leads,
-        quotes,
-        defaultCategory: 'PASTED',
-        resolveJobberWebUri,
-      }),
-    },
-    {
-      name: 'Facebook Leads',
-      xml: buildTwentyColumnWebhookSheetXml(appLeadHeaders, fbLeads),
-    },
-    {
-      name: 'Google Ads Leads',
-      xml: buildTwentyColumnWebhookSheetXml(appLeadHeaders, googleLeads),
-    },
-    {
-      name: 'ScrubbyBuilder Leads',
-      xml: buildTwentyColumnWebhookSheetXml(appLeadHeaders, leads),
+      state: 'frozen',
+      xSplit: 4,
+      ySplit: 3,
+      topLeftCell: 'E4',
+      activeCell: 'A4',
     },
   ];
 
-  const zip = new JSZip();
+  // Row 1: Executive Title Banner
+  ws.mergeCells('A1:S1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value = `✨ ${title} — TIDYUPS CLEANING (14-DAY FRESH WINDOW • 7-DAY UNCOMMUNICATED CUTOFF)`;
+  titleCell.font = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF0F172A' },
+  };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  ws.getRow(1).height = 30;
 
-  const sheetOverrides = sheetsConfig
-    .map(
-      (_, idx) =>
-        `<Override PartName="/xl/worksheets/sheet${idx + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
-    )
-    .join('\n  ');
+  // Row 2: KPI Summary + Quick Reference note
+  ws.mergeCells('A2:S2');
+  const kpiCell = ws.getCell('A2');
+  const totalQuoted = rows.reduce((sum, l) => sum + (Number(l.quotedAmount ?? 0) || 0), 0);
+  kpiCell.value = `📊 Active Leads in Tab: ${rows.length}   |   💰 Total Quoted Value: $${totalQuoted.toFixed(
+    2
+  )} CAD   |   🕒 Rules: Max 14 Days Old (7 Days if Uncommunicated)   |   🔗 See "Archived Old Sheets" Tab for Historical Sheets   |   ${subtitle}`;
+  kpiCell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+  kpiCell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: kpiBgArgb },
+  };
+  kpiCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  ws.getRow(2).height = 24;
 
-  zip.file(
-    '[Content_Types].xml',
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-  ${sheetOverrides}
-</Types>`
-  );
-
-  zip.file(
-    '_rels/.rels',
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-</Relationships>`
-  );
-
-  const wbSheetEntries = sheetsConfig
-    .map(
-      (s, idx) =>
-        `<sheet name="${xmlEscape(s.name)}" sheetId="${idx + 1}" r:id="rId${idx + 1}"/>`
-    )
-    .join('\n    ');
-
-  zip.file(
-    'xl/workbook.xml',
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets>
-    ${wbSheetEntries}
-  </sheets>
-</workbook>`
-  );
-
-  const wbRelsEntries = sheetsConfig
-    .map(
-      (_, idx) =>
-        `<Relationship Id="rId${idx + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${idx + 1}.xml"/>`
-    )
-    .join('\n  ');
-
-  zip.file(
-    'xl/_rels/workbook.xml.rels',
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  ${wbRelsEntries}
-  <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>`
-  );
-
-  zip.file('xl/styles.xml', buildStylesXml());
-
-  sheetsConfig.forEach((s, idx) => {
-    zip.file(`xl/worksheets/sheet${idx + 1}.xml`, s.xml);
+  // Row 3: AutoFilter Column Headers
+  const headerRow = ws.getRow(3);
+  headerRow.values = SHEET_COLUMNS.map((c) => c.header);
+  headerRow.height = 26;
+  headerRow.eachCell((cell) => {
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: headerBgArgb },
+    };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      bottom: { style: 'medium', color: { argb: 'FF0F172A' } },
+      left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    };
   });
 
-  const arrayBuf = await zip.generateAsync({
-    type: 'nodebuffer',
-    compression: 'DEFLATE',
-    compressionOptions: { level: 6 },
+  ws.autoFilter = {
+    from: { row: 3, column: 1 },
+    to: { row: Math.max(4, rows.length + 3), column: SHEET_COLUMNS.length },
+  };
+
+  // Populate Data Rows starting at Row 4
+  rows.forEach((lead, idx) => {
+    const rowNumber = idx + 4;
+    const tabName = resolveCleanSheetTab(lead.sourceTab, lead);
+    const palette = TAB_THEME_PALETTES[tabName] || TAB_THEME_PALETTES['Other Ads'];
+    const isEven = idx % 2 === 0;
+    const rowBgArgb = isEven ? palette.rowEvenBgArgb : palette.rowOddBgArgb;
+
+    const matchedQuote = Array.isArray(quotes)
+      ? quotes.find((q) => q && (q.id === lead.quoteId || (lead.quoteNumber && q.quoteNumber === lead.quoteNumber)))
+      : null;
+    const numericQuoteId = extractNumericJobberId(matchedQuote?.id) || extractNumericJobberId(lead.quoteId);
+    const quoteUrl = numericQuoteId ? `https://secure.getjobber.com/quotes/${numericQuoteId}` : '';
+
+    const communicated = hasLeadBeenCommunicatedWith(lead);
+    const dateStr = String(lead.dateReceived || lead.createdAt || new Date().toISOString()).slice(0, 10);
+
+    const row = ws.getRow(rowNumber);
+    row.values = [
+      dateStr,
+      `${palette.icon} ${tabName}`,
+      lead.source || lead.campaignName || tabName,
+      lead.customerName || '',
+      lead.phone || '',
+      lead.email || '',
+      lead.address || 'Edmonton, AB',
+      lead.city || 'Edmonton',
+      lead.postalCode || '',
+      lead.bedrooms || '3 Bedrooms',
+      lead.bathrooms || '2 Bathrooms',
+      lead.serviceRequested || 'Residential Cleaning',
+      lead.quotedAmount !== undefined && lead.quotedAmount !== null ? Number(lead.quotedAmount) : 0,
+      communicated ? '✅ Yes (Communicated)' : '⏳ Needs Follow-Up (<7d)',
+      lead.quoteNumber || '',
+      quoteUrl ? { text: `Open Quote ${lead.quoteNumber || `#${numericQuoteId}`}`, hyperlink: quoteUrl } : '',
+      lead.verdict || 'Good lead',
+      lead.status || (communicated ? 'Contacted' : 'New'),
+      lead.notes || lead.callSummary || '',
+    ];
+    row.height = 22;
+
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF0F172A' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: rowBgArgb },
+      };
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: colNumber === 13 ? 'right' : colNumber === 1 || colNumber === 14 || colNumber === 17 || colNumber === 18 ? 'center' : 'left',
+        wrapText: colNumber === 19,
+      };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+        right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+      };
+
+      // Highlight Sheet Tab badge column (Column 2)
+      if (colNumber === 2) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: palette.badgeBgArgb },
+        };
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: palette.badgeFgArgb } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      }
+
+      // Bold Client Name (Column 4)
+      if (colNumber === 4) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+      }
+
+      // Currency format on Quoted Total (Column 13)
+      if (colNumber === 13) {
+        cell.numFmt = '$#,##0.00';
+        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF065F46' } };
+      }
+
+      // Hyperlink styling on Jobber Quote Link (Column 16)
+      if (colNumber === 16 && quoteUrl) {
+        cell.font = { name: 'Calibri', size: 10, bold: true, underline: true, color: { argb: 'FF1D4ED8' } };
+      }
+    });
   });
 
-  return Buffer.from(arrayBuf);
+  // Summary Footer Row
+  const footerRowNum = Math.max(4, rows.length + 4);
+  const footerRow = ws.getRow(footerRowNum);
+  footerRow.values = [
+    'TOTALS',
+    `${rows.length} Lead(s)`,
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    'Total Quoted Pipeline:',
+    rows.length > 0 ? { formula: `SUM(M4:M${rows.length + 3})`, result: totalQuoted } : 0,
+    '',
+    '',
+    '',
+    '',
+    '',
+    'Only leads within the last 14 days (and <7 days if uncommunicated) are kept.',
+  ];
+  footerRow.height = 25;
+  footerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF0F172A' },
+    };
+    cell.alignment = {
+      vertical: 'middle',
+      horizontal: colNumber === 13 ? 'right' : 'left',
+    };
+    if (colNumber === 13) {
+      cell.numFmt = '$#,##0.00';
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF34D399' } };
+    }
+  });
+}
+
+/**
+ * Generates the brand-new, visually appealing multi-tab Google Sheets (.xlsx) workbook with:
+ * - All New Leads (14-Day)
+ * - Facebook Leads 1
+ * - Facebook Leads 2
+ * - Google Leads 1
+ * - Google Leads 2
+ * - Other Ads
+ * - Facebook AI
+ * - Quo
+ * - Archived Old Sheets (Direct clickable links to the 2 historical Google Sheets)
+ */
+export async function generateStyledLeadsWorkbookBuffer(
+  rawLeadsOrOptions:
+    | any[]
+    | {
+        leads?: any[];
+        quotes?: any[];
+        appLeadHeaders?: string[];
+        resolveJobberWebUri?: (type: string, id?: string) => string;
+      },
+  maybeQuotes: any[] = []
+): Promise<Buffer> {
+  const rawLeads = Array.isArray(rawLeadsOrOptions)
+    ? rawLeadsOrOptions
+    : Array.isArray(rawLeadsOrOptions?.leads)
+    ? rawLeadsOrOptions.leads
+    : [];
+  const quotes = Array.isArray(rawLeadsOrOptions)
+    ? maybeQuotes
+    : Array.isArray(rawLeadsOrOptions?.quotes)
+    ? rawLeadsOrOptions.quotes
+    : maybeQuotes;
+
+  const excelPkg = 'exceljs';
+  const ExcelJSMod: any = await import(/* @vite-ignore */ excelPkg);
+  const ExcelJSRuntime = ExcelJSMod.default || ExcelJSMod;
+  const workbook = new ExcelJSRuntime.Workbook();
+  workbook.creator = 'TidyUps Cleaning Edmonton';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const cleanLeads = filterValidRecentLeads(rawLeads);
+
+  // 1. Master Overview Tab: All New Leads (14-Day)
+  const masterWs = workbook.addWorksheet('All New Leads (14-Day)', {
+    properties: { tabColor: { argb: 'FF10B981' } },
+  });
+  styleWorksheetWithTheme(
+    masterWs,
+    'ALL NEW LEADS OVERVIEW (LAST 14 DAYS)',
+    'Combined view of Facebook Leads 1 & 2, Google Leads 1 & 2, Other Ads, Facebook AI, and Quo',
+    'FF0F766E',
+    'FFD1FAE5',
+    cleanLeads,
+    quotes
+  );
+
+  // 2. Create each of the 7 requested tabs in exact order
+  for (const tabName of CLEAN_SHEET_TABS) {
+    const palette = TAB_THEME_PALETTES[tabName];
+    const tabRows = cleanLeads.filter((l) => resolveCleanSheetTab(l.sourceTab, l) === tabName);
+    const ws = workbook.addWorksheet(tabName, {
+      properties: { tabColor: { argb: palette.tabColorArgb } },
+    });
+    styleWorksheetWithTheme(
+      ws,
+      `${palette.icon} ${tabName.toUpperCase()}`,
+      `Dedicated ${tabName} Tab — Starting Fresh (14-Day Window)`,
+      palette.headerBgArgb,
+      palette.kpiBgArgb,
+      tabRows,
+      quotes
+    );
+  }
+
+  // 3. Dedicated "Archived Old Sheets" Reference Tab with clickable links to the old Google Sheets
+  const archiveWs = workbook.addWorksheet('Archived Old Sheets', {
+    properties: { tabColor: { argb: 'FF64748B' } },
+  });
+  archiveWs.columns = [
+    { header: 'Archive Name', key: 'name', width: 42 },
+    { header: 'Direct Google Sheet Link (Click to Open)', key: 'link', width: 62 },
+    { header: 'Spreadsheet ID', key: 'id', width: 48 },
+    { header: 'Notes', key: 'notes', width: 65 },
+  ];
+
+  archiveWs.mergeCells('A1:D1');
+  const archTitle = archiveWs.getCell('A1');
+  archTitle.value = '🗄️ ARCHIVED / PREVIOUS GOOGLE SHEETS (LINKED FOR HISTORICAL REFERENCE ONLY)';
+  archTitle.font = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
+  archTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+  archTitle.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  archiveWs.getRow(1).height = 30;
+
+  archiveWs.mergeCells('A2:D2');
+  const archSub = archiveWs.getCell('A2');
+  archSub.value =
+    'Your brand-new Google Sheet starts fresh with only new leads (max 14 days old, or 7 days if uncommunicated). Click any link below to log into your old sheets if you ever need historical data:';
+  archSub.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+  archSub.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+  archSub.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  archiveWs.getRow(2).height = 24;
+
+  const archHeader = archiveWs.getRow(3);
+  archHeader.values = [
+    'Archived Google Sheet Name',
+    'Clickable Link to Open Old Google Sheet',
+    'Google Spreadsheet ID',
+    'Status & Policy',
+  ];
+  archHeader.height = 25;
+  archHeader.eachCell((cell) => {
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  });
+
+  ARCHIVED_OLD_GOOGLE_SHEETS.forEach((sheet, idx) => {
+    const r = archiveWs.getRow(idx + 4);
+    r.values = [
+      sheet.name,
+      { text: `🔗 Open ${sheet.name} (${sheet.url})`, hyperlink: sheet.url },
+      sheet.id,
+      sheet.description,
+    ];
+    r.height = 26;
+    r.eachCell((cell, colNumber) => {
+      cell.font = {
+        name: 'Calibri',
+        size: 10,
+        bold: colNumber === 1 || colNumber === 2,
+        underline: colNumber === 2,
+        color: { argb: colNumber === 2 ? 'FF1D4ED8' : 'FF0F172A' },
+      };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: idx % 2 === 0 ? 'FFF8FAFC' : 'FFF1F5F9' },
+      };
+      cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    });
+  });
+
+  const arrayBuffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(arrayBuffer);
 }
