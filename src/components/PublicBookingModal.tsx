@@ -21,6 +21,7 @@ import {
   Wand2,
   Users,
   Volume2,
+  RotateCcw,
 } from 'lucide-react';
 import { ServiceTicket } from '../types/dispatch';
 import { AddressAutocompleteInput } from './AddressAutocompleteInput';
@@ -96,21 +97,21 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
   const [createdSummary, setCreatedSummary] = useState<any>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
-  // 3 Simple Options: Move-Out, Basic, Deep
+  // 3 Simple Options: Move-Out, Basic, Deep — starts blank ('') so 0/8 boxes are pre-filled on open!
   const [serviceType, setServiceType] = useState<
-    'Move-Out Cleaning' | 'Basic Cleaning' | 'Deep Cleaning'
-  >('Move-Out Cleaning');
+    'Move-Out Cleaning' | 'Basic Cleaning' | 'Deep Cleaning' | ''
+  >('');
 
-  // Split Customer Name: First Name + Last Name
+  // Split Customer Name: First Name + Last Name — all fields start 100% blank on open
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
-  const [city, setCity] = useState('Edmonton');
+  const [city, setCity] = useState('');
   const [postalCode, setPostalCode] = useState('');
-  const [bedrooms, setBedrooms] = useState('3 Bedrooms');
-  const [bathrooms, setBathrooms] = useState('2 Bathrooms');
+  const [bedrooms, setBedrooms] = useState('');
+  const [bathrooms, setBathrooms] = useState('');
   const [cleanerCount, setCleanerCount] = useState<1 | 2>(2);
   // Auto-detect Facebook Ads & Google Ads parameters (?source=..., ?utm_source=..., ?fbclid=..., ?gclid=...) on app.tidyupscleaning.com/booking
   const detectedAdRouting = useMemo(() => {
@@ -203,12 +204,8 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
     };
   }, []);
 
-  const [preferredDate, setPreferredDate] = useState(() => {
-    const tmrw = new Date();
-    tmrw.setDate(tmrw.getDate() + 1);
-    return tmrw.toISOString().slice(0, 10);
-  });
-  const [preferredTime, setPreferredTime] = useState('Morning (8:00 AM - 12:00 PM)');
+  const [preferredDate, setPreferredDate] = useState('');
+  const [preferredTime, setPreferredTime] = useState('');
   const [heardAbout, setHeardAbout] = useState(() => detectedAdRouting.defaultHeardAbout);
   const [specialInstructions, setSpecialInstructions] = useState('');
 
@@ -711,10 +708,43 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
 
   const fullNameCombined = `${firstName.trim()} ${lastName.trim()}`.trim();
 
+  const handleClearSheet = useCallback(() => {
+    shouldKeepRecordingRef.current = false;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+    setIsRecordingVoice(false);
+    latestTranscriptRef.current = '';
+    latestInterimRef.current = '';
+    setVoiceTranscript('');
+    setInterimTranscript('');
+    setServiceType('');
+    setFirstName('');
+    setLastName('');
+    setPhone('');
+    setEmail('');
+    setAddress('');
+    setCity('');
+    setPostalCode('');
+    setBedrooms('');
+    setBathrooms('');
+    setCleanerCount(2);
+    setPreferredDate('');
+    setPreferredTime('');
+    setSpecialInstructions('');
+    setFlashingFields({});
+    setVoiceCapturedFields({});
+    setErrorMsg(null);
+    setVoiceStatusMsg('✓ Sheet cleared! All boxes reset to blank — ready to start fresh.');
+    setTimeout(() => setVoiceStatusMsg(null), 4000);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!firstName.trim() || !lastName.trim() || !phone.trim() || !address.trim()) {
-      setErrorMsg('Please fill in your First Name, Last Name, Mobile Phone Number, and Street Address so every required box is lit up.');
+    if (!serviceType || !firstName.trim() || !lastName.trim() || !phone.trim() || !address.trim() || !bedrooms || !bathrooms || !preferredDate) {
+      setErrorMsg('Please select your Cleaning Service Type, First Name, Last Name, Mobile Phone Number, Street Address, Bedrooms, Bathrooms, and Preferred Date so all 8 required boxes light up.');
       return;
     }
 
@@ -737,15 +767,15 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
       customerName: fullNameCombined,
       customerPhone: phone.trim(),
       customerEmail: email.trim(),
-      serviceType,
+      serviceType: serviceType || 'Move-Out Cleaning',
       cleanerCount: crewRuleDetails.cleaners,
       address: address.trim(),
-      city,
+      city: city || 'Edmonton',
       postalCode: postalCode.trim(),
-      bedrooms,
-      bathrooms,
+      bedrooms: bedrooms || '3 Bedrooms',
+      bathrooms: bathrooms || '2 Bathrooms',
       preferredDate: preferredDate || new Date().toISOString().slice(0, 10),
-      preferredTime,
+      preferredTime: preferredTime || 'Morning (8:00 AM - 12:00 PM)',
       heardAbout,
       utmSource: resolvedAdTab,
       adTab: resolvedAdTab,
@@ -868,16 +898,30 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
           </div>
         </div>
 
-        {mode === 'MODAL' && onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2.5 rounded-xl bg-zinc-900 border border-pink-500/40 text-zinc-300 hover:text-white hover:bg-red-600 transition-colors cursor-pointer"
-            aria-label="Close"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {step === 'FORM' && (
+            <button
+              type="button"
+              onClick={handleClearSheet}
+              className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-red-600 border-2 border-red-500/70 text-red-200 hover:text-white text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+              title="Clear all fields and start over with a blank booking sheet"
+              data-testid="button-start-over-top"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Start Over / Clear Sheet</span>
+            </button>
+          )}
+          {mode === 'MODAL' && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2.5 rounded-xl bg-zinc-900 border border-pink-500/40 text-zinc-300 hover:text-white hover:bg-red-600 transition-colors cursor-pointer"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Form Body */}
@@ -941,7 +985,7 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={handleToggleContinuousMic}
@@ -972,6 +1016,16 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                   >
                     <Wand2 className="w-3.5 h-3.5 text-pink-400" />
                     <span>{isParsingVoice ? 'Lighting Boxes...' : 'Light Up Boxes'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleClearSheet}
+                    className="px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-red-600 border border-red-500/70 text-red-300 hover:text-white text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all"
+                    title="Clear all form boxes and start over from scratch"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Start Over / Clear Sheet</span>
                   </button>
                 </div>
               </div>
@@ -1011,15 +1065,25 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                   <Sparkles className="w-3.5 h-3.5 text-red-500" />
                   <span>Live Form Box Status — Boxes Light Up Green/Pink When Filled!</span>
                 </span>
-                <span
-                  className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
-                    filledRequiredCount === requiredBoxesStatus.length
-                      ? 'bg-emerald-500 text-black shadow-[0_0_12px_rgba(16,185,129,0.5)]'
-                      : 'bg-pink-600 text-white'
-                  }`}
-                >
-                  {filledRequiredCount} / {requiredBoxesStatus.length} Required Boxes Lit Up ✓
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClearSheet}
+                    className="px-2.5 py-1 rounded-full bg-zinc-950 hover:bg-red-600 border border-red-500/60 text-red-300 hover:text-white text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Clear Sheet / Start Over</span>
+                  </button>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
+                      filledRequiredCount === requiredBoxesStatus.length
+                        ? 'bg-emerald-500 text-black shadow-[0_0_12px_rgba(16,185,129,0.5)]'
+                        : 'bg-pink-600 text-white'
+                    }`}
+                  >
+                    {filledRequiredCount} / {requiredBoxesStatus.length} Required Boxes Lit Up ✓
+                  </span>
+                </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {requiredBoxesStatus.map((b) => (
@@ -1101,91 +1165,93 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
               </div>
 
               {/* Cleaner Crew & Minimum Hours Rule Selector */}
-              <div className="mt-4 pt-4 border-t border-zinc-800/80">
-                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                  <span className="text-xs font-black text-pink-300 flex items-center gap-1.5">
-                    <Users className="w-4 h-4 text-red-500" />
-                    <span>Cleaner Crew &amp; Minimum Hours Rule ({serviceType}):</span>
-                  </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black uppercase">
-                    {crewRuleDetails.badgeText}
-                  </span>
+              {serviceType && (
+                <div className="mt-4 pt-4 border-t border-zinc-800/80">
+                  <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                    <span className="text-xs font-black text-pink-300 flex items-center gap-1.5">
+                      <Users className="w-4 h-4 text-red-500" />
+                      <span>Cleaner Crew &amp; Minimum Hours Rule ({serviceType}):</span>
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black uppercase">
+                      {crewRuleDetails.badgeText}
+                    </span>
+                  </div>
+
+                  {serviceType === 'Basic Cleaning' && (
+                    <div className="p-3 rounded-xl bg-zinc-950 border border-pink-500/50 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="font-black text-white">👤 1 Professional Cleaner ($52.50/hr)</span>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">
+                          Basic Cleaning is scheduled with 1 dedicated TidyUps cleaner.
+                        </p>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-black text-[11px]">
+                        ✓ 1 Cleaner Active
+                      </span>
+                    </div>
+                  )}
+
+                  {serviceType === 'Deep Cleaning' && (
+                    <div className="p-3 rounded-xl bg-zinc-950 border border-pink-500/50 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="font-black text-white">👥 2 Professional Cleaners — Minimum 2 Hours ($105.00/hr)</span>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">
+                          Deep Cleaning requires a minimum of 2 cleaners for 2+ hours ($210.00+ base).
+                        </p>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-black text-[11px]">
+                        ✓ 2 Cleaners (Min 2 Hrs)
+                      </span>
+                    </div>
+                  )}
+
+                  {serviceType === 'Move-Out Cleaning' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCleanerCount(2);
+                          triggerFieldHighlight('cleanerCount');
+                        }}
+                        className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                          cleanerCount === 2
+                            ? 'border-pink-500 bg-pink-950/50 text-white shadow-md'
+                            : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-pink-500/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-white">👥 2 Cleaners (Recommended)</span>
+                          {cleanerCount === 2 && <CheckCircle2 className="w-4 h-4 text-pink-400" />}
+                        </div>
+                        <div className="text-[11px] font-bold text-pink-300 mt-0.5">
+                          Minimum 3 Hours @ $105.00/hr ($315.00+)
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCleanerCount(1);
+                          triggerFieldHighlight('cleanerCount');
+                        }}
+                        className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                          cleanerCount === 1
+                            ? 'border-pink-500 bg-pink-950/50 text-white shadow-md'
+                            : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-pink-500/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-white">👤 1 Cleaner (Solo Move-Out)</span>
+                          {cleanerCount === 1 && <CheckCircle2 className="w-4 h-4 text-pink-400" />}
+                        </div>
+                        <div className="text-[11px] font-bold text-red-300 mt-0.5">
+                          Starts at 6 Hours Minimum @ $52.50/hr ($315.00+)
+                        </div>
+                      </button>
+                    </div>
+                  )}
                 </div>
-
-                {serviceType === 'Basic Cleaning' && (
-                  <div className="p-3 rounded-xl bg-zinc-950 border border-pink-500/50 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-black text-white">👤 1 Professional Cleaner ($52.50/hr)</span>
-                      <p className="text-[11px] text-zinc-400 mt-0.5">
-                        Basic Cleaning is scheduled with 1 dedicated TidyUps cleaner.
-                      </p>
-                    </div>
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-black text-[11px]">
-                      ✓ 1 Cleaner Active
-                    </span>
-                  </div>
-                )}
-
-                {serviceType === 'Deep Cleaning' && (
-                  <div className="p-3 rounded-xl bg-zinc-950 border border-pink-500/50 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-black text-white">👥 2 Professional Cleaners — Minimum 2 Hours ($105.00/hr)</span>
-                      <p className="text-[11px] text-zinc-400 mt-0.5">
-                        Deep Cleaning requires a minimum of 2 cleaners for 2+ hours ($210.00+ base).
-                      </p>
-                    </div>
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-black text-[11px]">
-                      ✓ 2 Cleaners (Min 2 Hrs)
-                    </span>
-                  </div>
-                )}
-
-                {serviceType === 'Move-Out Cleaning' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCleanerCount(2);
-                        triggerFieldHighlight('cleanerCount');
-                      }}
-                      className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
-                        cleanerCount === 2
-                          ? 'border-pink-500 bg-pink-950/50 text-white shadow-md'
-                          : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-pink-500/50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-white">👥 2 Cleaners (Recommended)</span>
-                        {cleanerCount === 2 && <CheckCircle2 className="w-4 h-4 text-pink-400" />}
-                      </div>
-                      <div className="text-[11px] font-bold text-pink-300 mt-0.5">
-                        Minimum 3 Hours @ $105.00/hr ($315.00+)
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCleanerCount(1);
-                        triggerFieldHighlight('cleanerCount');
-                      }}
-                      className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
-                        cleanerCount === 1
-                          ? 'border-pink-500 bg-pink-950/50 text-white shadow-md'
-                          : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-pink-500/50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-white">👤 1 Cleaner (Solo Move-Out)</span>
-                        {cleanerCount === 1 && <CheckCircle2 className="w-4 h-4 text-pink-400" />}
-                      </div>
-                      <div className="text-[11px] font-bold text-red-300 mt-0.5">
-                        Starts at 6 Hours Minimum @ $52.50/hr ($315.00+)
-                      </div>
-                    </button>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
 
             {/* 2. Split Customer Name (First Name + Last Name) & Contact Boxes */}
@@ -1316,6 +1382,7 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                     onChange={(e) => setCity(e.target.value)}
                     className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
                   >
+                    <option value="">Select City / Community...</option>
                     <option value="Edmonton">Edmonton</option>
                     <option value="St. Albert">St. Albert</option>
                     <option value="Sherwood Park">Sherwood Park</option>
@@ -1334,10 +1401,12 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                     {renderLitBadge('bedrooms', Boolean(bedrooms), true)}
                   </div>
                   <select
+                    required
                     value={bedrooms}
                     onChange={(e) => setBedrooms(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
                   >
+                    <option value="">Select Bedrooms / Property Size...</option>
                     <option value="1 Bedroom">1 Bedroom / Condo / Apartment</option>
                     <option value="2 Bedrooms">2 Bedrooms</option>
                     <option value="3 Bedrooms">3 Bedrooms</option>
@@ -1354,10 +1423,12 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                     {renderLitBadge('bathrooms', Boolean(bathrooms), true)}
                   </div>
                   <select
+                    required
                     value={bathrooms}
                     onChange={(e) => setBathrooms(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
                   >
+                    <option value="">Select Bathrooms...</option>
                     <option value="1 Bathroom">1 Bathroom</option>
                     <option value="1.5 Bathrooms">1.5 Bathrooms</option>
                     <option value="2 Bathrooms">2 Bathrooms</option>
@@ -1391,15 +1462,16 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs font-black text-white flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-red-400" />
-                      <span>Preferred Time Window *</span>
+                      <span>Preferred Time Window</span>
                     </label>
-                    {renderLitBadge('preferredTime', Boolean(preferredTime), true)}
+                    {renderLitBadge('preferredTime', Boolean(preferredTime), false)}
                   </div>
                   <select
                     value={preferredTime}
                     onChange={(e) => setPreferredTime(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
                   >
+                    <option value="">Select Preferred Time Window...</option>
                     <option value="Morning (8:00 AM - 12:00 PM)">Morning (8:00 AM - 12:00 PM)</option>
                     <option value="Afternoon (12:00 PM - 4:00 PM)">Afternoon (12:00 PM - 4:00 PM)</option>
                     <option value="Flexible / Any Time">Flexible / Earliest Available</option>
@@ -1453,26 +1525,37 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
               </div>
             </div>
 
-            {/* Submit Button */}
+            {/* Submit & Start Over / Clear Sheet Buttons */}
             <div className="space-y-2.5 pt-1">
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full py-4 px-6 bg-gradient-to-r from-pink-600 via-red-600 to-pink-600 hover:from-pink-500 hover:via-red-500 hover:to-pink-500 text-white rounded-2xl text-sm sm:text-base font-black shadow-[0_0_25px_rgba(236,72,153,0.5)] flex items-center justify-center gap-2.5 transition-all cursor-pointer disabled:opacity-50"
-              >
-                {isSubmitting ? (
-                  <span>Submitting Your Booking &amp; Creating Jobber Quote...</span>
-                ) : (
-                  <>
-                    <Sparkles className="w-5 h-5" />
-                    <span>
-                      Submit {serviceType} ({crewRuleDetails.cleaners} Cleaner
-                      {crewRuleDetails.cleaners > 1 ? 's' : ''}) Request
-                    </span>
-                    <ArrowRight className="w-5 h-5" />
-                  </>
-                )}
-              </button>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex-1 py-4 px-6 bg-gradient-to-r from-pink-600 via-red-600 to-pink-600 hover:from-pink-500 hover:via-red-500 hover:to-pink-500 text-white rounded-2xl text-sm sm:text-base font-black shadow-[0_0_25px_rgba(236,72,153,0.5)] flex items-center justify-center gap-2.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <span>Submitting Your Booking &amp; Creating Jobber Quote...</span>
+                  ) : (
+                    <>
+                      <Sparkles className="w-5 h-5" />
+                      <span>
+                        Submit {serviceType || 'Cleaning'} {serviceType ? `(${crewRuleDetails.cleaners} Cleaner${crewRuleDetails.cleaners > 1 ? 's' : ''})` : ''} Request
+                      </span>
+                      <ArrowRight className="w-5 h-5" />
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearSheet}
+                  className="py-4 px-5 rounded-2xl bg-zinc-900 hover:bg-red-600 border-2 border-red-500/70 text-red-200 hover:text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
+                  title="Clear all boxes and start over from scratch"
+                  data-testid="button-start-over-bottom"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Start Over / Clear Sheet</span>
+                </button>
+              </div>
               <div className="flex flex-wrap items-center justify-center gap-3 text-[11px] text-zinc-400 font-semibold">
                 <span className="flex items-center gap-1 text-emerald-400">
                   <ShieldCheck className="w-3.5 h-3.5" />

@@ -31,6 +31,7 @@ import {
   X,
   Volume2,
   Calculator,
+  RotateCcw,
 } from 'lucide-react';
 import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 import { ServiceTicket } from '../types/dispatch';
@@ -333,30 +334,26 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     }
   };
 
-  const [selectedService, setSelectedService] = useState<CleaningCategory>('move-out');
+  const [selectedService, setSelectedService] = useState<CleaningCategory | ''>('');
   const [activeBannerIdx, setActiveBannerIdx] = useState<number>(0);
 
-  // Split Customer Name: First Name + Last Name
+  // Split Customer Name: First Name + Last Name — all fields start 100% blank on open
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [address, setAddress] = useState('');
-  const [city, setCity] = useState('Edmonton');
+  const [city, setCity] = useState('');
   const [postalCode, setPostalCode] = useState('');
-  const [bedrooms, setBedrooms] = useState('3 Bedrooms');
-  const [bathrooms, setBathrooms] = useState('2 Bathrooms');
+  const [bedrooms, setBedrooms] = useState('');
+  const [bathrooms, setBathrooms] = useState('');
   const [cleanerCount, setCleanerCount] = useState<1 | 2>(2);
   const [frequency, setFrequency] = useState<
     'One-Time' | 'Weekly (15% Off)' | 'Bi-Weekly (10% Off)' | 'Monthly (5% Off)'
   >('One-Time');
   const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
-  const [preferredDate, setPreferredDate] = useState<string>(() => {
-    const tmrw = new Date();
-    tmrw.setDate(tmrw.getDate() + 1);
-    return tmrw.toISOString().slice(0, 10);
-  });
-  const [preferredTime, setPreferredTime] = useState('Morning (8:00 AM - 12:00 PM)');
+  const [preferredDate, setPreferredDate] = useState<string>('');
+  const [preferredTime, setPreferredTime] = useState('');
   const [heardAbout, setHeardAbout] = useState<string>(initialSourceFromUrl);
   const [specialInstructions, setSpecialInstructions] = useState('');
 
@@ -1033,19 +1030,55 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const filledRequiredCount = requiredBoxesStatus.filter((b) => b.filled).length;
   const fullNameCombined = `${firstName.trim()} ${lastName.trim()}`.trim();
 
+  const handleClearSheet = useCallback(() => {
+    shouldKeepRecordingRef.current = false;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+    setIsRecordingFormVoice(false);
+    latestTranscriptRef.current = '';
+    latestInterimRef.current = '';
+    setDictationText('');
+    setInterimDictation('');
+    setSelectedService('');
+    setFirstName('');
+    setLastName('');
+    setCustomerPhone('');
+    setCustomerEmail('');
+    setAddress('');
+    setCity('');
+    setPostalCode('');
+    setBedrooms('');
+    setBathrooms('');
+    setCleanerCount(2);
+    setFrequency('One-Time');
+    setSelectedAddons([]);
+    setPreferredDate('');
+    setPreferredTime('');
+    setSpecialInstructions('');
+    setFlashingFields({});
+    setVoiceCapturedFields({});
+    setErrorMessage(null);
+    setVoiceFillStatus('✓ Sheet cleared! All boxes reset to blank — ready to start fresh.');
+    setTimeout(() => setVoiceFillStatus(null), 4000);
+  }, []);
+
   const handleBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!firstName.trim() || !lastName.trim() || !customerPhone.trim() || !address.trim()) {
-      setErrorMessage('Please enter your First Name, Last Name, Mobile Phone Number, and Street Address so all required boxes light up.');
+    if (!selectedService || !firstName.trim() || !lastName.trim() || !customerPhone.trim() || !address.trim() || !bedrooms || !bathrooms || !preferredDate) {
+      setErrorMessage('Please select your Cleaning Service Type, First Name, Last Name, Mobile Phone Number, Street Address, Bedrooms, Bathrooms, and Preferred Date so all 8 required boxes light up.');
       return;
     }
 
     setIsSubmitting(true);
     setErrorMessage(null);
 
-    const fullAddress = address.toLowerCase().includes(city.toLowerCase())
+    const effectiveCity = city || 'Edmonton';
+    const fullAddress = address.toLowerCase().includes(effectiveCity.toLowerCase())
       ? address.trim()
-      : `${address.trim()}, ${city}, AB ${postalCode.trim()}`.trim();
+      : `${address.trim()}, ${effectiveCity}, AB ${postalCode.trim()}`.trim();
 
     try {
       const res = await fetch('/api/public/book', {
@@ -1721,7 +1754,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={handleToggleFormMic}
@@ -1742,6 +1775,15 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                         >
                           <Wand2 className="w-3.5 h-3.5 text-pink-400" />
                           <span>{isParsingFormVoice ? 'Lighting...' : 'Light Up Boxes'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearSheet}
+                          className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-red-600 border border-red-500/70 text-red-300 hover:text-white text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all"
+                          title="Clear all form boxes and start over from scratch"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Start Over / Clear Sheet</span>
                         </button>
                       </div>
                     </div>
@@ -1777,15 +1819,25 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       <span className="text-[11px] font-black uppercase tracking-wider text-pink-400">
                         ✨ Live Box Lighting Tracker — See Every Box Light Up When Filled
                       </span>
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
-                          filledRequiredCount === requiredBoxesStatus.length
-                            ? 'bg-emerald-500 text-black shadow-[0_0_12px_rgba(16,185,129,0.5)]'
-                            : 'bg-pink-600 text-white'
-                        }`}
-                      >
-                        {filledRequiredCount} / {requiredBoxesStatus.length} Required Boxes Lit Up ✓
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleClearSheet}
+                          className="px-2.5 py-1 rounded-full bg-zinc-950 hover:bg-red-600 border border-red-500/60 text-red-300 hover:text-white text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Clear Sheet / Start Over</span>
+                        </button>
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
+                            filledRequiredCount === requiredBoxesStatus.length
+                              ? 'bg-emerald-500 text-black shadow-[0_0_12px_rgba(16,185,129,0.5)]'
+                              : 'bg-pink-600 text-white'
+                          }`}
+                        >
+                          {filledRequiredCount} / {requiredBoxesStatus.length} Required Boxes Lit Up ✓
+                        </span>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                       {requiredBoxesStatus.map((b) => (
@@ -1930,6 +1982,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                         onChange={(e) => setCity(e.target.value)}
                         className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
                       >
+                        <option value="">Select City / Community...</option>
                         <option value="Edmonton">Edmonton</option>
                         <option value="Sherwood Park">Sherwood Park</option>
                         <option value="St. Albert">St. Albert</option>
@@ -1953,10 +2006,12 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                           {renderLitBadge('bedrooms', Boolean(bedrooms), true)}
                         </div>
                         <select
+                          required
                           value={bedrooms}
                           onChange={(e) => setBedrooms(e.target.value)}
                           className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
                         >
+                          <option value="">Select Bedrooms...</option>
                           <option value="1 Bedroom">1 Bedroom / Condo</option>
                           <option value="2 Bedrooms">2 Bedrooms</option>
                           <option value="3 Bedrooms">3 Bedrooms</option>
@@ -1974,10 +2029,12 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                           {renderLitBadge('bathrooms', Boolean(bathrooms), true)}
                         </div>
                         <select
+                          required
                           value={bathrooms}
                           onChange={(e) => setBathrooms(e.target.value)}
                           className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
                         >
+                          <option value="">Select Bathrooms...</option>
                           <option value="1 Bathroom">1 Bathroom</option>
                           <option value="1.5 Bathrooms">1.5 Bathrooms</option>
                           <option value="2 Bathrooms">2 Bathrooms</option>
@@ -2006,14 +2063,19 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                     </div>
 
                     {/* STRICT CREW & MINIMUM HOURS RULES BOX */}
-                    <div className={`p-4 rounded-2xl border-2 ${getLitBoxClass('cleanerCount', true)}`}>
+                    <div className={`p-4 rounded-2xl border-2 ${getLitBoxClass('cleanerCount', Boolean(selectedService))}`}>
                       <div className="flex items-center justify-between mb-2.5 flex-wrap gap-2">
                         <label className="text-xs font-black text-white flex items-center gap-1.5">
                           <Users className="w-4 h-4 text-pink-500" />
-                          <span>Cleaner Crew &amp; Minimum Hours ({activeServiceData.name}):</span>
+                          <span>Cleaner Crew &amp; Minimum Hours ({selectedService ? activeServiceData.name : 'Select Service Type Above'}):</span>
                         </label>
-                        {renderLitBadge('cleanerCount', true, true)}
+                        {renderLitBadge('cleanerCount', Boolean(selectedService), true)}
                       </div>
+                      {!selectedService && (
+                        <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-400">
+                          Pick <strong>Move-Out</strong>, <strong>Basic</strong>, or <strong>Deep Cleaning</strong> above to select your cleaner crew.
+                        </div>
+                      )}
 
                       {selectedService === 'standard' && (
                         <div className="p-3.5 rounded-xl bg-black border-2 border-pink-500 flex items-center justify-between gap-3">
@@ -2256,15 +2318,16 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       <div className="flex items-center justify-between mb-1.5">
                         <label className="block text-xs font-black text-white flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-red-500" />
-                          <span>Preferred Arrival Window *</span>
+                          <span>Preferred Arrival Window</span>
                         </label>
-                        {renderLitBadge('preferredTime', Boolean(preferredTime), true)}
+                        {renderLitBadge('preferredTime', Boolean(preferredTime), false)}
                       </div>
                       <select
                         value={preferredTime}
                         onChange={(e) => setPreferredTime(e.target.value)}
                         className="w-full px-3 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
                       >
+                        <option value="">Select Preferred Arrival Window...</option>
                         <option value="Morning (8:00 AM - 12:00 PM)">☀️ Morning (8:00 AM - 12:00 PM)</option>
                         <option value="Afternoon (12:00 PM - 4:00 PM)">🌤️ Afternoon (12:00 PM - 4:00 PM)</option>
                         <option value="Evening (4:00 PM - 7:00 PM)">🌙 Evening (4:00 PM - 7:00 PM)</option>
@@ -2318,25 +2381,36 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Submit Button */}
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-pink-600 via-red-600 to-pink-600 hover:from-pink-500 hover:via-red-500 hover:to-pink-500 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-[0_0_25px_rgba(236,72,153,0.45)] transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
-                  >
-                    {isSubmitting ? (
-                      <span>Submitting Your Cleaning Booking...</span>
-                    ) : (
-                      <>
-                        <Sparkles className="w-5 h-5" />
-                        <span>
-                          Confirm &amp; Request Booking ({priceCalculation.effectiveCleaners} Cleaner
-                          {priceCalculation.effectiveCleaners > 1 ? 's' : ''}) — ${priceCalculation.total.toFixed(2)} CAD
-                        </span>
-                        <ArrowRight className="w-5 h-5" />
-                      </>
-                    )}
-                  </button>
+                  {/* Submit & Start Over / Clear Sheet Buttons */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="flex-1 py-4 px-6 rounded-2xl bg-gradient-to-r from-pink-600 via-red-600 to-pink-600 hover:from-pink-500 hover:via-red-500 hover:to-pink-500 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-[0_0_25px_rgba(236,72,153,0.45)] transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                    >
+                      {isSubmitting ? (
+                        <span>Submitting Your Cleaning Booking...</span>
+                      ) : (
+                        <>
+                          <Sparkles className="w-5 h-5" />
+                          <span>
+                            Confirm &amp; Request Booking ({priceCalculation.effectiveCleaners} Cleaner
+                            {priceCalculation.effectiveCleaners > 1 ? 's' : ''}) — ${priceCalculation.total.toFixed(2)} CAD
+                          </span>
+                          <ArrowRight className="w-5 h-5" />
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearSheet}
+                      className="py-4 px-5 rounded-2xl bg-zinc-900 hover:bg-red-600 border-2 border-red-500/70 text-red-200 hover:text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
+                      title="Clear all form boxes and start over from scratch"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Start Over / Clear Sheet</span>
+                    </button>
+                  </div>
                   <p className="text-[11px] text-center font-bold text-zinc-400">
                     🔒 No upfront card charge today • Synced directly with our official Jobber Price List!
                   </p>
