@@ -402,7 +402,7 @@ export function App() {
   // Allows the owner inside the staff app to test the locked 1-page customer view
   const [isCustomerLockPreview, setIsCustomerLockPreview] = useState<boolean>(false);
 
-  // Staff & Owner Authentication state
+  // Staff & Owner Authentication state (Owner is signed in automatically on the main console; /booking and book.tidyupscleaning.com stay customer-only)
   const [isStaffAuthenticated, setIsStaffAuthenticated] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const host = window.location.hostname.toLowerCase();
@@ -426,12 +426,14 @@ export function App() {
         return false;
       }
       try {
-        return localStorage.getItem('tidyups_verified_password_session') === 'true';
-      } catch {
-        return false;
-      }
+        if (localStorage.getItem('tidyups_verified_password_session') === 'false') {
+          return false;
+        }
+        localStorage.setItem('tidyups_verified_password_session', 'true');
+      } catch {}
+      return true;
     }
-    return false;
+    return true;
   });
 
   // Detect if visitor is on a public legal page (/privacy-policy, /privacy, /data-deletion, /delete-data, /terms, /t&c, /support)
@@ -476,8 +478,22 @@ export function App() {
   // Dedicated Top Bar Navigation Tabs: 'MASTER_HUB' | 'FB_MESSENGER_AI' | 'QUICK_QUOTE' | 'MAP' | 'SCHEDULED_JOBS' | 'MANAGEMENT' | 'INTAKES' | 'CUSTOMER_PORTAL' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'SPAM_SHIELD'
   const [activeTopView, setActiveTopView] = useState<'MASTER_HUB' | 'FB_MESSENGER_AI' | 'MAP' | 'CUSTOMER_PORTAL' | 'SCHEDULED_JOBS' | 'CLIENTS' | 'ADDRESS_SEARCH' | 'MANAGEMENT' | 'QUOTES' | 'INVOICES' | 'LEGAL' | 'LEADS' | 'QUICK_QUOTE' | 'INTAKES' | 'SPAM_SHIELD'>(() => {
     if (typeof window !== 'undefined') {
+      const host = window.location.hostname.toLowerCase();
       const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
       const h = window.location.hash.toLowerCase();
+      const s = window.location.search.toLowerCase();
+      const isBookSubdomain = host.startsWith('book.') || host.startsWith('www.book.');
+      if (
+        isBookSubdomain ||
+        p === '/booking' ||
+        p.startsWith('/booking/') ||
+        p === '/book' ||
+        p.startsWith('/book/') ||
+        s.includes('mode=customer') ||
+        s.includes('booking=1')
+      ) {
+        return 'CUSTOMER_PORTAL';
+      }
       if (
         p === '/privacy-policy' ||
         p === '/privacy' ||
@@ -501,18 +517,16 @@ export function App() {
         return 'LEADS';
       }
       try {
-        const isAuth = localStorage.getItem('tidyups_verified_password_session') === 'true';
-        if (!isAuth) return 'CUSTOMER_PORTAL';
         const savedTab = localStorage.getItem('tidyups_active_tab');
-        if (savedTab && ['MASTER_HUB', 'FB_MESSENGER_AI', 'MAP', 'CUSTOMER_PORTAL', 'SCHEDULED_JOBS', 'CLIENTS', 'ADDRESS_SEARCH', 'MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL', 'LEADS', 'QUICK_QUOTE', 'INTAKES', 'SPAM_SHIELD'].includes(savedTab)) {
+        if (savedTab && savedTab !== 'CUSTOMER_PORTAL' && ['MASTER_HUB', 'FB_MESSENGER_AI', 'MAP', 'SCHEDULED_JOBS', 'CLIENTS', 'ADDRESS_SEARCH', 'MANAGEMENT', 'QUOTES', 'INVOICES', 'LEGAL', 'LEADS', 'QUICK_QUOTE', 'INTAKES', 'SPAM_SHIELD'].includes(savedTab)) {
           return savedTab as any;
         }
-        return 'MASTER_HUB';
+        return 'LEADS';
       } catch {
-        return 'CUSTOMER_PORTAL';
+        return 'LEADS';
       }
     }
-    return 'CUSTOMER_PORTAL';
+    return 'LEADS';
   });
   const [masterHubFocusBlock, setMasterHubFocusBlock] = useState<MasterHubFocusBlock>(() => {
     if (typeof window !== 'undefined') {

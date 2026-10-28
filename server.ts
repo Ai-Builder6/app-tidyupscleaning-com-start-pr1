@@ -92,10 +92,20 @@ dotenv.config();
 
 const app = express();
 
-// Determine port: support CLI argument (--port 3000), standard PORT env var, or DEFAULT_APP_PORT, defaulting to 3000
+// Determine port: in AI Studio preview (K_SERVICE=ais-* or NODE_ENV!==production), port 8080 is used by the outer proxy supervisor, so app must listen on 3000
 const portArgIndex = process.argv.indexOf("--port");
 const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? parseInt(process.argv[portArgIndex + 1], 10) : null;
-const PORT = cliPort || (process.env.PORT ? parseInt(process.env.PORT, 10) : (process.env.DEFAULT_APP_PORT ? parseInt(process.env.DEFAULT_APP_PORT, 10) : 3000));
+const isAiStudioContainer =
+  process.env.NODE_ENV !== "production" || String(process.env.K_SERVICE || "").startsWith("ais-");
+const PORT =
+  cliPort ||
+  (isAiStudioContainer
+    ? 3000
+    : process.env.PORT
+    ? parseInt(process.env.PORT, 10)
+    : process.env.DEFAULT_APP_PORT
+    ? parseInt(process.env.DEFAULT_APP_PORT, 10)
+    : 3000);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
@@ -17051,15 +17061,20 @@ async function startServer() {
     });
   });
 
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n  ➜  Local:   http://localhost:${PORT}/`);
-    console.log(`  ➜  Network: http://0.0.0.0:${PORT}/`);
-    console.log(`  Dispatch Server ready on port ${PORT} (WebSocket at /ws/chat)\n`);
+  let activeListenPort = PORT;
+  server.listen(activeListenPort, "0.0.0.0", () => {
+    console.log(`\n  ➜  Local:   http://localhost:${activeListenPort}/`);
+    console.log(`  ➜  Network: http://0.0.0.0:${activeListenPort}/`);
+    console.log(`  Dispatch Server ready on port ${activeListenPort} (WebSocket at /ws/chat)\n`);
   });
 
   server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(`Port ${PORT} is already in use. Exiting to allow supervisor restart.`);
+    if (err.code === "EADDRINUSE" && activeListenPort !== 3000) {
+      console.warn(`Port ${activeListenPort} is occupied by supervisor; falling back to port 3000...`);
+      activeListenPort = 3000;
+      server.listen(3000, "0.0.0.0");
+    } else if (err.code === "EADDRINUSE") {
+      console.error(`Port ${activeListenPort} is already in use. Exiting to allow supervisor restart.`);
       process.exit(1);
     } else {
       console.error("Server error:", err);
