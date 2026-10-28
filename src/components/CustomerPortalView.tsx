@@ -1372,7 +1372,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           <div className="lg:col-span-6 space-y-4 text-center lg:text-left">
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-pink-600 to-red-600 text-white text-xs font-black uppercase tracking-wide shadow-md">
               <Sparkles className="w-4 h-4" />
-              <span>🐰 TidyUps Bunny Voice &amp; Instant Quote Portal • app.tidyupscleaning.com/book</span>
+              <span>🐰 TidyUps Bunny Voice &amp; Instant Quote Portal • app.tidyupscleaning.com/booking</span>
             </div>
 
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
@@ -1470,7 +1470,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               </div>
               <div className="flex items-center justify-between px-1 text-[11px] font-extrabold text-zinc-300">
                 <span className="truncate">{OFFICIAL_COMPANY_BANNERS[activeBannerIdx].title}</span>
-                <span className="text-pink-400 font-mono shrink-0 ml-2">app.tidyupscleaning.com/book</span>
+                <a href="/booking" className="text-pink-400 hover:underline font-mono shrink-0 ml-2">app.tidyupscleaning.com/booking</a>
               </div>
             </div>
           </div>
@@ -2551,7 +2551,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                     TidyUps Cleaning Service Inc.
                   </h2>
                   <p className="text-[11px] text-pink-400 font-mono">
-                    https://app.tidyupscleaning.com/book • https://tidyupscleaning.com
+                    https://app.tidyupscleaning.com/booking • https://tidyupscleaning.com
                   </p>
                 </div>
               </div>

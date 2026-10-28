@@ -1638,11 +1638,11 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
               </span>
               <div className="flex flex-wrap items-center gap-1.5">
                 {[
-                  { key: 'fb1', label: '🔵 Facebook Leads 1', url: 'https://app.tidyupscleaning.com/booking?source=facebook_leads_1', cls: 'bg-[#1877F2] hover:bg-blue-500 text-white' },
-                  { key: 'fb2', label: '🔷 Facebook Leads 2', url: 'https://app.tidyupscleaning.com/booking?source=facebook_leads_2', cls: 'bg-[#0A66C2] hover:bg-sky-500 text-white' },
-                  { key: 'gg1', label: '🟢 Google Leads 1', url: 'https://app.tidyupscleaning.com/booking?source=google_leads_1', cls: 'bg-[#0F9D58] hover:bg-emerald-500 text-white' },
-                  { key: 'gg2', label: '🌲 Google Leads 2', url: 'https://app.tidyupscleaning.com/booking?source=google_leads_2', cls: 'bg-[#0D9488] hover:bg-teal-500 text-white' },
-                  { key: 'oth', label: '🟠 Other Ads', url: 'https://app.tidyupscleaning.com/booking?source=other_ads', cls: 'bg-[#D97706] hover:bg-amber-500 text-white' },
+                  { key: 'fb1', label: '🔵 Facebook Leads 1', url: 'https://app.tidyupscleaning.com/booking?source=fb1', cls: 'bg-[#1877F2] hover:bg-blue-500 text-white' },
+                  { key: 'fb2', label: '🔷 Facebook Leads 2', url: 'https://app.tidyupscleaning.com/booking?source=fb2', cls: 'bg-[#0A66C2] hover:bg-sky-500 text-white' },
+                  { key: 'gg1', label: '🟢 Google Leads 1', url: 'https://app.tidyupscleaning.com/booking?source=google1', cls: 'bg-[#0F9D58] hover:bg-emerald-500 text-white' },
+                  { key: 'gg2', label: '🌲 Google Leads 2', url: 'https://app.tidyupscleaning.com/booking?source=google2', cls: 'bg-[#0D9488] hover:bg-teal-500 text-white' },
+                  { key: 'oth', label: '🟠 Other Ads', url: 'https://app.tidyupscleaning.com/booking?source=other', cls: 'bg-[#D97706] hover:bg-amber-500 text-white' },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -1655,6 +1655,34 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                     <span>{copiedUrl === item.key ? `Copied ${item.label}!` : item.label}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Direct Webhook URL & Shared Key for Google Ads & Facebook Ads */}
+            <div className="pt-2 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="text-zinc-300">
+                ⚡ <strong>Webhook URL (Google Ads &amp; Facebook Ads):</strong>{' '}
+                <code className="text-cyan-300 font-mono">https://app.tidyupscleaning.com/api/leads/webhook</code>{' '}
+                • <strong>Shared Key (Same for Both):</strong>{' '}
+                <code className="text-emerald-300 font-mono font-bold">tidyups-yeg-leads-2026</code>
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleCopyBookingUrl('https://app.tidyupscleaning.com/api/leads/webhook', 'webhook_url')}
+                  className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-cyan-500/40 text-cyan-200 font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedUrl === 'webhook_url' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedUrl === 'webhook_url' ? 'Copied Webhook URL!' : 'Copy Webhook URL'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCopyBookingUrl('tidyups-yeg-leads-2026', 'webhook_key')}
+                  className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-emerald-500/40 text-emerald-200 font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedUrl === 'webhook_key' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedUrl === 'webhook_key' ? 'Copied Shared Key!' : 'Copy Shared Key'}</span>
+                </button>
               </div>
             </div>
           </div>

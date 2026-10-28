@@ -336,7 +336,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         }
         setShowQuoCallsPanel(true);
         setNotice(
-          `✓ Synced ${data.syncedCallsCount || 0} Quo / Sonia AI calls & transcripts! Cleaning leads with transcripts (Rahum & Blaze) are connected directly to your Voice & Quick Quotes sheet tab.`
+          `✓ Synced ${data.syncedCallsCount || 0} Quo / Sonia AI calls & transcripts! Cleaning leads with transcripts are connected directly to your Quo sheet tab.`
         );
       } else {
         setNotice(`Quo sync notice: ${data?.error || 'Could not sync calls'}`);
@@ -818,8 +818,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         : 'https://secure.getjobber.com/quotes';
       return [
         (l.dateReceived || new Date().toISOString()).slice(0, 10),
-        (l as any).sourceTab || 'Voice & Quick Quotes',
-        l.source || 'Voice / Quick Quote',
+        resolveCleanSheetTab(l.sourceTab, l),
+        l.source || 'Quo Call / Voice',
         l.customerName || '',
         l.phone || '',
         l.email || '',
@@ -1165,22 +1165,53 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
           </div>
         </div>
 
-        {/* Collapsible Facebook Lead Ads, Google Ads & book.tidyupscleaning.com Connection Panel */}
+        {/* Collapsible Facebook Lead Ads, Google Ads & app.tidyupscleaning.com/booking Connection Panel */}
         {showAdsConnectPanel && (
           <div className="mt-3 pt-3 border-t border-slate-800 bg-[#0d111c] rounded-xl p-4 space-y-3">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2">
               <div>
-                <h3 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-2">
+                <h3 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-2 flex-wrap">
                   <Globe className="w-4 h-4 text-blue-400" />
                   <span>
-                    Reconnect Facebook Lead Ads, Google Ads &amp; Customer Booking Site (book.tidyupscleaning.com)
+                    Reconnect Facebook Lead Ads, Google Ads &amp; Customer Booking Site (
+                    <a
+                      href="/booking"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-cyan-300 hover:text-cyan-200 underline"
+                    >
+                      app.tidyupscleaning.com/booking
+                    </a>
+                    )
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-black">
+                    ✓ All New Protocols Active (7 Tabs • 14-Day Window • Anti-Merge Guard)
                   </span>
                 </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Send Facebook Ads &amp; Google Ads traffic directly to <strong className="text-cyan-300">book.tidyupscleaning.com</strong> or connect your Meta / Google Ads Webhooks &amp; Google Sheets below so every lead is captured automatically.
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Send Facebook Ads &amp; Google Ads traffic directly to{' '}
+                  <a
+                    href="/booking"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-cyan-300 hover:text-cyan-200 font-extrabold underline font-mono"
+                  >
+                    https://app.tidyupscleaning.com/booking
+                  </a>{' '}
+                  (bookable live right now — and <code className="text-slate-300">book.tidyupscleaning.com</code> auto-redirects there) or connect your Meta / Google Ads Webhooks &amp; 7-Tab Google Sheet below.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href="/booking"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black flex items-center gap-1.5 shadow-xs"
+                  title="Open the live customer booking form at app.tidyupscleaning.com/booking"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open Live /booking Form</span>
+                </a>
                 <input
                   ref={sheetFileInputRef}
                   type="file"
@@ -1193,12 +1224,12 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   onClick={() => handleReconnectAndPullSheets(true)}
                   disabled={isReconnectingSheets}
                   className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-[11px] font-black flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
-                  title="Reads all tabs of your connected Google Sheet in Google Drive (including private Drive sheets) and pulls any new Facebook or Google Ads leads into the app"
+                  title="Reads all 7 tabs of your connected Google Sheet in Google Drive and pulls any new Facebook or Google Ads leads into the app"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isReconnectingSheets ? 'animate-spin' : ''}`} />
                   <span>
                     {isReconnectingSheets
-                      ? 'Scanning Google Sheet Tabs...'
+                      ? 'Scanning 7 Sheet Tabs...'
                       : '🔄 Pull New FB & Google Leads from Sheet'}
                   </span>
                 </button>
@@ -1219,89 +1250,149 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               </div>
             </div>
 
-            {/* Why Facebook Form Leads Might Not Be in the Sheet Yet — Actionable 3-Way Guide */}
+            {/* 3-Way Guide with Bookable Links & Updated 7-Tab Protocols */}
             <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-500/40 text-[11px] text-blue-100 space-y-1.5">
               <div className="font-extrabold text-blue-300 flex items-center gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>
-                  Why a Facebook Ad Test Lead Shows on Your Facebook Form But Not Yet in the App:
+                  How Jess Connects Facebook Ads &amp; Google Ads to <code className="text-cyan-300">app.tidyupscleaning.com/booking</code> &amp; Your 7-Tab Google Sheet:
                 </span>
               </div>
               <p className="text-slate-300 leading-relaxed">
-                If you pasted your Google Sheet link into the <strong>&ldquo;Website URL / Claim Link&rdquo;</strong> button at the end of a Facebook Instant Form, Facebook only opens that link for the customer — <strong>Facebook does not automatically write form answers into a link</strong> unless you use one of these 3 methods:
+                All links below are <strong>live, bookable, and updated with your new protocols</strong> (7 Google Sheet tabs, 14-day fresh lead window, 7-day uncommunicated filter, strict 2-of-3 client anti-merge protection, and automatic redirect to <code className="text-pink-300">app.tidyupscleaning.com/thank-you</code> with Google Ads Tag <code className="text-emerald-300">AW-18539302675</code>):
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1">
-                <div className="p-2 rounded-lg bg-[#0b0e17]/90 border border-blue-500/30">
+                <div className="p-2.5 rounded-lg bg-[#0b0e17]/90 border border-blue-500/30 space-y-1">
                   <div className="font-extrabold text-cyan-300">
-                    Option A (Best — Direct 3-Option Booking):
+                    Option A (Best — Direct Bookable Page):
                   </div>
-                  <div className="text-slate-300 mt-0.5">
-                    Use <code className="text-cyan-200 font-mono">https://app.tidyupscleaning.com/booking?source=facebook</code> as your Facebook Ad link. Customers pick <strong>Move-Out, Basic, or Deep</strong> and appear in your App, Jobber &amp; Sheet automatically!
+                  <div className="text-slate-300">
+                    Use{' '}
+                    <a
+                      href="/booking"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-cyan-200 font-mono underline hover:text-white font-bold"
+                    >
+                      https://app.tidyupscleaning.com/booking
+                    </a>{' '}
+                    (or add <code className="text-cyan-300">?source=fb1</code>, <code className="text-cyan-300">?source=fb2</code>, <code className="text-emerald-300">?source=google1</code>, <code className="text-emerald-300">?source=google2</code>). Customers pick <strong>Move-Out, Basic, or Deep</strong> and sync to your 7-tab Sheet &amp; Jobber!
                   </div>
                 </div>
-                <div className="p-2 rounded-lg bg-[#0b0e17]/90 border border-blue-500/30">
+                <div className="p-2.5 rounded-lg bg-[#0b0e17]/90 border border-blue-500/30 space-y-1">
                   <div className="font-extrabold text-emerald-300">
-                    Option B (Meta Instant Form → Google Sheet):
+                    Option B (Meta / Google Form → 7-Tab Sheet):
                   </div>
-                  <div className="text-slate-300 mt-0.5">
-                    In Meta Ads Manager → <strong>Instant Form → CRM Setup → Google Sheets</strong>, connect your Google Account &amp; pick <code className="text-emerald-200 font-mono">TidyUps Clean Leads &amp; Ads Hub</code> (tab: <strong>Facebook Leads</strong>), then click <strong>🔄 Pull New FB &amp; Google Leads from Sheet</strong> above.
+                  <div className="text-slate-300">
+                    In Meta Ads Manager or Google Ads → <strong>Google Sheets CRM Setup</strong>, connect your active sheet and choose any of your 7 tabs (<strong>Facebook Leads 1, Facebook Leads 2, Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo</strong>), then click <strong>🔄 Pull New FB &amp; Google Leads</strong> above.
                   </div>
                 </div>
-                <div className="p-2 rounded-lg bg-[#0b0e17]/90 border border-blue-500/30">
+                <div className="p-2.5 rounded-lg bg-[#0b0e17]/90 border border-blue-500/30 space-y-1">
                   <div className="font-extrabold text-indigo-300">
-                    Option C (Direct Webhook or 1-Click CSV Upload):
+                    Option C (Direct Webhook — Same Key for Both!):
                   </div>
-                  <div className="text-slate-300 mt-0.5">
-                    In Meta CRM Webhooks, paste <code className="text-indigo-200 font-mono">https://app.tidyupscleaning.com/api/webhooks/facebook</code> — or download your Facebook Form leads (<code>.csv</code>/<code>.xlsx</code>) and click <strong>📥 Upload FB Form / Sheet</strong> above!
+                  <div className="text-slate-300">
+                    In Google Ads or Meta CRM Webhooks, paste{' '}
+                    <code className="text-indigo-200 font-mono">https://app.tidyupscleaning.com/api/leads/webhook</code>.{' '}
+                    <strong>Both Google Ads &amp; Facebook Ads use the exact same Webhook Key:</strong>{' '}
+                    <code className="text-emerald-300 font-mono font-bold">tidyups-yeg-leads-2026</code> (also accepts <code className="text-emerald-300 font-mono">tidyups-google-ads-2026</code>).
                   </div>
                 </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
-              {/* 1. Direct Customer Booking Site & Ad Landing URLs */}
+              {/* 1. Direct Customer Booking Site & Ad Landing URLs (All Bookable) */}
               <div className="p-3 rounded-xl bg-[#131724] border border-cyan-500/40 space-y-1.5">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-1">
                   <span className="text-[11px] font-bold text-cyan-300">
-                    1. Locked Customer Booking Page (/book)
+                    1. Customer Booking Page (/booking)
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyHelper('bookUrl', 'https://app.tidyupscleaning.com/book')}
-                    className="text-[11px] text-cyan-400 hover:underline font-bold cursor-pointer"
-                  >
-                    {copiedField === 'bookUrl' ? 'Copied!' : 'Copy URL'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href="/booking"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-pink-400 hover:underline font-extrabold"
+                    >
+                      Book Now ↗
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyHelper('bookUrl', 'https://app.tidyupscleaning.com/booking')}
+                      className="text-[11px] text-cyan-400 hover:underline font-bold cursor-pointer"
+                    >
+                      {copiedField === 'bookUrl' ? 'Copied!' : 'Copy URL'}
+                    </button>
+                  </div>
                 </div>
-                <div className="font-mono text-[11px] text-cyan-200 bg-[#0b0e17] px-2.5 py-1.5 rounded border border-slate-800 truncate">
-                  https://app.tidyupscleaning.com/book
-                </div>
-                <div className="flex items-center gap-1.5 pt-0.5">
+                <a
+                  href="/booking"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block font-mono text-[11px] text-cyan-200 hover:text-white bg-[#0b0e17] px-2.5 py-1.5 rounded border border-slate-800 truncate underline"
+                  title="Click to open live bookable page: https://app.tidyupscleaning.com/booking"
+                >
+                  https://app.tidyupscleaning.com/booking
+                </a>
+                <div className="flex flex-wrap items-center gap-1 pt-0.5">
                   <button
                     type="button"
                     onClick={() =>
-                      handleCopyHelper('fbBookUrl', 'https://app.tidyupscleaning.com/book?source=facebook')
+                      handleCopyHelper('fb1BookUrl', 'https://app.tidyupscleaning.com/booking?source=fb1')
                     }
                     className="px-2 py-0.5 rounded bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-[10px] font-bold text-blue-200 cursor-pointer"
+                    title="Copy bookable link for Facebook Leads 1 tab"
                   >
-                    {copiedField === 'fbBookUrl' ? 'Copied FB URL!' : 'Copy FB Ad Link'}
+                    {copiedField === 'fb1BookUrl' ? 'Copied FB 1!' : 'Copy FB Leads 1'}
                   </button>
                   <button
                     type="button"
                     onClick={() =>
-                      handleCopyHelper('googBookUrl', 'https://app.tidyupscleaning.com/book?source=google')
+                      handleCopyHelper('fb2BookUrl', 'https://app.tidyupscleaning.com/booking?source=fb2')
+                    }
+                    className="px-2 py-0.5 rounded bg-sky-600/30 hover:bg-sky-600/50 border border-sky-500/40 text-[10px] font-bold text-sky-200 cursor-pointer"
+                    title="Copy bookable link for Facebook Leads 2 tab"
+                  >
+                    {copiedField === 'fb2BookUrl' ? 'Copied FB 2!' : 'Copy FB Leads 2'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyHelper('goog1BookUrl', 'https://app.tidyupscleaning.com/booking?source=google1')
                     }
                     className="px-2 py-0.5 rounded bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-[10px] font-bold text-emerald-200 cursor-pointer"
+                    title="Copy bookable link for Google Leads 1 tab"
                   >
-                    {copiedField === 'googBookUrl' ? 'Copied Google URL!' : 'Copy Google Ad Link'}
+                    {copiedField === 'goog1BookUrl' ? 'Copied Google 1!' : 'Copy Google 1'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyHelper('goog2BookUrl', 'https://app.tidyupscleaning.com/booking?source=google2')
+                    }
+                    className="px-2 py-0.5 rounded bg-teal-600/30 hover:bg-teal-600/50 border border-teal-500/40 text-[10px] font-bold text-teal-200 cursor-pointer"
+                    title="Copy bookable link for Google Leads 2 tab"
+                  >
+                    {copiedField === 'goog2BookUrl' ? 'Copied Google 2!' : 'Copy Google 2'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyHelper('otherBookUrl', 'https://app.tidyupscleaning.com/booking?source=other')
+                    }
+                    className="px-2 py-0.5 rounded bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/40 text-[10px] font-bold text-amber-200 cursor-pointer"
+                    title="Copy bookable link for Other Ads tab"
+                  >
+                    {copiedField === 'otherBookUrl' ? 'Copied Other!' : 'Copy Other Ads'}
                   </button>
                 </div>
               </div>
 
-              {/* 2. Active Spreadsheet ID */}
+              {/* 2. Active Spreadsheet ID & 7 Fresh Tabs */}
               <div className="p-3 rounded-xl bg-[#131724] border border-slate-800 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-400">2. Active Spreadsheet ID</span>
+                  <span className="text-[11px] font-bold text-slate-300">2. Active 7-Tab Spreadsheet ID</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -1319,18 +1410,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   {googleSheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1] ||
                     LEADS_SPREADSHEET_ID}
                 </div>
-                <p className="text-[10px] text-slate-400">
-                  Tabs auto-created: <strong className="text-slate-200">Facebook Leads</strong>,{' '}
-                  <strong className="text-slate-200">Google Leads</strong>,{' '}
-                  <strong className="text-slate-200">ScrubbyBuilder Leads</strong>
+                <p className="text-[10px] text-slate-400 leading-snug">
+                  7 Tabs auto-synced: <strong className="text-slate-200">Facebook Leads 1</strong>,{' '}
+                  <strong className="text-slate-200">Facebook Leads 2</strong>,{' '}
+                  <strong className="text-slate-200">Google Leads 1</strong>,{' '}
+                  <strong className="text-slate-200">Google Leads 2</strong>,{' '}
+                  <strong className="text-slate-200">Other Ads</strong>,{' '}
+                  <strong className="text-slate-200">Facebook AI</strong>,{' '}
+                  <strong className="text-slate-200">Quo</strong>
                 </p>
               </div>
 
-              {/* 3. Direct Inbound Webhook URL & Google Ads Key */}
+              {/* 3. Direct Inbound Webhook URL & Shared Google/FB Ads Key */}
               <div className="p-3 rounded-xl bg-[#131724] border border-slate-800 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-400">
-                    3. Direct FB / Google Ads Webhook URL &amp; Key
+                  <span className="text-[11px] font-bold text-slate-300">
+                    3. FB &amp; Google Ads Webhook &amp; Key
                   </span>
                   <button
                     type="button"
@@ -1344,8 +1439,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   {webhookUrl}
                 </div>
                 <div className="flex items-center justify-between gap-2 pt-1">
-                  <span className="text-[10px] text-slate-400">
-                    Google Ads Key:{' '}
+                  <span className="text-[10px] text-slate-300" title="Works for both Google Ads Webhook Key and Facebook Ads Verify Token">
+                    Shared Key (Google &amp; FB):{' '}
                     <code className="text-emerald-300 font-mono font-bold bg-[#0b0e17] px-1.5 py-0.5 rounded border border-slate-800">
                       tidyups-yeg-leads-2026
                     </code>
@@ -1361,9 +1456,14 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
                   <span className="text-[10px] text-slate-400 truncate">
                     Thank-You URL:{' '}
-                    <code className="text-pink-300 font-mono font-bold">
+                    <a
+                      href="/thank-you"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-pink-300 font-mono font-bold underline hover:text-white"
+                    >
                       https://app.tidyupscleaning.com/thank-you
-                    </code>
+                    </a>
                   </span>
                   <button
                     type="button"
@@ -1375,11 +1475,11 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 </div>
               </div>
 
-              {/* 4. 20-Column Lead Schema */}
+              {/* 4. 20-Column Lead Schema & Active Protocols */}
               <div className="p-3 rounded-xl bg-[#131724] border border-slate-800 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-400">
-                    4. 20-Column Ad Lead Headers
+                  <span className="text-[11px] font-bold text-slate-300">
+                    4. 20-Column Headers &amp; Protocols
                   </span>
                   <button
                     type="button"
@@ -1392,8 +1492,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 <div className="font-mono text-[10px] text-slate-300 bg-[#0b0e17] px-2.5 py-1.5 rounded border border-slate-800 truncate">
                   {APP_LEAD_HEADERS.join(' | ')}
                 </div>
-                <p className="text-[10px] text-slate-400">
-                  Matches Facebook Lead Ads &amp; TidyUps Day-3 Lead Processor schema.
+                <p className="text-[10px] text-emerald-300/90 leading-snug">
+                  ✓ 14-day fresh lead cutoff • 7-day uncommunicated filter • Strict 2-of-3 client anti-merge guard active.
                 </p>
               </div>
             </div>
@@ -1410,14 +1510,14 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     🎙️ QUO / OPENPHONE + SONIA AI SCREENER
                   </span>
                   <h3 className="text-xs sm:text-sm font-extrabold text-white">
-                    Missed Calls, Sonia AI Assistant &amp; Voicemail Transcripts → Clean Google Sheet
+                    Missed Calls, Sonia AI Assistant &amp; Voicemail Transcripts → Clean Google Sheet (Quo Tab)
                   </h3>
                   <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold font-mono">
                     Webhook Active: https://app.tidyupscleaning.com/api/quo/webhook
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 mt-1">
-                  When a caller misses you and leaves a message with <strong>Sonia (Tidyups AI Cleaning Assistant)</strong> or voicemail asking for a cleaning, their full <strong>Transcript &amp; AI Summary</strong> is automatically connected and added to your <strong>🟣 Voice &amp; Quick Quotes</strong> Google Sheet tab. Non-cleaning calls (Yelp ad reps, car lease reps, personal callbacks) are automatically filtered so they don&apos;t clutter your Lead Sheet.
+                  When a caller misses you and leaves a message with <strong>Sonia (Tidyups AI Cleaning Assistant)</strong> or voicemail asking for a cleaning, their full <strong>Transcript &amp; AI Summary</strong> is automatically connected and added to your <strong>🎙️ Quo</strong> Google Sheet tab. Non-cleaning calls (Yelp ad reps, car lease reps, personal callbacks) are automatically filtered so they don&apos;t clutter your Lead Sheet.
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">

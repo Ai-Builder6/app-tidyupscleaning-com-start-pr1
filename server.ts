@@ -6722,6 +6722,11 @@ app.post("/api/google-sheets/config", (req, res) => {
 // GET /api/leads/webhook (and /api/webhooks/facebook, /api/webhooks/google):
 // Supports Facebook / Meta Lead Ads hub.challenge verification AND browser health check
 const GOOGLE_ADS_WEBHOOK_KEY = process.env.GOOGLE_ADS_WEBHOOK_KEY || "tidyups-yeg-leads-2026";
+const ACCEPTED_WEBHOOK_KEYS = [
+  GOOGLE_ADS_WEBHOOK_KEY,
+  "tidyups-yeg-leads-2026",
+  "tidyups-google-ads-2026",
+];
 
 const handleLeadWebhookVerification = (req: any, res: any) => {
   const mode = req.query["hub.mode"];
@@ -6733,16 +6738,28 @@ const handleLeadWebhookVerification = (req: any, res: any) => {
     status: "active",
     service: "833 TidyUps Lead & Customer Booking Webhook",
     webhookUrl: "https://app.tidyupscleaning.com/api/leads/webhook",
+    customerBookingUrl: "https://app.tidyupscleaning.com/booking",
+    sharedWebhookKey: GOOGLE_ADS_WEBHOOK_KEY,
+    acceptedWebhookKeys: ACCEPTED_WEBHOOK_KEYS,
     googleAdsKey: GOOGLE_ADS_WEBHOOK_KEY,
+    facebookVerifyToken: GOOGLE_ADS_WEBHOOK_KEY,
+    note: "Google Ads and Facebook Ads use the exact same webhook URL and key (tidyups-yeg-leads-2026 or tidyups-google-ads-2026).",
     endpoints: [
       "https://app.tidyupscleaning.com/api/leads/webhook",
-      "https://book.tidyupscleaning.com/api/leads/webhook",
+      "https://app.tidyupscleaning.com/api/leads/webhook?tab=fb1",
+      "https://app.tidyupscleaning.com/api/leads/webhook?tab=fb2",
+      "https://app.tidyupscleaning.com/api/leads/webhook?tab=google1",
+      "https://app.tidyupscleaning.com/api/leads/webhook?tab=google2",
+      "https://app.tidyupscleaning.com/api/leads/webhook?tab=other",
+      "https://app.tidyupscleaning.com/api/leads/webhook?tab=fb_ai",
+      "https://app.tidyupscleaning.com/api/leads/webhook?tab=quo",
       "https://app.tidyupscleaning.com/api/webhooks/facebook",
       "https://app.tidyupscleaning.com/api/webhooks/google",
     ],
+    tabs: CLEAN_SHEET_TABS,
     spreadsheetId: googleSheetsSyncState.spreadsheetId,
     sheetUrl: googleSheetsSyncState.sheetUrl,
-    message: "Facebook Lead Ads, Google Ads Lead Form Extensions, and book.tidyupscleaning.com Webhooks are active and ready.",
+    message: "Facebook Lead Ads, Google Ads Lead Form Extensions, and app.tidyupscleaning.com/booking Webhooks are active and synced to all 7 Google Sheet tabs.",
   });
 };
 
@@ -6753,9 +6770,12 @@ app.get("/api/leads/facebook", handleLeadWebhookVerification);
 app.get("/api/leads/google", handleLeadWebhookVerification);
 
 // POST /api/leads/webhook (and aliases): Direct Inbound Lead Webhook for Facebook Lead Ads (Zapier/Make/Meta), Google Ads Lead Form Extensions & Customer Booking Sheet
-const handleInboundLeadWebhook = (forcedPlatform?: "Facebook Leads" | "Google Leads") => (req: any, res: any) => {
+const handleInboundLeadWebhook = (forcedPlatform?: string) => (req: any, res: any) => {
   const projectId = getProjectId(req);
-  const body = req.body || {};
+  const rawBody = req.body || {};
+  // Unwrap native Meta Leadgen nested payload if sent directly from Meta Graph Webhooks
+  const metaChangeVal = rawBody?.entry?.[0]?.changes?.[0]?.value;
+  const body = metaChangeVal && typeof metaChangeVal === "object" ? { ...rawBody, ...metaChangeVal } : rawBody;
 
   // Support Google Ads Lead Form Extension "Send test data" verification ping (returns 200 OK without inserting fake test leads)
   if (body.is_test === true || body.is_test === "true") {
@@ -6763,8 +6783,9 @@ const handleInboundLeadWebhook = (forcedPlatform?: "Facebook Leads" | "Google Le
       success: true,
       isTestVerification: true,
       googleAdsKeyVerified: true,
-      receivedKey: body.google_key || GOOGLE_ADS_WEBHOOK_KEY,
-      message: "✓ Google Ads Lead Form Webhook test verified (200 OK). Fake test payload ignored to keep Edmonton leads clean.",
+      sharedKeyVerified: true,
+      receivedKey: body.google_key || body.verify_token || GOOGLE_ADS_WEBHOOK_KEY,
+      message: "✓ Google Ads / Facebook Ads Lead Form Webhook test verified (200 OK). Fake test payload ignored to keep Edmonton leads clean.",
     });
   }
 
@@ -6784,15 +6805,27 @@ const handleInboundLeadWebhook = (forcedPlatform?: "Facebook Leads" | "Google Le
     }
   }
 
+  const queryTabHint = String(
+    req.query?.tab ||
+      req.query?.source_tab ||
+      req.query?.source ||
+      req.query?.utm_source ||
+      ""
+  ).trim();
+
   const rawSource = String(
-    forcedPlatform ||
-      body.source ||
+    queryTabHint ||
+      forcedPlatform ||
+      body.adTab ||
       body.source_tab ||
+      body.source ||
       body.platform ||
       body.utm_source ||
-      (body.google_key || body.gclid || body.user_column_data ? "Google Leads" : "FB Leads")
+      body.campaign_name ||
+      body.campaignName ||
+      (body.google_key || body.gclid || body.user_column_data ? "Google Leads 1" : "Facebook Leads 1")
   );
-  const { source, sourceTab } = resolveCleanSheetTab(rawSource);
+  const { source, sourceTab } = resolveCleanSheetTab(rawSource, body);
 
   const firstName = String(body.first_name || body.firstName || colMap["first_name"] || "").trim();
   const lastName = String(body.last_name || body.lastName || colMap["last_name"] || "").trim();
@@ -6845,6 +6878,7 @@ const handleInboundLeadWebhook = (forcedPlatform?: "Facebook Leads" | "Google Le
   const leadId = `lead-webhook-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
   const quoteId = `quote_local_${Date.now()}`;
   const quoteNumber = `QT-${Math.floor(4385 + Math.random() * 500)}`;
+  const nowIso = new Date().toISOString();
 
   const newLead = {
     id: leadId,
@@ -6861,7 +6895,7 @@ const handleInboundLeadWebhook = (forcedPlatform?: "Facebook Leads" | "Google Le
     source: source as any,
     sourceTab,
     campaignName: body.campaign_name || body.campaignName || `${sourceTab} Inbound Webhook`,
-    dateReceived: new Date().toISOString(),
+    dateReceived: nowIso,
     status: "New",
     verdict: "Good lead" as const,
     isJobberSynced: false,
@@ -6878,13 +6912,36 @@ const handleInboundLeadWebhook = (forcedPlatform?: "Facebook Leads" | "Google Le
     if (!Array.isArray(store.adLeads)) store.adLeads = [];
     store.adLeads.unshift(newLead as any);
 
-    // Also add/update Client in store.clients so the caller is immediately in Clients Database
+    // Also add/update Client in store.clients using strict 2-of-3 matching rule (never merge different phone numbers)
     if (!Array.isArray(store.clients)) store.clients = [];
-    const existingClient = store.clients.find(
-      (c: any) =>
-        (phone && String(c.phone || "").replace(/\D/g, "").slice(-10) === phone.replace(/\D/g, "").slice(-10)) ||
-        String(c.name || "").trim().toLowerCase() === fullName.toLowerCase()
-    );
+    const incomingPhone10 = phone.replace(/\D/g, "").slice(-10);
+    const incomingEmailNorm = email.toLowerCase();
+    const incomingNameNorm = fullName.toLowerCase();
+    const incomingStreetNorm = address.toLowerCase().split(",")[0].trim();
+
+    const existingClient = store.clients.find((c: any) => {
+      const cPhone10 = String(c.phone || "").replace(/\D/g, "").slice(-10);
+      // Hard rule: never merge two clients who have different 10-digit phone numbers
+      if (incomingPhone10.length === 10 && cPhone10.length === 10 && incomingPhone10 !== cPhone10) {
+        return false;
+      }
+      const cNameNorm = String(c.name || "").trim().toLowerCase();
+      if (incomingNameNorm && incomingNameNorm !== "inbound ad lead" && cNameNorm === incomingNameNorm) {
+        return true;
+      }
+      let sharedCount = 0;
+      if (incomingPhone10.length === 10 && cPhone10 === incomingPhone10) sharedCount++;
+      if (incomingEmailNorm && String(c.email || "").trim().toLowerCase() === incomingEmailNorm) sharedCount++;
+      const cStreetNorm = String(c.address || "").toLowerCase().split(",")[0].trim();
+      if (incomingStreetNorm && incomingStreetNorm !== "edmonton" && cStreetNorm === incomingStreetNorm) {
+        sharedCount++;
+      }
+      return sharedCount >= 2;
+    });
+
+    const isFbTab = sourceTab.startsWith("Facebook");
+    const isGoogleTab = sourceTab.startsWith("Google");
+
     if (!existingClient) {
       store.clients.unshift({
         id: `cli-webhook-${Date.now().toString(36)}`,
@@ -6896,18 +6953,18 @@ const handleInboundLeadWebhook = (forcedPlatform?: "Facebook Leads" | "Google Le
         province: "AB",
         postalCode,
         verdict: "Good lead",
-        tags: [sourceTab === "FB Leads" ? "facebook-lead" : "google-lead"],
+        tags: [isFbTab ? "facebook-lead" : isGoogleTab ? "google-lead" : "ad-lead", sourceTab],
         isJobberLinked: false,
         totalJobs: 0,
         latestServiceDate: requestedDate,
         notes: `${serviceRequested} (${bedrooms}, ${bathrooms}) • ${newLead.notes}`,
-        source: sourceTab === "FB Leads" ? "Facebook Lead Ad" : "Google Ads",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        source: sourceTab,
+        createdAt: nowIso,
+        updatedAt: nowIso,
       } as any);
     }
 
-    store.lastSavedAt = new Date().toISOString();
+    store.lastSavedAt = nowIso;
     saveStore(store, projectId);
     if (projectId !== "tidyups") {
       saveStore(store, "tidyups");
@@ -6926,10 +6983,10 @@ const handleInboundLeadWebhook = (forcedPlatform?: "Facebook Leads" | "Google Le
 };
 
 app.post("/api/leads/webhook", handleInboundLeadWebhook());
-app.post("/api/webhooks/facebook", handleInboundLeadWebhook("Facebook Leads"));
-app.post("/api/webhooks/google", handleInboundLeadWebhook("Google Leads"));
-app.post("/api/leads/facebook", handleInboundLeadWebhook("Facebook Leads"));
-app.post("/api/leads/google", handleInboundLeadWebhook("Google Leads"));
+app.post("/api/webhooks/facebook", handleInboundLeadWebhook("Facebook Leads 1"));
+app.post("/api/webhooks/google", handleInboundLeadWebhook("Google Leads 1"));
+app.post("/api/leads/facebook", handleInboundLeadWebhook("Facebook Leads 1"));
+app.post("/api/leads/google", handleInboundLeadWebhook("Google Leads 1"));
 
 // Helper: Parse RFC-4180 CSV text into a 2D array of string cells (preserving quoted commas and newlines)
 function parseCsvTo2DMatrix(csvText: string): string[][] {
@@ -7773,8 +7830,8 @@ app.post("/api/leads/sync", async (req, res) => {
     ...(store.adLeads || []).map((l: any) =>
       [
         (l.dateReceived || "").slice(0, 10),
-        l.sourceTab || "Voice & Quick Quotes",
-        l.source || "Voice Quote",
+        resolveCleanSheetTab(l.sourceTab || l.source, l).sourceTab,
+        l.source || "Quo Call / Voice",
         l.customerName || "",
         l.phone || "",
         l.email || "",
@@ -8193,8 +8250,8 @@ app.get("/api/leads/export.csv", (req, res) => {
           : "https://secure.getjobber.com/quotes");
       return [
         (l.dateReceived || new Date().toISOString()).slice(0, 10),
-        l.sourceTab || "Voice & Quick Quotes",
-        l.source || "Voice / Quick Quote",
+        resolveCleanSheetTab(l.sourceTab || l.source, l).sourceTab,
+        l.source || "Quo Call / Voice",
         l.customerName || "",
         l.phone || "",
         l.email || "",
@@ -12864,7 +12921,7 @@ function upsertCallLeadIntoCleanSheet(
     source: callLogEntry.answeredByAi
       ? `Sonia AI / Missed Call (${callLogEntry.lineName})`
       : `Voice / Quo Call (${callLogEntry.lineName})`,
-    sourceTab: "Voice & Quick Quotes",
+    sourceTab: "Quo",
     campaignName: `Quo ${callLogEntry.lineName} — Transcript Auto-Sync`,
     dateReceived: callLogEntry.timestamp || new Date().toISOString(),
     status: "New",
