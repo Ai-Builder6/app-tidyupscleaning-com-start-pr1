@@ -194,12 +194,29 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
     } catch {}
   }
 
+  if (typeof window === 'undefined') return null;
+
+  const bridgeOrigin = OAUTH_BRIDGE_PRIMARY_ORIGIN;
+  const currentOrigin = window.location.origin.replace(/\/$/, '');
+  const targetBridgeBase = currentOrigin === bridgeOrigin ? currentOrigin : bridgeOrigin;
+  const bridgeUrl = `${targetBridgeBase}/oauth-bridge?return_origin=${encodeURIComponent(currentOrigin)}`;
+
+  // Open popup SYNCHRONOUSLY during the user click event so Chrome/Safari never block it
+  const popup = window.open(
+    bridgeUrl,
+    'tidyups_google_drive_oauth',
+    'width=480,height=640,menubar=no,toolbar=no,location=no,status=no'
+  );
+
   // Check if local backend or Cloud Run bridge session already has a valid token cached
   try {
     const cachedRes = await fetch('/api/google-drive/session-token');
     if (cachedRes.ok) {
       const cachedData = await cachedRes.json();
       if (cachedData?.accessToken) {
+        try {
+          popup?.close();
+        } catch {}
         return await finalizeAccessTokenSession(
           cachedData.accessToken,
           cachedData.email,
@@ -214,6 +231,9 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
     if (bridgeCachedRes.ok) {
       const bridgeCachedData = await bridgeCachedRes.json();
       if (bridgeCachedData?.accessToken) {
+        try {
+          popup?.close();
+        } catch {}
         return await finalizeAccessTokenSession(
           bridgeCachedData.accessToken,
           bridgeCachedData.email,
@@ -223,23 +243,8 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
     }
   } catch {}
 
-  if (typeof window === 'undefined') return null;
-
   return new Promise((resolve) => {
     isSigningIn = true;
-    const bridgeOrigin = OAUTH_BRIDGE_PRIMARY_ORIGIN;
-    const currentOrigin = window.location.origin.replace(/\/$/, '');
-    // Always use the registered primary Cloud Run origin (cleaning-service-dispatch-board-230358145142.us-east1.run.app)
-    // so ais-dev-*.run.app and app.tidyupscleaning.com never hit Error 400: origin_mismatch
-    const targetBridgeBase =
-      currentOrigin === bridgeOrigin ? currentOrigin : bridgeOrigin;
-    const bridgeUrl = `${targetBridgeBase}/oauth-bridge?return_origin=${encodeURIComponent(currentOrigin)}`;
-
-    const popup = window.open(
-      bridgeUrl,
-      'tidyups_google_drive_oauth',
-      'width=480,height=640,menubar=no,toolbar=no,location=no,status=no'
-    );
 
     if (!popup) {
       isSigningIn = false;

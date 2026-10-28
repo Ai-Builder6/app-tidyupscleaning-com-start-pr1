@@ -395,12 +395,19 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     });
   }, [leadsList, activeTab, verdictFilter, searchQuery]);
 
-  // Save connected Google Sheet URL (requires a real docs.google.com/spreadsheets URL for Facebook Meta & Google Ads)
+  // Save connected Google Sheet URL (requires a real brand-new docs.google.com/spreadsheets URL, never the old ScrubbyBuilder sheets)
   const handleSaveSheetUrl = async (customUrl?: string) => {
     const urlToSave = (customUrl ?? googleSheetUrl).trim();
     if (!urlToSave || !urlToSave.includes('docs.google.com/spreadsheets/d/')) {
       setNotice(
-        'Facebook Meta requires a real Google Sheets address starting with https://docs.google.com/spreadsheets/d/... — click "+ Create New 7-Tab Sheet in Drive" or click one of the "Copy / Use Sheet" buttons below!'
+        'Facebook Meta requires a Google Sheets URL starting with https://docs.google.com/spreadsheets/d/... — click "+ Create New 7-Tab Sheet in Drive" to generate your brand-new clean sheet URL!'
+      );
+      return;
+    }
+    if (isArchivedOldSheetUrlOrId(urlToSave)) {
+      setGoogleSheetUrl(createdDriveSheetUrl || '');
+      setNotice(
+        '⚠️ That URL (1TifUL... / 1-1pal...) is your OLD sheet with ScrubbyBuilder leads! Click the teal button "+ Create New 7-Tab Sheet in Drive" to generate a brand-new Clean Google Sheet URL with 0 old leads.'
       );
       return;
     }
@@ -414,7 +421,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
       const data = await res.json();
       if (data.success) {
         setGoogleSheetUrl(urlToSave);
-        setNotice('✓ Connected your Google Sheet URL (https://docs.google.com/spreadsheets/d/...)! Ready to paste into Facebook Meta.');
+        setCreatedDriveSheetUrl(urlToSave);
+        setNotice('✓ Connected your Brand-New 7-Tab Google Sheet URL! Ready to paste into Facebook Meta.');
       }
     } catch (e: any) {
       setNotice(`Could not save Sheet URL: ${e.message}`);
@@ -423,24 +431,30 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     }
   };
 
-  // 1-Click: Create a brand-new native 7-tab Google Sheet in user's Google Drive (FB Ads & Google Ads Ready)
+  // 1-Click: Create a brand-new native 7-tab Google Sheet in user's Google Drive (FB Ads & Google Ads Ready, 0 ScrubbyBuilder leads)
   const handleCreateNewSheetInDrive = async () => {
     setIsCreatingDriveSheet(true);
     setNotice(null);
     try {
       const res = await createNewCleanLeadsSheetInDrive();
-      setGoogleSheetUrl(res.sheetUrl);
-      if (!isArchivedOldSheetUrlOrId(res.sheetUrl)) {
+      if (res.sheetUrl.includes('docs.google.com/spreadsheets/d/') && !isArchivedOldSheetUrlOrId(res.sheetUrl)) {
+        setGoogleSheetUrl(res.sheetUrl);
         setCreatedDriveSheetUrl(res.sheetUrl);
+        setCreatedDriveSheetName(res.sheetName);
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(res.sheetUrl).catch(() => {});
+        }
+        setCopiedField('topMetaSheetUrl');
+        setNotice(
+          `✓ Created brand-new 7-Tab Clean Google Sheet in your Google Drive & COPIED its new URL for Facebook Meta: ${res.sheetUrl} (0 ScrubbyBuilder leads!)`
+        );
+      } else {
+        setNotice(
+          '✓ Downloaded your Brand-New 7-Tab Clean Workbook (.XLSX)! To get a docs.google.com URL without Google Drive sign-in, open https://sheets.new → File → Import → Upload that file.'
+        );
       }
-      setCreatedDriveSheetName(res.sheetName);
-      setNotice(
-        res.sheetUrl.includes('docs.google.com/spreadsheets')
-          ? `✓ Created brand-new 7-Tab Google Sheet "${res.sheetName}" inside "${TIDYUPS_DRIVE_FOLDER_NAME}" in your Google Drive and set it as your Connected Google Sheet URL!`
-          : `✓ Initialized your Brand-New 7-Tab Clean Leads Sheet (${CLEAN_SHEET_TABS.join(', ')}) starting fresh from now! Click "Download Styled .XLSX" or sign into Google to push to Google Drive.`
-      );
     } catch (err: any) {
-      setNotice(`Could not create Google Sheet in Drive: ${err?.message || 'Please allow Google Drive access.'}`);
+      setNotice(`Could not create Google Sheet in Drive: ${err?.message || 'Please allow the Google sign-in popup.'}`);
     } finally {
       setIsCreatingDriveSheet(false);
     }
@@ -1120,37 +1134,48 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
           </div>
         </div>
 
-        {/* Row 2: Active Google Sheets URL (docs.google.com/spreadsheets/d/...) for Facebook Meta + Create New 7-Tab Sheet in Drive */}
+        {/* Row 2: Active Brand-New 7-Tab Google Sheets URL (docs.google.com/spreadsheets/d/...) for Facebook Meta */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 flex-1">
             <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="text-xs font-extrabold text-emerald-300 whitespace-nowrap">
-              Google Sheets URL (For Meta):
+              New 7-Tab Google Sheet URL (For Meta):
             </span>
             <input
               type="text"
               value={
-                googleSheetUrl.includes('docs.google.com/spreadsheets/d/')
+                googleSheetUrl.includes('docs.google.com/spreadsheets/d/') &&
+                !isArchivedOldSheetUrlOrId(googleSheetUrl)
                   ? googleSheetUrl
-                  : `https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`
+                  : ''
               }
               onChange={(e) => setGoogleSheetUrl(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/.../edit"
-              className="flex-1 px-3 py-1.5 rounded-xl bg-[#0b0e17] border border-emerald-500/50 text-xs text-emerald-300 font-mono focus:outline-none focus:border-emerald-400"
+              placeholder='Click "+ Create New 7-Tab Sheet in Drive" → generates your new docs.google.com/spreadsheets URL!'
+              className="flex-1 px-3 py-1.5 rounded-xl bg-[#0b0e17] border border-emerald-500/50 text-xs text-emerald-300 font-mono focus:outline-none focus:border-emerald-400 placeholder:text-amber-300/80"
             />
-            <button
-              type="button"
-              onClick={() => {
-                const realUrl = googleSheetUrl.includes('docs.google.com/spreadsheets/d/')
-                  ? googleSheetUrl
-                  : `https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`;
-                handleCopyHelper('topMetaSheetUrl', realUrl);
-              }}
-              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer whitespace-nowrap shadow-xs"
-              title="Copy actual https://docs.google.com/spreadsheets/d/... URL to paste into Facebook Meta"
-            >
-              {copiedField === 'topMetaSheetUrl' ? '✓ Copied for Meta!' : '📋 Copy URL for Meta'}
-            </button>
+            {googleSheetUrl.includes('docs.google.com/spreadsheets/d/') &&
+            !isArchivedOldSheetUrlOrId(googleSheetUrl) ? (
+              <button
+                type="button"
+                onClick={() => handleCopyHelper('topMetaSheetUrl', googleSheetUrl)}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer whitespace-nowrap shadow-xs"
+                title="Copy your brand-new 7-tab https://docs.google.com/spreadsheets/d/... URL to paste into Facebook Meta"
+              >
+                {copiedField === 'topMetaSheetUrl' ? '✓ Copied for Meta!' : '📋 Copy New Sheet URL for Meta'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleCreateNewSheetInDrive}
+                disabled={isCreatingDriveSheet}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer whitespace-nowrap shadow-xs"
+                title="Creates a brand-new 7-tab Google Sheet in your Google Drive (0 ScrubbyBuilder leads) and gives you its docs.google.com/spreadsheets URL for Facebook Meta"
+              >
+                {isCreatingDriveSheet
+                  ? 'Creating in Google Drive...'
+                  : '⚡ Generate New Sheet URL for Meta'}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => handleSaveSheetUrl()}
@@ -1442,64 +1467,50 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 </div>
               </div>
 
-              {/* 2. Actual Google Sheets Address (docs.google.com/spreadsheets) for Facebook Meta */}
+              {/* 2. Brand-New 7-Tab Google Sheets Address (docs.google.com/spreadsheets) for Facebook Meta */}
               <div className="p-3 rounded-xl bg-[#131724] border border-emerald-500/40 space-y-1.5">
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-[11px] font-bold text-emerald-300">
-                    2. Actual Google Sheet URL (For Meta)
+                    2. Brand-New 7-Tab Sheet URL (For Meta)
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const realUrl = googleSheetUrl.includes('docs.google.com/spreadsheets/d/')
-                        ? googleSheetUrl
-                        : `https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`;
-                      handleCopyHelper('sheetId', realUrl);
-                    }}
-                    className="text-[11px] text-emerald-400 hover:underline font-extrabold cursor-pointer"
-                  >
-                    {copiedField === 'sheetId' ? '✓ Copied Sheet URL!' : 'Copy Sheet URL'}
-                  </button>
+                  {googleSheetUrl.includes('docs.google.com/spreadsheets/d/') &&
+                  !isArchivedOldSheetUrlOrId(googleSheetUrl) ? (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyHelper('sheetId', googleSheetUrl)}
+                      className="text-[11px] text-emerald-400 hover:underline font-extrabold cursor-pointer"
+                    >
+                      {copiedField === 'sheetId' ? '✓ Copied New URL!' : 'Copy New Sheet URL'}
+                    </button>
+                  ) : null}
                 </div>
                 <div className="font-mono text-[10px] text-emerald-300 bg-[#0b0e17] px-2.5 py-1.5 rounded border border-slate-800 break-all">
-                  {googleSheetUrl.includes('docs.google.com/spreadsheets/d/')
+                  {googleSheetUrl.includes('docs.google.com/spreadsheets/d/') &&
+                  !isArchivedOldSheetUrlOrId(googleSheetUrl)
                     ? googleSheetUrl
-                    : `https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`}
+                    : 'Not created in Google Drive yet — click "+ Create Brand-New 7-Tab Sheet in Drive" below to generate your new docs.google.com URL (0 ScrubbyBuilder leads)!'}
                 </div>
-                <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url1 = `https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`;
-                      setGoogleSheetUrl(url1);
-                      handleCopyHelper('metaSheet1', url1);
-                    }}
-                    className="px-2 py-0.5 rounded bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-[10px] font-bold text-emerald-200 cursor-pointer"
-                    title="Copy Google Sheet #1 URL for Facebook Meta"
-                  >
-                    {copiedField === 'metaSheet1' ? '✓ Copied Sheet #1!' : 'Copy Sheet #1 URL'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url2 = `https://docs.google.com/spreadsheets/d/${SECONDARY_LEADS_SPREADSHEET_ID}/edit`;
-                      setGoogleSheetUrl(url2);
-                      handleCopyHelper('metaSheet2', url2);
-                    }}
-                    className="px-2 py-0.5 rounded bg-teal-600/30 hover:bg-teal-600/50 border border-teal-500/40 text-[10px] font-bold text-teal-200 cursor-pointer"
-                    title="Copy Google Sheet #2 URL for Facebook Meta"
-                  >
-                    {copiedField === 'metaSheet2' ? '✓ Copied Sheet #2!' : 'Copy Sheet #2 URL'}
-                  </button>
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                   <button
                     type="button"
                     onClick={handleCreateNewSheetInDrive}
                     disabled={isCreatingDriveSheet}
-                    className="px-2 py-0.5 rounded bg-cyan-600/30 hover:bg-cyan-600/50 border border-cyan-500/40 text-[10px] font-bold text-cyan-200 cursor-pointer"
-                    title="Create a brand-new 7-tab Google Sheet in Google Drive and get its docs.google.com URL"
+                    className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-[10px] font-extrabold text-white cursor-pointer shadow-xs"
+                    title="Creates a brand-new 7-tab Google Sheet in your Google Drive (0 old ScrubbyBuilder leads) and gives you its docs.google.com URL"
                   >
-                    {isCreatingDriveSheet ? 'Creating...' : '+ New Drive Sheet'}
+                    {isCreatingDriveSheet
+                      ? 'Creating in Google Drive...'
+                      : '⚡ + Create Brand-New 7-Tab Sheet in Drive'}
                   </button>
+                  <a
+                    href="https://sheets.new"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 rounded bg-cyan-600/30 hover:bg-cyan-600/50 border border-cyan-500/40 text-[10px] font-bold text-cyan-200"
+                    title="Open a blank Google Sheet at sheets.new, then click File -> Import -> Upload the 7-Tab .XLSX"
+                  >
+                    Open sheets.new ↗
+                  </a>
                 </div>
               </div>
 

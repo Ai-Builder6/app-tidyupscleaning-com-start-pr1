@@ -702,25 +702,18 @@ export async function createNewCleanLeadsSheetInDrive(options?: {
     });
   }
 
-  let folder: DriveFolderInfo;
+  let folder: DriveFolderInfo = {
+    id: '',
+    name: TIDYUPS_DRIVE_FOLDER_NAME,
+    webViewLink: 'https://drive.google.com/drive/my-drive',
+  };
   try {
     folder = await ensureTidyUpsDriveFolder(token);
   } catch {
-    return performServerSideGoogleSheetSync({
-      sheetTitle: options?.sheetTitle,
-      downloadXlsx: true,
-    });
+    // If folder lookup fails, upload directly to root of Google Drive so creation never fails
   }
 
-  // First pull any new rows from existing sheets so we never miss a lead before creating the new sheet
-  let pullSnap: PullGoogleSheetLeadsResult | null = null;
-  try {
-    pullSnap = await pullNewLeadsFromGoogleSheetInDrive({ accessToken: token });
-  } catch {
-    // ignore pre-pull notice
-  }
-
-  // Fetch the multi-tab XLSX buffer from the server
+  // Fetch the clean 7-tab XLSX buffer from the server (contains ONLY the 7 clean tabs, zero ScrubbyBuilder tabs)
   const xlsxRes = await fetch('/api/leads/export.xlsx?project=tidyups');
   if (!xlsxRes.ok) {
     return performServerSideGoogleSheetSync({
@@ -734,13 +727,15 @@ export async function createNewCleanLeadsSheetInDrive(options?: {
   const sheetName =
     options?.sheetTitle || `TidyUps Brand-New Leads Hub (7 Tabs • 14-Day Fresh) - ${dateStr}`;
 
-  const createMeta = {
+  const createMeta: Record<string, any> = {
     name: sheetName,
     mimeType: 'application/vnd.google-apps.spreadsheet',
-    parents: [folder.id],
     description:
-      'Brand-New TidyUps Clean Leads Google Sheet (Tabs: Facebook Leads 1, Facebook Leads 2, Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo + Archived Old Sheets Links).',
+      'Brand-New TidyUps Clean Leads Google Sheet (Tabs: Facebook Leads 1, Facebook Leads 2, Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo).',
   };
+  if (folder.id) {
+    createMeta.parents = [folder.id];
+  }
 
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(createMeta)], { type: 'application/json' }));
@@ -789,11 +784,8 @@ export async function createNewCleanLeadsSheetInDrive(options?: {
     sheetName: created.name || sheetName,
     folder,
     userEmail,
-    pulledRowsCount: pullSnap?.pulledRowsCount || 0,
-    newlyImportedLeads: pullSnap?.newlyImportedLeads || [],
-    leads: pullSnap?.leads,
-    clients: pullSnap?.clients,
-    quotes: pullSnap?.quotes,
+    pulledRowsCount: 0,
+    newlyImportedLeads: [],
   };
 }
 
