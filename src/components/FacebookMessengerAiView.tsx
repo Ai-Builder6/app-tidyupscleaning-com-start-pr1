@@ -303,8 +303,11 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
     [activeThread, projectId]
   );
 
+  const shouldKeepFbVoiceRef = useRef<boolean>(false);
+
   const stopVoiceMic = useCallback(
     async (shouldApplyLeadInfo = true) => {
+      shouldKeepFbVoiceRef.current = false;
       const currentMode = voiceMode;
       const finalSpoken = voiceAccRef.current.trim();
       if (recognitionRef.current) {
@@ -342,10 +345,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
     }
 
     try {
-      const recognition = new SpeechRecognitionCtor();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
+      shouldKeepFbVoiceRef.current = true;
       voiceAccRef.current = targetMode === 'CHAT_MESSAGE' ? messageInput : '';
       setVoiceTranscript('');
       setVoiceMode(targetMode);
@@ -354,42 +354,68 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
         setComposerMode('OWNER_REPLY');
       }
 
-      recognition.onresult = (event: any) => {
-        let finalChunk = '';
-        let interimChunk = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const piece = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalChunk += piece + ' ';
-          } else {
-            interimChunk += piece;
+      const startContinuousFbRec = () => {
+        const recognition = new SpeechRecognitionCtor();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-CA';
+
+        recognition.onresult = (event: any) => {
+          let finalChunk = '';
+          let interimChunk = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const piece = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalChunk += piece + ' ';
+            } else {
+              interimChunk += piece;
+            }
           }
-        }
-        if (finalChunk) {
-          voiceAccRef.current = `${voiceAccRef.current} ${finalChunk}`.trim();
-        }
-        const combined = `${voiceAccRef.current} ${interimChunk}`.trim();
-        setVoiceTranscript(combined);
-        if (targetMode === 'CHAT_MESSAGE') {
-          setMessageInput(combined);
-        }
+          if (finalChunk) {
+            voiceAccRef.current = `${voiceAccRef.current} ${finalChunk}`.trim();
+          }
+          const combined = `${voiceAccRef.current} ${interimChunk}`.trim();
+          setVoiceTranscript(combined);
+          if (targetMode === 'CHAT_MESSAGE') {
+            setMessageInput(combined);
+          }
+        };
+
+        recognition.onerror = (ev: any) => {
+          if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+            shouldKeepFbVoiceRef.current = false;
+            setVoiceMode('NONE');
+          }
+        };
+
+        recognition.onend = () => {
+          if (shouldKeepFbVoiceRef.current) {
+            setTimeout(() => {
+              if (!shouldKeepFbVoiceRef.current) return;
+              try {
+                recognition.start();
+              } catch {
+                try {
+                  startContinuousFbRec();
+                } catch {}
+              }
+            }, 90);
+            return;
+          }
+          const spoken = voiceAccRef.current.trim();
+          setVoiceMode('NONE');
+          if (targetMode === 'LEAD_INFO' && spoken) {
+            applySpokenLeadInfoToThread(spoken);
+          }
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
       };
 
-      recognition.onerror = () => {
-        setVoiceMode('NONE');
-      };
-
-      recognition.onend = () => {
-        const spoken = voiceAccRef.current.trim();
-        setVoiceMode('NONE');
-        if (targetMode === 'LEAD_INFO' && spoken) {
-          applySpokenLeadInfoToThread(spoken);
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
+      startContinuousFbRec();
     } catch (err: any) {
+      shouldKeepFbVoiceRef.current = false;
       setVoiceMode('NONE');
       setStatusBanner({
         tone: 'warning',

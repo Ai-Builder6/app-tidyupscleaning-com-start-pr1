@@ -47,6 +47,7 @@ import { Technician } from '../types/dispatch';
 import {
   TIDYUPS_DRIVE_FOLDER_NAME,
   saveAndDownloadNumberedProjectBackupZip,
+  uploadWholeProjectZipToDriveFolder,
   downloadFileFromApiWithoutNavigation,
 } from '../services/googleDriveBackupService';
 
@@ -167,6 +168,8 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
   const [driveBackupNotice, setDriveBackupNotice] = useState<{
     text: string;
     folderUrl?: string;
+    downloadUrl?: string;
+    downloadFilename?: string;
     isError?: boolean;
   } | null>(null);
 
@@ -174,16 +177,32 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
     setIsUploadingProjectDrive(true);
     setDriveBackupNotice(null);
     try {
-      const res = await saveAndDownloadNumberedProjectBackupZip({ autoGithubBackup: true });
+      const res = await uploadWholeProjectZipToDriveFolder({ forceRebuild: true });
+      const fname = res.file?.name || 'app.tidyups.cleaning-PR6.zip';
       setDriveBackupNotice({
-        text: `✓ Saved & Downloaded "${res.filename}" (${res.prLabel}) + Backed up to Server & GitHub!${res.uploadedToDrive ? ` Also uploaded to Drive folder "${TIDYUPS_DRIVE_FOLDER_NAME}"!` : ''}`,
-        folderUrl: res.driveFolderUrl || 'https://github.com/Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR6',
+        text: `✓ Built & Loaded "${fname}" (${res.prLabel || 'PR6'}) directly into folder "${res.folder.name}" in your Google Drive!`,
+        folderUrl: res.folder.webViewLink,
+        downloadUrl: `/api/project/download-saved-zip?filename=${encodeURIComponent(fname)}`,
+        downloadFilename: fname,
       });
     } catch (err: any) {
-      setDriveBackupNotice({
-        text: err?.message || 'Could not build numbered Backup ZIP.',
-        isError: true,
-      });
+      // Also build on server so the user can still download or open the Backup Modal immediately
+      try {
+        const localRes = await saveAndDownloadNumberedProjectBackupZip({ autoGithubBackup: true });
+        setDriveBackupNotice({
+          text: `✓ Built "${localRes.filename}" (${localRes.prLabel}) on server! Click "All Backups, Drive & GitHub" to sign in to Google Drive and load it to your Drive.`,
+          downloadUrl: localRes.downloadUrl,
+          downloadFilename: localRes.filename,
+        });
+      } catch {
+        setDriveBackupNotice({
+          text: err?.message || 'Could not build or upload numbered Backup ZIP.',
+          isError: true,
+        });
+      }
+      if (onOpenProjectBackup) {
+        onOpenProjectBackup();
+      }
     } finally {
       setIsUploadingProjectDrive(false);
     }
@@ -871,24 +890,35 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
               </p>
               {driveBackupNotice && (
                 <div
-                  className={`mt-2 p-2.5 rounded-xl text-[11px] font-bold flex items-center justify-between gap-2 ${
+                  className={`mt-2 p-2.5 rounded-xl text-[11px] font-bold flex flex-wrap items-center justify-between gap-2 ${
                     driveBackupNotice.isError
                       ? 'bg-rose-950/80 text-rose-200 border border-rose-700'
                       : 'bg-emerald-950/80 text-emerald-200 border border-emerald-700'
                   }`}
                 >
                   <span>{driveBackupNotice.text}</span>
-                  {driveBackupNotice.folderUrl && (
-                    <a
-                      href={driveBackupNotice.folderUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black flex items-center gap-1 shrink-0"
-                    >
-                      <span>View Repo / Folder</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {driveBackupNotice.downloadUrl && (
+                      <a
+                        href={driveBackupNotice.downloadUrl}
+                        download={driveBackupNotice.downloadFilename || true}
+                        className="px-2 py-1 rounded-lg bg-cyan-600 text-white text-[10px] font-black flex items-center gap-1 shrink-0"
+                      >
+                        <span>⬇️ Download ZIP</span>
+                      </a>
+                    )}
+                    {driveBackupNotice.folderUrl && (
+                      <a
+                        href={driveBackupNotice.folderUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black flex items-center gap-1 shrink-0"
+                      >
+                        <span>Open Drive Folder</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -900,9 +930,9 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
               disabled={isUploadingProjectDrive}
               className="flex-1 py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:opacity-95 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
             >
-              <FileArchive className="w-3.5 h-3.5" />
+              <CloudUpload className="w-3.5 h-3.5" />
               <span>
-                {isUploadingProjectDrive ? 'Saving & Downloading ZIP...' : '1-Click Save & Download Backup ZIP'}
+                {isUploadingProjectDrive ? 'Building & Loading to Drive...' : '☁️ Build & Load ZIP to Google Drive'}
               </span>
             </button>
             {onOpenProjectBackup && (

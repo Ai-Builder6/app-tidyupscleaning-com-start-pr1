@@ -22,7 +22,6 @@ export const OAUTH_CLIENT_ID =
 
 export const OAUTH_REGISTERED_ORIGINS = [
   'https://app.tidyupscleaning.com',
-  'https://book.tidyupscleaning.com',
   'https://cleaning-service-dispatch-board-230358145142.us-east1.run.app',
   'https://ais-dev-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app',
   'https://ais-pre-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app',
@@ -162,26 +161,11 @@ export const initAuth = (
 };
 
 /**
- * Direct Google Identity Services (initTokenClient) OAuth Sign-In.
- * NEVER calls Firebase signInWithPopup (`gtm-kvj5cp62-zty5m.firebaseapp.com/__/auth/handler`),
- * avoiding the "The requested action is invalid" popup completely.
- */
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
-  // Background syncs never open a browser Google OAuth popup (preventing unsolicited "Error 400: origin_mismatch" on app.tidyupscleaning.com).
-  if (cachedAccessToken) {
-    try {
-      return await finalizeAccessTokenSession(cachedAccessToken);
-    } catch {
-      return null;
-    }
-  }
-  return null;
-};
-
-/**
- * Explicit user-click OAuth flow for creating a brand-new 7-tab Google Sheet in Google Drive.
- * Uses the already-authorized Cloud Run /oauth-bridge popup when on custom domains (app.tidyupscleaning.com)
- * so it never triggers Error 400: origin_mismatch.
+ * Explicit user-click OAuth flow for Google Drive & Google Sheets.
+ * Always routes through the already-authorized Cloud Run origin
+ * (`https://cleaning-service-dispatch-board-230358145142.us-east1.run.app/oauth-bridge`)
+ * so it works on both `app.tidyupscleaning.com` and AI Studio preview (`ais-dev-*.run.app`)
+ * without ever triggering Error 400: origin_mismatch!
  */
 export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
   user: User;
@@ -193,31 +177,50 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
     } catch {}
   }
 
+  // Check if backend session already has a valid token cached
+  try {
+    const cachedRes = await fetch('/api/google-drive/session-token');
+    if (cachedRes.ok) {
+      const cachedData = await cachedRes.json();
+      if (cachedData?.accessToken) {
+        return await finalizeAccessTokenSession(
+          cachedData.accessToken,
+          cachedData.email,
+          cachedData.displayName
+        );
+      }
+    }
+  } catch {}
+
   if (typeof window === 'undefined') return null;
 
   return new Promise((resolve) => {
+    isSigningIn = true;
     const bridgeOrigin = OAUTH_BRIDGE_PRIMARY_ORIGIN;
     const currentOrigin = window.location.origin.replace(/\/$/, '');
-    const bridgeUrl =
-      currentOrigin.includes('.run.app')
-        ? `${currentOrigin}/oauth-bridge`
-        : `${bridgeOrigin}/oauth-bridge`;
+    // Always use the registered primary Cloud Run origin (cleaning-service-dispatch-board-230358145142.us-east1.run.app)
+    // so ais-dev-*.run.app and app.tidyupscleaning.com never hit Error 400: origin_mismatch
+    const targetBridgeBase =
+      currentOrigin === bridgeOrigin ? currentOrigin : bridgeOrigin;
+    const bridgeUrl = `${targetBridgeBase}/oauth-bridge?return_origin=${encodeURIComponent(currentOrigin)}`;
 
     const popup = window.open(
       bridgeUrl,
       'tidyups_google_drive_oauth',
-      'width=480,height=620,menubar=no,toolbar=no,location=no,status=no'
+      'width=480,height=640,menubar=no,toolbar=no,location=no,status=no'
     );
 
     if (!popup) {
+      isSigningIn = false;
       resolve(null);
       return;
     }
 
     let settled = false;
     const cleanup = () => {
+      isSigningIn = false;
       window.removeEventListener('message', onMessage);
-      clearInterval(checkClosed);
+      clearInterval(checkClosedAndPoll);
     };
 
     const onMessage = async (event: MessageEvent) => {
@@ -240,14 +243,66 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
 
     window.addEventListener('message', onMessage);
 
-    const checkClosed = setInterval(() => {
+    const checkClosedAndPoll = setInterval(async () => {
+      if (settled) return;
+      // Poll local and bridge session-token endpoint in case COOP cleared window.opener
+      try {
+        const localTokenRes = await fetch('/api/google-drive/session-token');
+        if (localTokenRes.ok) {
+          const data = await localTokenRes.json();
+          if (data?.accessToken && !settled) {
+            settled = true;
+            cleanup();
+            try {
+              popup.close();
+            } catch {}
+            const session = await finalizeAccessTokenSession(
+              data.accessToken,
+              data.email,
+              data.displayName
+            );
+            resolve(session);
+            return;
+          }
+        }
+      } catch {}
+
+      try {
+        const bridgeTokenRes = await fetch(`${bridgeOrigin}/api/google-drive/session-token`);
+        if (bridgeTokenRes.ok) {
+          const data = await bridgeTokenRes.json();
+          if (data?.accessToken && !settled) {
+            settled = true;
+            cleanup();
+            try {
+              popup.close();
+            } catch {}
+            const session = await finalizeAccessTokenSession(
+              data.accessToken,
+              data.email,
+              data.displayName
+            );
+            resolve(session);
+            return;
+          }
+        }
+      } catch {}
+
       if (popup.closed && !settled) {
         settled = true;
         cleanup();
         resolve(null);
       }
-    }, 500);
+    }, 800);
   });
+};
+
+/**
+ * Interactive Google Drive OAuth Sign-In triggered on user button clicks.
+ * Uses the authorized Cloud Run /oauth-bridge popup so it never hits Error 400: origin_mismatch.
+ */
+export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+  return requestGoogleDriveAccessTokenPopup();
 };
 
 export const getAccessTokenSync = (): string | null => {
@@ -255,6 +310,17 @@ export const getAccessTokenSync = (): string | null => {
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
+  if (cachedAccessToken) return cachedAccessToken;
+  try {
+    const r = await fetch('/api/google-drive/session-token');
+    if (r.ok) {
+      const data = await r.json();
+      if (data?.accessToken) {
+        cachedAccessToken = data.accessToken;
+        return cachedAccessToken;
+      }
+    }
+  } catch {}
   return cachedAccessToken;
 };
 

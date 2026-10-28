@@ -258,7 +258,15 @@ let activeGoogleDriveSession: {
   expiresAt: number;
 } | null = null;
 
+app.options("/api/google-drive/session-token", (_req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
 app.get("/api/google-drive/session-token", (_req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
   if (activeGoogleDriveSession && Date.now() < activeGoogleDriveSession.expiresAt) {
     return res.json({
       active: true,
@@ -271,6 +279,7 @@ app.get("/api/google-drive/session-token", (_req, res) => {
 });
 
 app.post("/api/google-drive/session-token", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
   const { accessToken, email, displayName } = req.body || {};
   if (accessToken && typeof accessToken === "string") {
     activeGoogleDriveSession = {
@@ -286,7 +295,7 @@ app.post("/api/google-drive/session-token", (req, res) => {
 
 // Serves a lightweight Google Identity Services OAuth popup bridge on the already-authorized
 // Cloud Run origin (https://cleaning-service-dispatch-board-230358145142.us-east1.run.app/oauth-bridge)
-// and posts the access_token back to window.opener via postMessage!
+// and posts the access_token back to window.opener via postMessage AND /api/google-drive/session-token!
 app.get("/oauth-bridge", (_req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`<!DOCTYPE html>
@@ -358,6 +367,8 @@ app.get("/oauth-bridge", (_req, res) => {
       "email",
       "profile"
     ].join(" ");
+    const params = new URLSearchParams(window.location.search);
+    const returnOrigin = params.get("return_origin") || "";
 
     function startOAuth() {
       const statusEl = document.getElementById("status-text");
@@ -371,7 +382,7 @@ app.get("/oauth-bridge", (_req, res) => {
         scope: SCOPES,
         callback: async (resp) => {
           if (resp && resp.access_token) {
-            statusEl.textContent = "Connected! Returning to TidyUps...";
+            statusEl.textContent = "Connected! Syncing token back to TidyUps...";
             let userInfo = {};
             try {
               const r = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
@@ -379,14 +390,38 @@ app.get("/oauth-bridge", (_req, res) => {
               });
               if (r.ok) userInfo = await r.json();
             } catch (e) {}
-            if (window.opener) {
-              window.opener.postMessage({
-                type: "TIDYUPS_GOOGLE_OAUTH_SUCCESS",
-                accessToken: resp.access_token,
-                user: userInfo
-              }, "*");
+            const payload = {
+              accessToken: resp.access_token,
+              email: userInfo.email || "cleaningserviceyeg@gmail.com",
+              displayName: userInfo.name || "TidyUps Admin"
+            };
+            try {
+              await fetch("/api/google-drive/session-token", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              });
+            } catch (e) {}
+            if (returnOrigin && returnOrigin.startsWith("http")) {
+              try {
+                await fetch(returnOrigin.replace(/\\/$/, "") + "/api/google-drive/session-token", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(payload)
+                });
+              } catch (e) {}
             }
-            setTimeout(() => window.close(), 300);
+            if (window.opener) {
+              try {
+                window.opener.postMessage({
+                  type: "TIDYUPS_GOOGLE_OAUTH_SUCCESS",
+                  accessToken: resp.access_token,
+                  user: userInfo
+                }, "*");
+              } catch (e) {}
+            }
+            statusEl.textContent = "✓ Connected! You can close this window.";
+            setTimeout(() => window.close(), 350);
           } else {
             statusEl.textContent = (resp && (resp.error_description || resp.error)) || "Sign-in was cancelled.";
           }
@@ -9155,6 +9190,14 @@ function buildTidyUpsZipFilename(prNum: number, date = new Date()): string {
   return `app.tidyups.cleaning-PR${safeNum}-${dateStamp}-${period}-${time12}.zip`;
 }
 
+const ACTIVE_BRAND_AISTUDIO_ASSETS = new Set([
+  "833Tidyups_logo_no_bg_8d1f90d6.png",
+  "39x14_ver_0001__1__d4ddd987.png",
+  "download__5__a6150ad7.jpg",
+  "833_Banner_003_16385828.png",
+  "833_Banner_004_-_Copy__2__3861ba3f.png",
+]);
+
 function addDirectoryToZip(zip: JSZip, dirPath: string, relativeRoot = ""): number {
   let count = 0;
   try {
@@ -9165,6 +9208,13 @@ function addDirectoryToZip(zip: JSZip, dirPath: string, relativeRoot = ""): numb
       if (entry.name.endsWith(".zip") || entry.name.endsWith(".log") || entry.name === "bun.lock") continue;
       const fullPath = path.join(dirPath, entry.name);
       const relPath = relativeRoot ? `${relativeRoot}/${entry.name}` : entry.name;
+      // Exclude temporary chat screenshot attachments in public/assets/aistudio so the ZIP stays ~1.4 MB (under Drive's 5 MB multipart limit)
+      if (
+        relPath.startsWith("public/assets/aistudio/") &&
+        !ACTIVE_BRAND_AISTUDIO_ASSETS.has(entry.name)
+      ) {
+        continue;
+      }
       if (entry.isDirectory()) {
         count += addDirectoryToZip(zip, fullPath, relPath);
       } else if (entry.isFile()) {
@@ -9241,11 +9291,11 @@ async function getOrCreateWholeProjectZip(options?: {
     targetPr = Math.max(6, storedCounter + 1);
   }
 
-  // Only reuse if explicitly allowed and an exact matching PR archive already exists on disk
+  // Only reuse if explicitly allowed and an exact matching PR archive already exists on disk (< 4.5 MB lean archive)
   if (!options?.forceRebuild && !options?.incrementPr && !options?.requestedPr && existingBackups.length > 0) {
     const latest = existingBackups[0];
     const latestPath = path.join(CACHED_PROJECT_ZIP_DIR, latest.filename);
-    if (fs.existsSync(latestPath) && latest.sizeBytes > 1024) {
+    if (fs.existsSync(latestPath) && latest.sizeBytes > 1024 && latest.sizeBytes < 4500000) {
       return {
         buffer: fs.readFileSync(latestPath),
         reused: true,
@@ -9277,6 +9327,7 @@ async function getOrCreateWholeProjectZip(options?: {
           zipFilename: filename,
           domain: "app.tidyups.cleaning",
           productionDomain: "app.tidyupscleaning.com",
+          bookingUrl: "https://app.tidyupscleaning.com/booking",
           googleDriveBackupFolder: "TidyUps Cleaning App Backup Zips",
           includedWorkflows: [
             "AI_BUILD_WORKFLOW.md",
@@ -9298,6 +9349,7 @@ async function getOrCreateWholeProjectZip(options?: {
         {
           domain: "app.tidyups.cleaning",
           productionDomain: "app.tidyupscleaning.com",
+          bookingUrl: "https://app.tidyupscleaning.com/booking",
           brandId: "tidyups",
           projectId: "tidyups",
           prLabel,
@@ -9412,6 +9464,253 @@ app.get("/api/project/export-metadata", (_req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to load export metadata" });
+  }
+});
+
+// Fast JSON endpoint to build & save a numbered PR# ZIP on the server and return its direct download URL
+app.post("/api/project/build-zip", async (req, res) => {
+  try {
+    const requestedPr = req.body?.requestedPr || req.query.pr || "";
+    const forceRebuild = req.body?.forceRebuild !== false;
+    const incrementPr = req.body?.incrementPr !== false;
+    const autoGithubBackup = req.body?.autoGithubBackup !== false;
+
+    const { buffer, reused, createdAt, filename, prNumber, prLabel } = await getOrCreateWholeProjectZip({
+      forceRebuild,
+      incrementPr,
+      requestedPr,
+    });
+
+    if (autoGithubBackup) {
+      setImmediate(async () => {
+        try {
+          const store = loadStore();
+          const token = resolveServerGithubToken(undefined, store?.githubToken);
+          if (token) {
+            const owner = store?.githubOwner || "Ai-Builder6";
+            const targetRepo = store?.githubRepo || `APP.TIDYUPSCLEANING.COM-START-PR6`;
+            const ghHeaders: Record<string, string> = {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github+json",
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "TidyUps-Cleaning-App-Sync",
+            };
+            const files = collectWorkspaceFilesForGitHub(process.cwd(), "");
+            await pushWorkspaceFilesToGithubRepo({
+              owner,
+              targetRepo,
+              prLabel,
+              commitMessage: `feat(${prLabel}): automatic 1-click app backup (${filename})`,
+              files,
+              ghHeaders,
+            });
+          }
+        } catch (bgErr) {
+          console.warn("Background GitHub backup sync note:", bgErr);
+        }
+      });
+    }
+
+    return res.json({
+      success: true,
+      reused,
+      createdAt,
+      filename,
+      prNumber,
+      prLabel,
+      sizeBytes: buffer.length,
+      downloadUrl: `/api/project/download-saved-zip?filename=${encodeURIComponent(filename)}`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Failed to build project zip on server" });
+  }
+});
+
+// Server-side direct upload of a built or fresh numbered PR# ZIP into the user's Google Drive folder ("TidyUps Cleaning App Backup Zips")
+app.post("/api/project/upload-zip-to-drive", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || "";
+    const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    const accessToken =
+      (req.body?.accessToken && String(req.body.accessToken).trim()) ||
+      bearerToken ||
+      (activeGoogleDriveSession && Date.now() < activeGoogleDriveSession.expiresAt
+        ? activeGoogleDriveSession.accessToken
+        : "");
+
+    if (!accessToken) {
+      return res.status(401).json({
+        error: "AUTH_REQUIRED",
+        message: "Google Drive authorization token is required. Click Sign in with Google first.",
+      });
+    }
+
+    const folderName = "TidyUps Cleaning App Backup Zips";
+
+    // 1. Find or create "TidyUps Cleaning App Backup Zips" folder in Google Drive
+    const folderQuery = encodeURIComponent(
+      `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and trashed = false`
+    );
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${folderQuery}&fields=files(id,name,webViewLink)&pageSize=5`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    if (searchRes.status === 401 || searchRes.status === 403) {
+      return res.status(401).json({
+        error: "AUTH_EXPIRED",
+        message: "Google Drive session expired. Please sign in with Google again.",
+      });
+    }
+
+    let folder: { id: string; name: string; webViewLink: string } | null = null;
+    if (searchRes.ok) {
+      const searchData: any = await searchRes.json().catch(() => ({}));
+      if (Array.isArray(searchData.files) && searchData.files.length > 0) {
+        const f = searchData.files[0];
+        folder = {
+          id: f.id,
+          name: f.name || folderName,
+          webViewLink: f.webViewLink || `https://drive.google.com/drive/folders/${f.id}`,
+        };
+      }
+    }
+
+    if (!folder) {
+      const createRes = await fetch(
+        "https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: folderName,
+            mimeType: "application/vnd.google-apps.folder",
+            description:
+              "Dedicated backup folder for TidyUps Cleaning App (app.tidyups.cleaning) — Numbered PR6+ Whole Project & Workflows ZIPs",
+          }),
+        }
+      );
+      if (!createRes.ok) {
+        const errBody: any = await createRes.json().catch(() => ({}));
+        return res.status(createRes.status).json({
+          error: errBody?.error?.message || "Failed to create Google Drive backup folder.",
+        });
+      }
+      const created: any = await createRes.json();
+      folder = {
+        id: created.id,
+        name: created.name || folderName,
+        webViewLink: created.webViewLink || `https://drive.google.com/drive/folders/${created.id}`,
+      };
+    }
+
+    // 2. Check existing files in the folder so we know the highest PR# in Drive
+    let highestDrivePr = 5;
+    try {
+      const listQ = encodeURIComponent(`'${folder.id}' in parents and trashed = false`);
+      const listRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${listQ}&fields=files(id,name)&pageSize=30`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (listRes.ok) {
+        const listData: any = await listRes.json().catch(() => ({}));
+        for (const item of listData.files || []) {
+          const m = String(item.name || "").match(/PR(\d+)/i);
+          if (m) {
+            const n = parseInt(m[1], 10);
+            if (!isNaN(n) && n > highestDrivePr) highestDrivePr = n;
+          }
+        }
+      }
+    } catch {}
+
+    // 3. Either upload a specific already-saved filename from /tmp/tidyups_project_backups or build a fresh numbered ZIP
+    let zipBuffer: Buffer;
+    let filename: string;
+    let prNumber: number;
+    let prLabel: string;
+    let reused = false;
+
+    const requestedFilename = req.body?.filename ? path.basename(String(req.body.filename)) : "";
+    const existingFilePath = requestedFilename ? path.join(CACHED_PROJECT_ZIP_DIR, requestedFilename) : "";
+
+    if (requestedFilename && existingFilePath && fs.existsSync(existingFilePath)) {
+      zipBuffer = fs.readFileSync(existingFilePath);
+      filename = requestedFilename;
+      const m = filename.match(/PR(\d+)/i);
+      prNumber = m ? parseInt(m[1], 10) : highestDrivePr + 1;
+      prLabel = `PR${prNumber}`;
+      reused = true;
+    } else {
+      const requestedPr = req.body?.requestedPr || Math.max(6, highestDrivePr + 1);
+      const built = await getOrCreateWholeProjectZip({
+        forceRebuild: true,
+        incrementPr: true,
+        requestedPr,
+      });
+      zipBuffer = built.buffer;
+      filename = built.filename;
+      prNumber = built.prNumber;
+      prLabel = built.prLabel;
+      reused = built.reused;
+    }
+
+    // 4. Upload the ZIP buffer into Google Drive using multipart related upload
+    const metadata = {
+      name: filename,
+      mimeType: "application/zip",
+      parents: [folder.id],
+      description: `TidyUps Cleaning (${prLabel}) Whole Project & Workflows Archive for app.tidyupscleaning.com`,
+    };
+    const boundary = "-------TidyUpsDriveBoundary" + Date.now();
+    const metaPart = Buffer.from(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/zip\r\n\r\n`,
+      "utf-8"
+    );
+    const endPart = Buffer.from(`\r\n--${boundary}--`, "utf-8");
+    const multipartBody = Buffer.concat([metaPart, zipBuffer, endPart]);
+
+    const uploadRes = await fetch(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,createdTime,size,webViewLink",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`,
+          "Content-Length": String(multipartBody.length),
+        },
+        body: multipartBody,
+      }
+    );
+
+    if (!uploadRes.ok) {
+      const errData: any = await uploadRes.json().catch(() => ({}));
+      return res.status(uploadRes.status).json({
+        error: errData?.error?.message || `Google Drive upload failed (${uploadRes.status}).`,
+      });
+    }
+
+    const uploadedFile: any = await uploadRes.json();
+
+    return res.json({
+      success: true,
+      folder,
+      file: uploadedFile,
+      reusedServerZip: reused,
+      prNumber,
+      prLabel,
+      filename,
+      sizeBytes: zipBuffer.length,
+      downloadUrl: `/api/project/download-saved-zip?filename=${encodeURIComponent(filename)}`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: err.message || "Failed to upload project ZIP to Google Drive.",
+    });
   }
 });
 

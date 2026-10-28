@@ -154,42 +154,92 @@ export const QuickQuoteModal: React.FC<QuickQuoteModalProps> = ({
     setQuoteNote((prev) => `${prev ? prev + ' ' : ''}[Applied ${percent}% Repeat Client Loyalty Discount (-$${loyaltyDiscountVal})]`);
   };
 
+  const quickVoiceRecRef = React.useRef<any>(null);
+  const shouldKeepQuickVoiceRef = React.useRef<boolean>(false);
+  const quickVoiceTranscriptRef = React.useRef<string>('');
+
   const handleQuickVoiceDictation = () => {
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) return;
     if (isRecordingVoice) {
+      shouldKeepQuickVoiceRef.current = false;
+      if (quickVoiceRecRef.current) {
+        try {
+          quickVoiceRecRef.current.onend = null;
+          quickVoiceRecRef.current.stop();
+        } catch {}
+        quickVoiceRecRef.current = null;
+      }
       setIsRecordingVoice(false);
       return;
     }
     try {
-      const rec = new SpeechRec();
-      rec.lang = 'en-CA';
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.onstart = () => setIsRecordingVoice(true);
-      rec.onresult = async (ev: any) => {
-        const transcript = ev.results?.[0]?.[0]?.transcript || '';
-        if (transcript) {
-          const res = await fetch('/api/dispatch/parse-voice-ticket', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ transcript }),
-          });
-          const data = await res.json();
-          if (data) {
-            if (data.customerName) setCustomerName(data.customerName);
-            if (data.phone) setCustomerPhone(data.phone);
-            if (data.address) setServiceAddress(data.address);
-            if (data.bedrooms) setBedrooms(data.bedrooms);
-            if (data.bathrooms) setBathrooms(data.bathrooms);
-            if (data.serviceCategory) setServiceType(data.serviceCategory);
-            if (data.specificInstructions) setQuoteNote(data.specificInstructions);
+      shouldKeepQuickVoiceRef.current = true;
+      quickVoiceTranscriptRef.current = '';
+
+      const startRec = () => {
+        const rec = new SpeechRec();
+        rec.lang = 'en-CA';
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.onstart = () => setIsRecordingVoice(true);
+        rec.onresult = async (ev: any) => {
+          let finalChunk = '';
+          for (let i = ev.resultIndex; i < ev.results.length; i++) {
+            if (ev.results[i].isFinal) {
+              finalChunk += ev.results[i][0].transcript + ' ';
+            }
           }
-        }
+          if (finalChunk.trim()) {
+            quickVoiceTranscriptRef.current = `${quickVoiceTranscriptRef.current} ${finalChunk}`.trim();
+            try {
+              const res = await fetch('/api/dispatch/parse-voice-ticket', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transcript: quickVoiceTranscriptRef.current }),
+              });
+              const data = await res.json();
+              if (data) {
+                if (data.customerName) setCustomerName(data.customerName);
+                if (data.phone) setCustomerPhone(data.phone);
+                if (data.address) setServiceAddress(data.address);
+                if (data.bedrooms) setBedrooms(data.bedrooms);
+                if (data.bathrooms) setBathrooms(data.bathrooms);
+                if (data.serviceCategory) setServiceType(data.serviceCategory);
+                if (data.specificInstructions) setQuoteNote(data.specificInstructions);
+              }
+            } catch {}
+          }
+        };
+        rec.onerror = (ev: any) => {
+          if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+            shouldKeepQuickVoiceRef.current = false;
+            setIsRecordingVoice(false);
+          }
+        };
+        rec.onend = () => {
+          if (shouldKeepQuickVoiceRef.current) {
+            setTimeout(() => {
+              if (!shouldKeepQuickVoiceRef.current) return;
+              try {
+                rec.start();
+              } catch {
+                try {
+                  startRec();
+                } catch {}
+              }
+            }, 90);
+            return;
+          }
+          setIsRecordingVoice(false);
+        };
+        quickVoiceRecRef.current = rec;
+        rec.start();
       };
-      rec.onend = () => setIsRecordingVoice(false);
-      rec.start();
+
+      startRec();
     } catch {
+      shouldKeepQuickVoiceRef.current = false;
       setIsRecordingVoice(false);
     }
   };

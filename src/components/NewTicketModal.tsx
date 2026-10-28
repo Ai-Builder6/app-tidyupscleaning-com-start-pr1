@@ -330,16 +330,22 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({
       audioContextRef.current = null;
     }
     if (recognitionRef.current) {
+      shouldKeepListeningRef.current = false;
       try {
+        recognitionRef.current.onend = null;
         recognitionRef.current.stop();
       } catch {
         // Ignore
       }
       recognitionRef.current = null;
     }
+    shouldKeepListeningRef.current = false;
     setAudioLevel(0);
     setIsListening(false);
   }, []);
+
+  const shouldKeepListeningRef = useRef<boolean>(false);
+  const latestNewTicketInterimRef = useRef<string>('');
 
   // Save new successful voice command into recent list (max 5)
   const addRecentVoiceCommand = useCallback((text: string) => {
@@ -518,118 +524,100 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({
     setVoiceMode(targetMode);
     setShowVoicePanel(true);
     setInterimTranscript('');
+    latestNewTicketInterimRef.current = '';
 
-    // 1. Request real microphone hardware access via getUserMedia
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-
-      // Set up AudioContext for real-time waveform visualization
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        const audioCtx = new AudioCtx();
-        audioContextRef.current = audioCtx;
-        if (audioCtx.state === 'suspended') {
-          await audioCtx.resume();
-        }
-        const source = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 64;
-        source.connect(analyser);
-        analyserRef.current = analyser;
-        monitorAudioVolume();
-      }
-
-      playChime('start');
-    } catch (err: unknown) {
-      console.warn('Microphone stream access error:', err);
-      const error = err as { name?: string; message?: string };
-      setMicPermissionDenied(true);
-      if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
-        setMicErrorMessage('Microphone permission was denied. Please allow microphone access in your browser address bar.');
-      } else if (error?.name === 'NotFoundError') {
-        setMicErrorMessage('No microphone device found on your system. Please connect a microphone and try again.');
-      } else {
-        setMicErrorMessage('Unable to access microphone. Please verify browser permissions.');
-      }
-      return;
-    }
-
-    // 2. Initialize Web Speech API for voice-to-text
     const SpeechRecognitionClass =
       (window as unknown as { SpeechRecognition?: any }).SpeechRecognition ||
       (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
 
     if (!SpeechRecognitionClass) {
-      setMicErrorMessage('Speech recognition is not natively supported in this browser. Microphone audio was detected; you can also type manually.');
-      setIsListening(true);
+      setMicErrorMessage('Speech recognition is not natively supported in this browser. You can type or paste manually.');
       return;
     }
 
     try {
-      const recognition = new SpeechRecognitionClass();
-      recognitionRef.current = recognition;
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
+      shouldKeepListeningRef.current = true;
+      playChime('start');
 
-      recognition.onstart = () => {
+      const startContinuousInstance = () => {
+        const recognition = new SpeechRecognitionClass();
+        recognitionRef.current = recognition;
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-CA';
+
+        recognition.onstart = () => {
+          setIsListening(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          let currentInterim = '';
+          let currentFinal = '';
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const trans = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              currentFinal += trans + ' ';
+            } else {
+              currentInterim += trans;
+            }
+          }
+
+          if (currentFinal) {
+            setVoiceTranscript((prev) => {
+              const updated = (prev + ' ' + currentFinal).trim();
+              if (targetMode === 'description') {
+                setIssueDescription((desc) => (desc + ' ' + currentFinal).trim());
+              }
+              return updated;
+            });
+          }
+          latestNewTicketInterimRef.current = currentInterim;
+          setInterimTranscript(currentInterim);
+        };
+
+        recognition.onerror = (event: any) => {
+          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            shouldKeepListeningRef.current = false;
+            setMicPermissionDenied(true);
+            setMicErrorMessage('Microphone access blocked. Please enable microphone permissions in your browser.');
+            stopMicrophoneTracks();
+          }
+        };
+
+        recognition.onend = () => {
+          if (latestNewTicketInterimRef.current.trim()) {
+            const pending = latestNewTicketInterimRef.current.trim();
+            latestNewTicketInterimRef.current = '';
+            setVoiceTranscript((prev) => (prev + ' ' + pending).trim());
+            setInterimTranscript('');
+          }
+          if (shouldKeepListeningRef.current) {
+            setTimeout(() => {
+              if (!shouldKeepListeningRef.current) return;
+              try {
+                recognition.start();
+              } catch {
+                try {
+                  startContinuousInstance();
+                } catch {}
+              }
+            }, 90);
+            return;
+          }
+          setIsListening(false);
+        };
+
+        recognition.start();
         setIsListening(true);
       };
 
-      recognition.onresult = (event: any) => {
-        let currentInterim = '';
-        let currentFinal = '';
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const trans = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            currentFinal += trans + ' ';
-          } else {
-            currentInterim += trans;
-          }
-        }
-
-        if (currentFinal) {
-          setVoiceTranscript((prev) => {
-            const updated = (prev + ' ' + currentFinal).trim();
-            if (targetMode === 'description') {
-              setIssueDescription((desc) => (desc + ' ' + currentFinal).trim());
-            }
-            return updated;
-          });
-        }
-        setInterimTranscript(currentInterim);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('Speech recognition notice:', event.error);
-        if (event.error === 'not-allowed') {
-          setMicPermissionDenied(true);
-          setMicErrorMessage('Microphone access blocked. Please enable microphone permissions in your browser.');
-          stopMicrophoneTracks();
-        } else if (event.error === 'no-speech') {
-          // User paused speaking; keep active
-        }
-      };
-
-      recognition.onend = () => {
-        // If still listening and not explicitly stopped, restart continuous recognition
-        if (mediaStreamRef.current && isListening) {
-          try {
-            recognition.start();
-          } catch {
-            // Already started or terminated
-          }
-        }
-      };
-
-      recognition.start();
-      setIsListening(true);
+      startContinuousInstance();
     } catch (recErr) {
+      shouldKeepListeningRef.current = false;
       console.warn('Recognition start exception:', recErr);
     }
-  }, [monitorAudioVolume, stopMicrophoneTracks, isListening]);
+  }, [stopMicrophoneTracks]);
 
   // Stop recording and process transcript
   const handleStopAndProcess = useCallback(async () => {

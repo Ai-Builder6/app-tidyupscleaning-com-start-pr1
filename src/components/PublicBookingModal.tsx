@@ -521,65 +521,82 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
       latestTranscriptRef.current = voiceTranscript;
       latestInterimRef.current = '';
 
-      const recognition = new SpeechRec();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.maxAlternatives = 3;
-      recognition.lang = 'en-CA';
+      const startContinuousRec = () => {
+        const recognition = new SpeechRec();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 3;
+        recognition.lang = 'en-CA';
 
-      recognition.onstart = () => {
-        setIsRecordingVoice(true);
-        setVoiceStatusMsg(
-          '🎙️ Continuous Mic Active (Will NOT shut off when you pause!) — Speak First & Last Name, Phone, Address, Bedrooms, Bathrooms & Date...'
-        );
-      };
+        recognition.onstart = () => {
+          setIsRecordingVoice(true);
+          setVoiceStatusMsg(
+            '🎙️ Continuous Mic Active (Will NOT shut off when you pause!) — Speak First & Last Name, Phone, Address, Bedrooms, Bathrooms & Date...'
+          );
+        };
 
-      recognition.onresult = (event: any) => {
-        let finalChunk = '';
-        let interimChunk = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const t = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalChunk += t + ' ';
-          } else {
-            interimChunk += t;
+        recognition.onresult = (event: any) => {
+          let finalChunk = '';
+          let interimChunk = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const t = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalChunk += t + ' ';
+            } else {
+              interimChunk += t;
+            }
           }
-        }
-        const prevBase = latestTranscriptRef.current;
-        const updated = finalChunk ? `${prevBase} ${finalChunk}`.trim() : prevBase;
-        latestTranscriptRef.current = updated;
-        latestInterimRef.current = interimChunk;
+          const prevBase = latestTranscriptRef.current;
+          const updated = finalChunk ? `${prevBase} ${finalChunk}`.trim() : prevBase;
+          latestTranscriptRef.current = updated;
+          latestInterimRef.current = interimChunk;
 
-        const combinedStream = `${updated} ${interimChunk}`.trim();
-        if (combinedStream) {
-          applyLiveSpeechExtraction(combinedStream);
-        }
-        setVoiceTranscript(updated);
-        setInterimTranscript(interimChunk);
-      };
+          const combinedStream = `${updated} ${interimChunk}`.trim();
+          if (combinedStream) {
+            applyLiveSpeechExtraction(combinedStream);
+          }
+          setVoiceTranscript(updated);
+          setInterimTranscript(interimChunk);
+        };
 
-      recognition.onerror = (ev: any) => {
-        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
-          shouldKeepRecordingRef.current = false;
-          setIsRecordingVoice(false);
-          setVoiceStatusMsg('Microphone permission was blocked by browser settings.');
-        }
-      };
+        recognition.onerror = (ev: any) => {
+          if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+            shouldKeepRecordingRef.current = false;
+            setIsRecordingVoice(false);
+            setVoiceStatusMsg('Microphone permission was blocked by browser settings.');
+          }
+        };
 
-      recognition.onend = () => {
-        // Auto-restart immediately if user hasn't clicked Stop so pauses never cut off speech!
-        if (shouldKeepRecordingRef.current) {
-          try {
-            recognition.start();
+        recognition.onend = () => {
+          if (latestInterimRef.current.trim()) {
+            const merged = `${latestTranscriptRef.current} ${latestInterimRef.current}`.trim();
+            latestTranscriptRef.current = merged;
+            latestInterimRef.current = '';
+            setVoiceTranscript(merged);
+            setInterimTranscript('');
+          }
+          if (shouldKeepRecordingRef.current) {
+            setTimeout(() => {
+              if (!shouldKeepRecordingRef.current) return;
+              try {
+                recognition.start();
+              } catch {
+                try {
+                  startContinuousRec();
+                } catch {}
+              }
+            }, 90);
             return;
-          } catch {}
-        }
-        setIsRecordingVoice(false);
-        setInterimTranscript('');
+          }
+          setIsRecordingVoice(false);
+          setInterimTranscript('');
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
       };
 
-      recognitionRef.current = recognition;
-      recognition.start();
+      startContinuousRec();
     } catch {
       shouldKeepRecordingRef.current = false;
       setIsRecordingVoice(false);
@@ -1406,7 +1423,7 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                     <option value="Google Search / Ad (Campaign 2)">Google Search / Ad (Campaign 2)</option>
                     <option value="Facebook / Instagram Ad">Facebook / Instagram Ad</option>
                     <option value="Facebook Ad (Campaign 2)">Facebook Ad (Campaign 2)</option>
-                    <option value="Website (app.tidyupscleaning.com/booking)">Website (tidyupscleaning.com / book.tidyupscleaning.com)</option>
+                    <option value="Website (app.tidyupscleaning.com/booking)">Website (tidyupscleaning.com / app.tidyupscleaning.com/booking)</option>
                     <option value="Friend / Family Referral">Friend / Family / Realtor Referral</option>
                     <option value="Repeat TidyUps Client">Repeat TidyUps Client</option>
                   </select>
@@ -1575,7 +1592,7 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                 <span className="font-bold text-zinc-200">
                   Official Booking URL:{' '}
                   <code className="text-pink-400 font-mono font-black">https://app.tidyupscleaning.com/booking</code>{' '}
-                  <span className="text-zinc-400">(anyone visiting <code className="text-emerald-300">book.tidyupscleaning.com</code> auto-redirects here!)</span>
+                  <span className="text-zinc-400">(all <code className="text-emerald-300">tidyupscleaning.com/booking</code> links route here!)</span>
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2">

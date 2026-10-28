@@ -896,65 +896,82 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       latestTranscriptRef.current = dictationText;
       latestInterimRef.current = '';
 
-      const rec = new SpeechRec();
-      rec.lang = 'en-CA';
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.maxAlternatives = 3;
+      const startContinuousRec = () => {
+        const rec = new SpeechRec();
+        rec.lang = 'en-CA';
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.maxAlternatives = 3;
 
-      rec.onstart = () => {
-        setIsRecordingFormVoice(true);
-        setVoiceFillStatus(
-          '🎙️ Continuous Mic Active (Will NOT shut off when you pause!) — Speak First & Last Name, Phone, Address, Bedrooms, Bathrooms & Preferred Date...'
-        );
-      };
+        rec.onstart = () => {
+          setIsRecordingFormVoice(true);
+          setVoiceFillStatus(
+            '🎙️ Continuous Mic Active (Will NOT shut off when you pause!) — Speak First & Last Name, Phone, Address, Bedrooms, Bathrooms & Preferred Date...'
+          );
+        };
 
-      rec.onresult = (ev: any) => {
-        let finalChunk = '';
-        let interimChunk = '';
-        for (let i = ev.resultIndex; i < ev.results.length; i++) {
-          const t = ev.results[i][0].transcript;
-          if (ev.results[i].isFinal) {
-            finalChunk += t + ' ';
-          } else {
-            interimChunk += t;
+        rec.onresult = (ev: any) => {
+          let finalChunk = '';
+          let interimChunk = '';
+          for (let i = ev.resultIndex; i < ev.results.length; i++) {
+            const t = ev.results[i][0].transcript;
+            if (ev.results[i].isFinal) {
+              finalChunk += t + ' ';
+            } else {
+              interimChunk += t;
+            }
           }
-        }
-        const prevBase = latestTranscriptRef.current;
-        const updated = finalChunk ? `${prevBase} ${finalChunk}`.trim() : prevBase;
-        latestTranscriptRef.current = updated;
-        latestInterimRef.current = interimChunk;
+          const prevBase = latestTranscriptRef.current;
+          const updated = finalChunk ? `${prevBase} ${finalChunk}`.trim() : prevBase;
+          latestTranscriptRef.current = updated;
+          latestInterimRef.current = interimChunk;
 
-        const combinedLive = `${updated} ${interimChunk}`.trim();
-        if (combinedLive) {
-          applyLiveSpeechExtraction(combinedLive);
-        }
-        setDictationText(updated);
-        setInterimDictation(interimChunk);
-      };
+          const combinedLive = `${updated} ${interimChunk}`.trim();
+          if (combinedLive) {
+            applyLiveSpeechExtraction(combinedLive);
+          }
+          setDictationText(updated);
+          setInterimDictation(interimChunk);
+        };
 
-      rec.onerror = (ev: any) => {
-        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
-          shouldKeepRecordingRef.current = false;
-          setIsRecordingFormVoice(false);
-          setVoiceFillStatus('Microphone access was blocked by browser permissions.');
-        }
-      };
+        rec.onerror = (ev: any) => {
+          if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+            shouldKeepRecordingRef.current = false;
+            setIsRecordingFormVoice(false);
+            setVoiceFillStatus('Microphone access was blocked by browser permissions.');
+          }
+        };
 
-      rec.onend = () => {
-        // Automatically restart on pause so the mic NEVER shuts off until the user clicks Stop!
-        if (shouldKeepRecordingRef.current) {
-          try {
-            rec.start();
+        rec.onend = () => {
+          if (latestInterimRef.current.trim()) {
+            const merged = `${latestTranscriptRef.current} ${latestInterimRef.current}`.trim();
+            latestTranscriptRef.current = merged;
+            latestInterimRef.current = '';
+            setDictationText(merged);
+            setInterimDictation('');
+          }
+          if (shouldKeepRecordingRef.current) {
+            setTimeout(() => {
+              if (!shouldKeepRecordingRef.current) return;
+              try {
+                rec.start();
+              } catch {
+                try {
+                  startContinuousRec();
+                } catch {}
+              }
+            }, 90);
             return;
-          } catch {}
-        }
-        setIsRecordingFormVoice(false);
-        setInterimDictation('');
+          }
+          setIsRecordingFormVoice(false);
+          setInterimDictation('');
+        };
+
+        recognitionRef.current = rec;
+        rec.start();
       };
 
-      recognitionRef.current = rec;
-      rec.start();
+      startContinuousRec();
     } catch {
       shouldKeepRecordingRef.current = false;
       setIsRecordingFormVoice(false);
@@ -1183,7 +1200,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 <span>Official Customer Booking Page (/booking)</span>
               </span>
               <div className="text-xs text-zinc-200">
-                <strong className="text-pink-400">Official Booking Link (for Jess&apos;s FB &amp; Google Ads + book.tidyupscleaning.com):</strong>{' '}
+                <strong className="text-pink-400">Official Booking Link (for Jess&apos;s FB &amp; Google Ads + tidyupscleaning.com/booking):</strong>{' '}
                 <code className="px-1.5 py-0.5 rounded bg-zinc-900 border border-pink-500/40 text-pink-300 font-mono font-bold">
                   https://app.tidyupscleaning.com/booking
                 </code>

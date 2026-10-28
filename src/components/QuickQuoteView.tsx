@@ -1331,90 +1331,94 @@ export const QuickQuoteView: React.FC<QuickQuoteViewProps> = ({
       shouldKeepRecordingRef.current = true;
       latestTranscriptRef.current = voiceTranscript;
       latestInterimRef.current = '';
-
-      // 1. Start parallel MediaRecorder audio stream so we can compare Audio + Transcript
       audioChunksRef.current = [];
       setHasParallelAudio(false);
       setReconciliationNote(null);
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices
-          .getUserMedia({ audio: true })
-          .then((stream) => {
-            try {
-              const mr = new MediaRecorder(stream);
-              mr.ondataavailable = (ev) => {
-                if (ev.data && ev.data.size > 0) {
-                  audioChunksRef.current.push(ev.data);
-                }
-              };
-              mr.start(1000);
-              mediaRecorderRef.current = mr;
-              setHasParallelAudio(true);
-            } catch {}
-          })
-          .catch(() => {});
-      }
 
-      // 2. Start live Web Speech API recognition with auto-restart on pause & real-time green block highlighting
-      const recognition = new SpeechRec();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.maxAlternatives = 3;
-      recognition.lang = 'en-CA';
+      // Start live Web Speech API recognition with resilient auto-restart so the mic NEVER shuts off while talking
+      const startContinuousRecognitionInstance = () => {
+        if (!shouldKeepRecordingRef.current) return;
+        const recognition = new SpeechRec();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 3;
+        recognition.lang = 'en-CA';
 
-      recognition.onstart = () => {
-        setIsRecording(true);
-        setVoiceStatusMsg(
-          '🎙️ Listening live (Continuous Attention Active)... Speak Name, Phone, Address, Preferred Day/Date, Bedrooms & Bathrooms!'
-        );
-      };
+        recognition.onstart = () => {
+          setIsRecording(true);
+          setVoiceStatusMsg(
+            '🎙️ Mic Locked ON (Will NOT shut off until you click Stop) — Speak Name, Phone, Address, Preferred Day/Date, Bedrooms & Bathrooms!'
+          );
+        };
 
-      recognition.onresult = (event: any) => {
-        let finalChunk = '';
-        let interimChunk = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const t = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalChunk += t + ' ';
-          } else {
-            interimChunk += t;
+        recognition.onresult = (event: any) => {
+          let finalChunk = '';
+          let interimChunk = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const t = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalChunk += t + ' ';
+            } else {
+              interimChunk += t;
+            }
           }
-        }
-        const prevBase = latestTranscriptRef.current;
-        const updated = finalChunk ? `${prevBase} ${finalChunk}`.trim() : prevBase;
-        latestTranscriptRef.current = updated;
-        latestInterimRef.current = interimChunk;
+          const prevBase = latestTranscriptRef.current;
+          const updated = finalChunk ? `${prevBase} ${finalChunk}`.trim() : prevBase;
+          latestTranscriptRef.current = updated;
+          latestInterimRef.current = interimChunk;
 
-        const combinedLiveStream = `${updated} ${interimChunk}`.trim();
-        if (combinedLiveStream) {
-          applyLiveSpeechExtraction(combinedLiveStream, Boolean(finalChunk));
-        }
-        setVoiceTranscript(updated);
-        setInterimTranscript(interimChunk);
-      };
+          const combinedLiveStream = `${updated} ${interimChunk}`.trim();
+          if (combinedLiveStream) {
+            applyLiveSpeechExtraction(combinedLiveStream, Boolean(finalChunk));
+          }
+          setVoiceTranscript(updated);
+          setInterimTranscript(interimChunk);
+        };
 
-      recognition.onerror = (ev: any) => {
-        if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
-          shouldKeepRecordingRef.current = false;
-          setIsRecording(false);
-        }
-      };
+        recognition.onerror = (ev: any) => {
+          if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+            shouldKeepRecordingRef.current = false;
+            setIsRecording(false);
+            setVoiceStatusMsg('Microphone permission was blocked by browser settings.');
+          }
+          // Ignore 'no-speech', 'aborted', and 'network' errors so onend auto-restarts seamlessly
+        };
 
-      recognition.onend = () => {
-        // Automatically restart if the user hasn't clicked Stop so pauses never cut off dictation
-        if (shouldKeepRecordingRef.current) {
-          try {
-            recognition.start();
+        recognition.onend = () => {
+          // Commit any pending interim words before restarting so zero words are lost
+          if (latestInterimRef.current && latestInterimRef.current.trim()) {
+            const merged = `${latestTranscriptRef.current} ${latestInterimRef.current}`.trim();
+            latestTranscriptRef.current = merged;
+            latestInterimRef.current = '';
+            setVoiceTranscript(merged);
+            setInterimTranscript('');
+            applyLiveSpeechExtraction(merged, true);
+          }
+          // Never shut off the mic unless the user explicitly clicked Stop
+          if (shouldKeepRecordingRef.current) {
+            setTimeout(() => {
+              if (!shouldKeepRecordingRef.current) return;
+              try {
+                recognition.start();
+              } catch {
+                try {
+                  startContinuousRecognitionInstance();
+                } catch {}
+              }
+            }, 90);
             return;
-          } catch {}
-        }
-        setIsRecording(false);
-        setInterimTranscript('');
+          }
+          setIsRecording(false);
+          setInterimTranscript('');
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
       };
 
-      recognitionRef.current = recognition;
       playVoiceChime('start');
-      recognition.start();
+      setIsRecording(true);
+      startContinuousRecognitionInstance();
     } catch {
       shouldKeepRecordingRef.current = false;
       setIsRecording(false);

@@ -302,66 +302,92 @@ export interface DirectBackupZipResult {
   prNumber: number;
   prLabel: string;
   sizeBytes: number;
+  downloadUrl: string;
   savedToServer: boolean;
   autoGithubBackedUp: boolean;
   uploadedToDrive: boolean;
   driveFolderUrl?: string;
+  driveFileUrl?: string;
 }
 
 /**
- * 1-Click Instant Backup ZIP (Works directly on https://app.tidyupscleaning.com with ZERO Google OAuth popups):
- * 1. Builds & saves the next numbered PR# ZIP (`PR6`, `PR7`, `PR8`...) on the server.
+ * Triggers a reliable native browser attachment download for a server-saved ZIP file,
+ * working inside both standalone browser tabs and sandboxed preview iframes.
+ */
+export function triggerNativeServerZipDownload(downloadUrl: string, filename: string): void {
+  if (typeof document === 'undefined') return;
+  try {
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch {}
+}
+
+/**
+ * 1-Click Instant Backup ZIP:
+ * 1. Builds & saves the next numbered PR# ZIP (`PR6`, `PR7`, `PR8`...) on the server via `/api/project/build-zip`.
  * 2. Triggers an automatic background GitHub repository backup on the server.
- * 3. Immediately downloads the `.zip` archive straight to the user's computer/device.
- * 4. If a Google Drive token is already active in this session, also uploads a copy to "TidyUps Cleaning App Backup Zips".
+ * 3. Immediately downloads the `.zip` archive straight to the user's computer/device via native HTTP attachment.
+ * 4. If a Google Drive token is active in this session, also uploads a copy to "TidyUps Cleaning App Backup Zips" in Google Drive.
  */
 export async function saveAndDownloadNumberedProjectBackupZip(options?: {
   requestedPr?: string | number;
   autoGithubBackup?: boolean;
 }): Promise<DirectBackupZipResult> {
-  let prParam = '';
-  if (options?.requestedPr !== undefined && options?.requestedPr !== '') {
-    const m = String(options.requestedPr).match(/(\d+)/);
-    if (m) prParam = `&pr=${Math.max(6, parseInt(m[1], 10))}`;
+  const buildRes = await fetch('/api/project/build-zip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requestedPr: options?.requestedPr,
+      forceRebuild: true,
+      incrementPr: true,
+      autoGithubBackup: options?.autoGithubBackup !== false,
+    }),
+  });
+
+  if (!buildRes.ok) {
+    const errData = await buildRes.json().catch(() => ({}));
+    throw new Error(errData?.error || 'Could not build numbered Backup ZIP on server.');
   }
-  const ghParam = options?.autoGithubBackup !== false ? '&autoGithubBackup=true' : '';
-  const queryUrl = `/api/project/export-zip?force=true&increment=true${prParam}${ghParam}`;
 
-  const res = await fetch(queryUrl);
-  if (!res.ok) {
-    throw new Error('Could not build numbered Backup ZIP on server.');
-  }
+  const built = await buildRes.json();
+  const filename: string =
+    built.filename || `app.tidyups.cleaning-PR6-${new Date().toISOString().slice(0, 10)}.zip`;
+  const prLabel: string = built.prLabel || 'PR6';
+  const prNumber: number = Number(built.prNumber || 6);
+  const sizeBytes: number = Number(built.sizeBytes || 0);
+  const downloadUrl: string =
+    built.downloadUrl || `/api/project/download-saved-zip?filename=${encodeURIComponent(filename)}`;
 
-  const prLabel = res.headers.get('X-Zip-PR-Label') || 'PR6';
-  const prNumber = Number(res.headers.get('X-Zip-PR-Number') || 6);
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const filename =
-    res.headers.get('X-Zip-Filename') || `app.tidyups.cleaning-${prLabel}-${dateStr}.zip`;
-
-  const blob = await res.blob();
-  const blobUrl = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = blobUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(blobUrl), 8000);
+  triggerNativeServerZipDownload(downloadUrl, filename);
 
   let uploadedToDrive = false;
   let driveFolderUrl: string | undefined;
+  let driveFileUrl: string | undefined;
   const existingToken = getAccessTokenSync();
   if (existingToken) {
     try {
-      const driveUploaded = await uploadAppFileToTidyUpsDriveFolder({
-        filename,
-        blob,
-        mimeType: 'application/zip',
-        description: `TidyUps Cleaning (${prLabel}) Whole Project & Workflows Archive for app.tidyupscleaning.com`,
-        accessToken: existingToken,
+      const driveRes = await fetch('/api/project/upload-zip-to-drive', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${existingToken}`,
+        },
+        body: JSON.stringify({
+          accessToken: existingToken,
+          filename,
+        }),
       });
-      uploadedToDrive = true;
-      driveFolderUrl = driveUploaded.folder.webViewLink;
+      if (driveRes.ok) {
+        const driveData = await driveRes.json();
+        uploadedToDrive = true;
+        driveFolderUrl = driveData?.folder?.webViewLink;
+        driveFileUrl = driveData?.file?.webViewLink;
+      }
     } catch {
       // Non-blocking: local + server + GitHub backup already succeeded
     }
@@ -371,23 +397,25 @@ export async function saveAndDownloadNumberedProjectBackupZip(options?: {
     filename,
     prNumber,
     prLabel,
-    sizeBytes: blob.size,
+    sizeBytes,
+    downloadUrl,
     savedToServer: true,
     autoGithubBackedUp: options?.autoGithubBackup !== false,
     uploadedToDrive,
     driveFolderUrl,
+    driveFileUrl,
   };
 }
 
 /**
- * 1-Click Handler:
- * 1. Determines the next sequential PR number (PR6, PR7, PR8...) across Google Drive & Server so morning and afternoon saves are always distinct.
- * 2. Builds a fresh numbered `app.tidyups.cleaning-PR#...zip` on the server.
- * 3. Uploads the numbered ZIP straight into "TidyUps Cleaning App Backup Zips" in Google Drive.
- * 4. If Google OAuth popup is blocked or unavailable on the current domain, automatically falls back to saving & downloading the numbered Backup ZIP directly!
+ * 1-Click Google Drive Upload Handler:
+ * 1. Ensures the user is authenticated with Google Drive (opening the authorized Cloud Run `/oauth-bridge` popup on click if needed).
+ * 2. Builds a fresh ~1.4 MB numbered `app.tidyups.cleaning-PR#...zip` (or uploads an already-built `existingServerFilename`) on the server.
+ * 3. Uploads the `.zip` directly from the server into the user's `"TidyUps Cleaning App Backup Zips"` folder in Google Drive!
  */
 export async function uploadWholeProjectZipToDriveFolder(options?: {
   customFilename?: string;
+  existingServerFilename?: string;
   requestedPr?: string | number;
   forceRebuild?: boolean;
   accessToken?: string | null;
@@ -396,109 +424,60 @@ export async function uploadWholeProjectZipToDriveFolder(options?: {
   let token = options?.accessToken || getAccessTokenSync();
   let userEmail: string | null = null;
 
-  try {
-    if (!token) {
-      // Trigger Google Sign-In synchronously on the click tick before any await
-      const authPromise = ensureDriveAuthToken();
-      const authRes = await authPromise;
-      token = authRes.accessToken;
-      userEmail = authRes.user?.email || null;
-    }
-  } catch {
-    // Fallback: immediately save & download numbered ZIP directly without failing
-    const direct = await saveAndDownloadNumberedProjectBackupZip({
-      requestedPr: options?.requestedPr,
-      autoGithubBackup: true,
-    });
-    return {
-      folder: {
-        id: 'local-and-server-backup',
-        name: `${TIDYUPS_DRIVE_FOLDER_NAME} (Downloaded + Saved to Server & GitHub)`,
-        webViewLink: 'https://github.com/Ai-Builder6/APP.TIDYUPSCLEANING.COM-START-PR6',
-      },
-      file: {
-        id: direct.filename,
-        name: direct.filename,
-        mimeType: 'application/zip',
-        createdTime: new Date().toISOString(),
-        size: String(direct.sizeBytes),
-      },
-      reusedServerZip: false,
-      prNumber: direct.prNumber,
-      prLabel: direct.prLabel,
-      userEmail: null,
-    };
+  if (!token) {
+    // Trigger Google Sign-In popup synchronously on user click
+    const authRes = await ensureDriveAuthToken();
+    token = authRes.accessToken;
+    userEmail = authRes.user?.email || null;
   }
 
-  let folder: DriveFolderInfo;
-  let existingDriveFiles: DriveBackupFileItem[] = [];
+  const attemptServerDriveUpload = async (activeToken: string) => {
+    const res = await fetch('/api/project/upload-zip-to-drive', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${activeToken}`,
+      },
+      body: JSON.stringify({
+        accessToken: activeToken,
+        filename: options?.existingServerFilename || undefined,
+        requestedPr: options?.requestedPr || undefined,
+        forceRebuild: options?.forceRebuild !== false,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || data?.error === 'AUTH_EXPIRED' || data?.error === 'AUTH_REQUIRED') {
+      throw new Error('AUTH_EXPIRED');
+    }
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.error || data?.message || 'Failed to upload ZIP to Google Drive folder.');
+    }
+    return data;
+  };
+
+  let uploadData: any;
   try {
-    const listed = await listTidyUpsFolderFiles(token);
-    folder = listed.folder;
-    existingDriveFiles = listed.files;
+    uploadData = await attemptServerDriveUpload(token);
   } catch (err: any) {
     if (err?.message === 'AUTH_EXPIRED') {
       const freshAuth = await googleSignIn();
       if (!freshAuth?.accessToken) {
-        throw new Error('Google Drive re-authentication required.');
+        throw new Error('Google Drive Sign-In is required to load the ZIP file into your Google Drive.');
       }
       token = freshAuth.accessToken;
       userEmail = freshAuth.user?.email || null;
-      const listed = await listTidyUpsFolderFiles(token);
-      folder = listed.folder;
-      existingDriveFiles = listed.files;
+      uploadData = await attemptServerDriveUpload(token);
     } else {
       throw err;
     }
   }
 
-  // Inspect existing PR numbers in Google Drive so we never collide with an earlier morning/afternoon save (minimum floor PR6 since PR1-PR5 are retired)
-  let highestDrivePr = 5;
-  for (const f of existingDriveFiles) {
-    const m = (f.name || '').match(/PR(\d+)/i);
-    if (m) {
-      const n = parseInt(m[1], 10);
-      if (!isNaN(n) && n > highestDrivePr) highestDrivePr = n;
-    }
-  }
-
-  let prParam = '';
-  if (options?.requestedPr !== undefined && options?.requestedPr !== '') {
-    const m = String(options.requestedPr).match(/(\d+)/);
-    if (m) prParam = `&pr=${Math.max(6, parseInt(m[1], 10))}`;
-  } else {
-    prParam = `&pr=${highestDrivePr + 1}`;
-  }
-
-  const shouldIncrement = options?.forceRebuild !== false;
-  const queryUrl = `/api/project/export-zip?mode=drive&force=true&autoGithubBackup=true${shouldIncrement ? '&increment=true' : ''}${prParam}`;
-  const zipRes = await fetch(queryUrl);
-  if (!zipRes.ok) {
-    throw new Error('Could not build or retrieve Whole Project & Workflows ZIP from server.');
-  }
-
-  const reusedServerZip = zipRes.headers.get('X-Zip-Cache-Status') === 'REUSED_EXISTING';
-  const serverSuggestedName = zipRes.headers.get('X-Zip-Filename');
-  const prLabel = zipRes.headers.get('X-Zip-PR-Label') || 'PR6';
-  const prNumber = Number(zipRes.headers.get('X-Zip-PR-Number') || 6);
-  const zipBlob = await zipRes.blob();
-
+  const prLabel: string = uploadData.prLabel || 'PR6';
+  const prNumber: number = Number(uploadData.prNumber || 6);
   const dateStr = new Date().toISOString().slice(0, 10);
-  const zipFilename =
-    options?.customFilename ||
-    serverSuggestedName ||
-    `app.tidyups.cleaning-${prLabel}-${dateStr}.zip`;
-
-  const { file } = await uploadAppFileToTidyUpsDriveFolder({
-    filename: zipFilename,
-    blob: zipBlob,
-    mimeType: 'application/zip',
-    description: `TidyUps Cleaning (${prLabel}) Whole Project & Workflows Archive for app.tidyups.cleaning (src/, server.ts, .github/workflows/, workflows/, AI_BUILD_WORKFLOW.md, README.md, database store & configs)`,
-    accessToken: token,
-  });
 
   // Also ensure AI_BUILD_WORKFLOW.md is inside the same "TidyUps Cleaning App Backup Zips" folder
-  if (options?.aiWorkflowContent) {
+  if (options?.aiWorkflowContent && token) {
     await uploadAppFileToTidyUpsDriveFolder({
       filename: `AI_BUILD_WORKFLOW-${prLabel}-${dateStr}.md`,
       blob: new Blob([options.aiWorkflowContent], { type: 'text/markdown' }),
@@ -509,9 +488,9 @@ export async function uploadWholeProjectZipToDriveFolder(options?: {
   }
 
   return {
-    folder,
-    file,
-    reusedServerZip,
+    folder: uploadData.folder,
+    file: uploadData.file,
+    reusedServerZip: Boolean(uploadData.reusedServerZip),
     prNumber,
     prLabel,
     userEmail,

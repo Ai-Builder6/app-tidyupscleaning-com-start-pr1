@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastSavedAt": "2026-10-28T05:14:28.298Z",
+  "lastSavedAt": "2026-10-28T06:37:27.057Z",
   "tickets": [
     {
       "id": "Z2lkOi8vSm9iYmVyL1Zpc2l0LzIzNTc2MjY0NTI=",
@@ -7587,8 +7587,8 @@
   ],
   "quotes": [
     {
-      "id": "quote_local_1793164335530",
-      "quoteNumber": "QT-4426",
+      "id": "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjgz",
+      "quoteNumber": "QT-7537",
       "clientName": "Sheralee Cave",
       "clientPhone": "(780) 364-0177",
       "clientEmail": "sheraleew@live.com",
@@ -7600,12 +7600,12 @@
       "total": 427.5,
       "depositRequired": 100,
       "createdAt": "2026-10-28T05:12:15.530Z",
-      "updatedAt": "2026-10-28T05:12:15.530Z",
+      "updatedAt": "2026-10-28T06:10:01.240Z",
       "scheduledDate": "2026-01-24",
       "verdict": "Good lead",
-      "jobberWebUri": "https://secure.getjobber.com/quotes",
-      "jobberClientWebUri": "https://secure.getjobber.com/clients",
-      "jobberClientId": "jobber-cli-4302",
+      "jobberWebUri": "https://secure.getjobber.com/quotes/68019283",
+      "jobberClientWebUri": "https://secure.getjobber.com/clients/157374822",
+      "jobberClientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=",
       "googleSheetSynced": true,
       "notes": "[DRAFT FOR OWNER REVIEW] FB Page: 833 Tidyups | Scope: Move-Out / Turnover Vacate Cleaning (1 Bedroom, 1 Bathroom) on 2026-01-24 | Special Notes: Requested Date/Time: January 24 | Postal Code: T6J 4M5 | Messenger Transcript: Customer: Hello! I filled out your form and would like to know more about your business.\nFirst name: Sheralee\nLast name: Cave\nPhone number: (780) 364-0177\nEmail: sheraleew@live.com\nStreet address: 371 Saddleback Rd Nw\nCity: Edmonton\nState: AB\nCountry: CA\nPost code: T6J 4M5\n�Please Let Me Know Which Service Your Interested In�: Move Out Cleaning\nHow Many Bedrooms Do you have..?: 1\nHow ManyBathrooms do you have.?: 1\nBest Date For Service: January 24",
       "lineItems": [
@@ -7625,11 +7625,16 @@
         }
       ],
       "source": "Facebook",
-      "isLiveSynced": false
+      "isLiveSynced": true,
+      "jobberQuoteId": "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjgz",
+      "clientHubUri": "https://clienthub.getjobber.com/client_hubs/80aa9b22-e31a-48d1-b225-c49ad4a09d89/quotes/68019283",
+      "jobberPropertyId": "Z2lkOi8vSm9iYmVyL1Byb3BlcnR5LzE2MzI2MjAxNg==",
+      "isLocal": false,
+      "syncedAt": "2026-10-28T06:10:01.240Z"
     },
     {
-      "id": "quote_local_1793047474891",
-      "quoteNumber": "QT-4425",
+      "id": "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjg0",
+      "quoteNumber": "QT-7538",
       "clientName": "Sheralee Cave",
       "clientPhone": "(780) 364-0177",
       "clientEmail": "sheraleew@live.com",
@@ -7641,12 +7646,12 @@
       "total": 427.5,
       "depositRequired": 100,
       "createdAt": "2026-10-26T20:44:34.891Z",
-      "updatedAt": "2026-10-26T20:44:34.891Z",
+      "updatedAt": "2026-10-28T06:10:02.362Z",
       "scheduledDate": "2026-01-24",
       "verdict": "Good lead",
-      "jobberWebUri": "https://secure.getjobber.com/quotes",
-      "jobberClientWebUri": "https://secure.getjobber.com/clients",
-      "jobberClientId": "jobber-cli-4352",
+      "jobberWebUri": "https://secure.getjobber.com/quotes/68019284",
+      "jobberClientWebUri": "https://secure.getjobber.com/clients/157374822",
+      "jobberClientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=",
       "googleSheetSynced": true,
       "notes": "[DRAFT FOR OWNER REVIEW] FB Page: 833 Tidyups | Scope: Move-Out / Turnover Vacate Cleaning (1 Bedroom, 1 Bathroom) on 2026-01-24 | Special Notes: Requested Date/Time: January 24 | Postal Code: T6J 4M5 | Messenger Transcript: Customer: Hello! I filled out your form and would like to know more about your business.\nFirst name: Sheralee\nLast name: Cave\nPhone number: (780) 364-0177\nEmail: sheraleew@live.com\nStreet address: 371 Saddleback Rd Nw\nCity: Edmonton\nState: AB\nCountry: CA\nPost code: T6J 4M5\n�Please Let Me Know Which Service Your Interested In�: Move Out Cleaning\nHow Many Bedrooms Do you have..?: 1\nHow ManyBathrooms do you have.?: 1\nBest Date For Service: January 24",
       "lineItems": [
@@ -7666,8 +7671,13 @@
         }
       ],
       "source": "Facebook",
-      "isLiveSynced": false,
-      "googleSheetUrl": "https://docs.google.com/spreadsheets/d/1TifULi7n2BylQdvla-8DRvYHul_A1wXXzypUdBJwEeA/edit"
+      "isLiveSynced": true,
+      "googleSheetUrl": "https://docs.google.com/spreadsheets/d/1TifULi7n2BylQdvla-8DRvYHul_A1wXXzypUdBJwEeA/edit",
+      "jobberQuoteId": "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjg0",
+      "clientHubUri": "https://clienthub.getjobber.com/client_hubs/80aa9b22-e31a-48d1-b225-c49ad4a09d89/quotes/68019284",
+      "jobberPropertyId": "Z2lkOi8vSm9iYmVyL1Byb3BlcnR5LzE2MzI2MjAxNg==",
+      "isLocal": false,
+      "syncedAt": "2026-10-28T06:10:02.362Z"
     },
     {
       "id": "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3ODUxMDI2",
@@ -14264,9 +14274,9 @@
     "accountName": "Tidyups Cleaning Service Inc",
     "clientId": "27966135-e33e-4c2e-8dc3-ad7ba06dabb8",
     "clientSecret": "65534ce762fe3ec20a5c1447794dabee0ac03f2caf1048c8686377d4e754a36a",
-    "accessToken": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjE1ODAxNzYsImlzcyI6Imh0dHBzOi8vYXBpLmdldGpvYmJlci5jb20iLCJjbGllbnRfaWQiOiIyNzk2NjEzNS1lMzNlLTRjMmUtOGRjMy1hZDdiYTA2ZGFiYjgiLCJzY29wZSI6InJlYWRfY2xpZW50cyB3cml0ZV9jbGllbnRzIHJlYWRfcmVxdWVzdHMgd3JpdGVfcmVxdWVzdHMgcmVhZF9xdW90ZXMgd3JpdGVfcXVvdGVzIHJlYWRfam9icyB3cml0ZV9qb2JzIHJlYWRfc2NoZWR1bGVkX2l0ZW1zIHdyaXRlX3NjaGVkdWxlZF9pdGVtcyByZWFkX2ludm9pY2VzIHdyaXRlX2ludm9pY2VzIHJlYWRfam9iYmVyX3BheW1lbnRzIHJlYWRfdXNlcnMgd3JpdGVfdXNlcnMgd3JpdGVfdGF4X3JhdGVzIHJlYWRfZXhwZW5zZXMgd3JpdGVfZXhwZW5zZXMgcmVhZF9jdXN0b21fZmllbGRfY29uZmlndXJhdGlvbnMgd3JpdGVfY3VzdG9tX2ZpZWxkX2NvbmZpZ3VyYXRpb25zIHJlYWRfdGltZV9zaGVldHMgcmVhZF9lcXVpcG1lbnQgd3JpdGVfZXF1aXBtZW50IHJlYWRfbWFya2V0aW5nIHdyaXRlX21hcmtldGluZyIsImFwcF9pZCI6IjI3OTY2MTM1LWUzM2UtNGMyZS04ZGMzLWFkN2JhMDZkYWJiOCIsInVzZXJfaWQiOjE1ODAxNzYsImFjY291bnRfaWQiOjcxODU3NiwiYXVkIjpbImh0dHBzOi8vZ2V0am9iYmVyLmNvbS9ncmFwaHFsIl0sImV4cCI6MTc5Mjg4MjMwOX0.eHs16_3PzVxI-4jsTA5xekbqDNC4y2k2euo-z6cXSUo",
+    "accessToken": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjE1ODAxNzYsImlzcyI6Imh0dHBzOi8vYXBpLmdldGpvYmJlci5jb20iLCJjbGllbnRfaWQiOiIyNzk2NjEzNS1lMzNlLTRjMmUtOGRjMy1hZDdiYTA2ZGFiYjgiLCJzY29wZSI6InJlYWRfY2xpZW50cyB3cml0ZV9jbGllbnRzIHJlYWRfcmVxdWVzdHMgd3JpdGVfcmVxdWVzdHMgcmVhZF9xdW90ZXMgd3JpdGVfcXVvdGVzIHJlYWRfam9icyB3cml0ZV9qb2JzIHJlYWRfc2NoZWR1bGVkX2l0ZW1zIHdyaXRlX3NjaGVkdWxlZF9pdGVtcyByZWFkX2ludm9pY2VzIHdyaXRlX2ludm9pY2VzIHJlYWRfam9iYmVyX3BheW1lbnRzIHJlYWRfdXNlcnMgd3JpdGVfdXNlcnMgd3JpdGVfdGF4X3JhdGVzIHJlYWRfZXhwZW5zZXMgd3JpdGVfZXhwZW5zZXMgcmVhZF9jdXN0b21fZmllbGRfY29uZmlndXJhdGlvbnMgd3JpdGVfY3VzdG9tX2ZpZWxkX2NvbmZpZ3VyYXRpb25zIHJlYWRfdGltZV9zaGVldHMgcmVhZF9lcXVpcG1lbnQgd3JpdGVfZXF1aXBtZW50IHJlYWRfbWFya2V0aW5nIHdyaXRlX21hcmtldGluZyIsImFwcF9pZCI6IjI3OTY2MTM1LWUzM2UtNGMyZS04ZGMzLWFkN2JhMDZkYWJiOCIsInVzZXJfaWQiOjE1ODAxNzYsImFjY291bnRfaWQiOjcxODU3NiwiYXVkIjpbImh0dHBzOi8vZ2V0am9iYmVyLmNvbS9ncmFwaHFsIl0sImV4cCI6MTc5MzE2OTIyNH0.r_bKyVqQXgUYoBe85ifTPnl3ycYk8IuinVazS0hyKOc",
     "refreshToken": "a7762acc0e526b8a5dbc7b3215de2123",
-    "lastSyncedAt": "2026-10-24T21:25:42.845Z"
+    "lastSyncedAt": "2026-10-28T06:09:59.837Z"
   },
   "chatMessages": [
     {
@@ -15638,16 +15648,18 @@
         "facebook-lead",
         "833 Tidyups",
         "quote-qt-4425",
-        "quote-qt-4426"
+        "quote-qt-4426",
+        "quote-qt-7537",
+        "quote-qt-7538"
       ],
-      "isJobberLinked": false,
-      "jobberId": "cli-fb-28926607507026653",
+      "isJobberLinked": true,
+      "jobberId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=",
       "totalJobs": 1,
       "latestServiceDate": "2026-01-24",
       "notes": "[833 Tidyups] Move-Out / Turnover Vacate Cleaning (1 Bedroom, 1 Bathroom) — Requested Date/Time: January 24 | Postal Code: T6J 4M5",
       "source": "Facebook",
       "createdAt": "2026-10-05T16:13:39+0000",
-      "updatedAt": "2026-10-28T05:12:15.531Z"
+      "updatedAt": "2026-10-28T06:10:02.362Z"
     },
     {
       "id": "cli-fb-37396543333293435",
@@ -21768,7 +21780,33 @@
       "+17806000607"
     ]
   },
-  "adLeads": [],
+  "adLeads": [
+    {
+      "id": "lead-clean-mvrpt6l6-volu",
+      "customerName": "Sheralee Cave",
+      "phone": "(780) 364-0177",
+      "email": "sheraleew@live.com",
+      "address": "371 Saddleback Rd Nw, Edmonton, AB T6J 4M5",
+      "city": "Edmonton",
+      "postalCode": "T6J 4M5",
+      "serviceRequested": "Move-Out / Turnover Vacate Cleaning (1 Bedroom, 1 Bathroom)",
+      "bedrooms": "1 Bedroom",
+      "bathrooms": "1 Bathroom",
+      "dateOfServiceRequested": "2026-01-24",
+      "source": "Facebook Lead",
+      "sourceTab": "Facebook Leads 1",
+      "campaignName": "Clean Sheet — Facebook Leads 1",
+      "dateReceived": "2026-10-28T06:10:01.242Z",
+      "status": "Quoted",
+      "verdict": "Good lead",
+      "isJobberSynced": true,
+      "jobberClientId": "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=",
+      "quoteId": "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjg0",
+      "quoteNumber": "QT-7538",
+      "quotedAmount": 427.5,
+      "notes": "[DRAFT FOR OWNER REVIEW] FB Page: 833 Tidyups | Scope: Move-Out / Turnover Vacate Cleaning (1 Bedroom, 1 Bathroom) on 2026-01-24 | Special Notes: Requested Date/Time: January 24 | Postal Code: T6J 4M5 | Messenger Transcript: Customer: Hello! I filled out your form and would like to know more about your business.\nFirst name: Sheralee\nLast name: Cave\nPhone number: (780) 364-0177\nEmail: sheraleew@live.com\nStreet address: 371 Saddleback Rd Nw\nCity: Edmonton\nState: AB\nCountry: CA\nPost code: T6J 4M5\n�Please Let Me Know Which Service Your Interested In�: Move Out Cleaning\nHow Many Bedrooms Do you have..?: 1\nHow ManyBathrooms do you have.?: 1\nBest Date For Service: January 24"
+    }
+  ],
   "serviceCatalog": [
     {
       "id": "cat-mo-1b1b",
@@ -22907,7 +22945,7 @@
       "sortOrder": 460
     }
   ],
-  "cleanSheetExplicitlyBlank": true,
+  "cleanSheetExplicitlyBlank": false,
   "cleanSheetConfig": {
     "spreadsheetId": "tidyups-new-7tab-clean-sheet-2026",
     "sheetUrl": "https://app.tidyupscleaning.com/clean-sheet",
@@ -23527,9 +23565,9 @@
       "reason": "Short Hangup / Unanswered Out-of-Area Call (0s)"
     }
   ],
-  "zipPrCounter": 18,
-  "lastZipFilename": "app.tidyups.cleaning-PR18-2026-10-25-Morning-11-02AM.zip",
-  "lastZipCreatedAt": "2026-10-25T17:02:28.199Z",
+  "zipPrCounter": 20,
+  "lastZipFilename": "app.tidyups.cleaning-PR20-2026-10-28-Morning-12-37AM.zip",
+  "lastZipCreatedAt": "2026-10-28T06:37:26.215Z",
   "explicitReplaceSpamShield": true,
   "githubConfig": {
     "owner": "Ai-Builder6",

@@ -70,6 +70,7 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
 
   // Upload & Drive files state
   const [isUploadingDrive, setIsUploadingDrive] = useState<boolean>(false);
+  const [uploadingFilename, setUploadingFilename] = useState<string | null>(null);
   const [isDownloadingLocal, setIsDownloadingLocal] = useState<boolean>(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState<boolean>(false);
   const [driveFiles, setDriveFiles] = useState<DriveBackupFileItem[]>([]);
@@ -78,6 +79,8 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
     message: string;
     link?: string;
     folderLink?: string;
+    downloadUrl?: string;
+    downloadFilename?: string;
   } | null>(null);
 
   // Mandatory Explicit User Confirmation Dialog State for Destructive/Mutating Drive Operations
@@ -201,6 +204,11 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
           message: `Signed in as ${result.user.email || result.user.displayName}. Folder "${TIDYUPS_DRIVE_FOLDER_NAME}" is ready in Google Drive!`,
         });
         fetchDriveBackupFiles(result.accessToken);
+      } else {
+        setStatusBanner({
+          type: 'error',
+          message: 'Google Sign-In window was closed or blocked. Please allow popups and click Sign in with Google.',
+        });
       }
     } catch (err: any) {
       setStatusBanner({
@@ -223,14 +231,19 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
 
   const activePrLabel = selectedPrOverride || nextPrLabel;
 
-  // 1-Click: Create numbered PR# Whole Project & Workflows ZIP and upload directly into
+  // 1-Click: Build numbered PR# Whole Project & Workflows ZIP (or take an existing server ZIP) and upload directly into
   // the "TidyUps Cleaning App Backup Zips" folder in Google Drive
-  const handleOneClickUploadToDriveFolder = async (forceRebuild = true) => {
+  const handleOneClickUploadToDriveFolder = async (
+    forceRebuild = true,
+    existingServerFilename?: string
+  ) => {
     setIsUploadingDrive(true);
+    setUploadingFilename(existingServerFilename || null);
     setStatusBanner(null);
     try {
       const result = await uploadWholeProjectZipToDriveFolder({
         requestedPr: selectedPrOverride || undefined,
+        existingServerFilename,
         forceRebuild,
         accessToken: token,
         aiWorkflowContent,
@@ -245,11 +258,14 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
       setSelectedPrOverride('');
       refreshMetadata();
 
+      const savedFilename = result.file?.name || existingServerFilename || nextSuggestedZipFilename;
       setStatusBanner({
         type: 'success',
-        message: `✓ Saved numbered backup "${result.file.name}" (${result.prLabel || activePrLabel}) directly into folder "${result.folder.name}" in Google Drive!`,
+        message: `✓ Built & Loaded "${savedFilename}" (${result.prLabel || activePrLabel}) directly into folder "${result.folder.name}" in your Google Drive!`,
         link: result.file.webViewLink || result.folder.webViewLink,
         folderLink: result.folder.webViewLink,
+        downloadUrl: `/api/project/download-saved-zip?filename=${encodeURIComponent(savedFilename)}`,
+        downloadFilename: savedFilename,
       });
 
       if (currentToken) {
@@ -261,45 +277,92 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
       }
       setStatusBanner({
         type: 'error',
-        message: err?.message || 'Failed to upload Whole Project ZIP to Google Drive folder.',
+        message:
+          err?.message ||
+          'Failed to upload Whole Project ZIP to Google Drive folder. Please click Sign in with Google first.',
       });
     } finally {
       setIsUploadingDrive(false);
+      setUploadingFilename(null);
     }
   };
 
-  // 1-Click Save & Download a numbered PR# ZIP copy directly to computer + Server + GitHub (Zero OAuth popups!)
+  // 1-Click Build, Save & Download a numbered PR# ZIP copy directly to computer + Server + GitHub
   const handleDownloadNumberedZip = async () => {
     setIsDownloadingLocal(true);
     setStatusBanner(null);
     try {
-      const prQuery = selectedPrOverride ? `&pr=${encodeURIComponent(selectedPrOverride)}` : '';
-      const res = await fetch(`/api/project/export-zip?force=true&increment=true&autoGithubBackup=true${prQuery}`);
-      if (!res.ok) throw new Error('Failed to build numbered ZIP archive.');
-      const filename =
-        res.headers.get('X-Zip-Filename') ||
+      const buildRes = await fetch('/api/project/build-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestedPr: selectedPrOverride || undefined,
+          forceRebuild: true,
+          incrementPr: true,
+          autoGithubBackup: true,
+        }),
+      });
+      const built = await buildRes.json().catch(() => ({}));
+      if (!buildRes.ok || !built?.success) {
+        throw new Error(built?.error || 'Failed to build numbered ZIP archive on server.');
+      }
+
+      const filename: string =
+        built.filename ||
         `app.tidyups.cleaning-${activePrLabel}-${new Date().toISOString().slice(0, 10)}.zip`;
-      const prLabel = res.headers.get('X-Zip-PR-Label') || activePrLabel;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const prLabel: string = built.prLabel || activePrLabel;
+      const downloadUrl: string =
+        built.downloadUrl || `/api/project/download-saved-zip?filename=${encodeURIComponent(filename)}`;
+
+      // Trigger native attachment download
       const a = document.createElement('a');
-      a.href = url;
+      a.href = downloadUrl;
       a.download = filename;
+      a.rel = 'noopener';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 8000);
+
+      // If already signed in to Google Drive, also upload this built ZIP into "TidyUps Cleaning App Backup Zips" automatically!
+      let driveUploadedFolderLink: string | undefined;
+      const activeToken = token || (await getAccessToken());
+      if (activeToken) {
+        try {
+          const driveRes = await fetch('/api/project/upload-zip-to-drive', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${activeToken}`,
+            },
+            body: JSON.stringify({
+              accessToken: activeToken,
+              filename,
+            }),
+          });
+          if (driveRes.ok) {
+            const driveData = await driveRes.json();
+            driveUploadedFolderLink = driveData?.folder?.webViewLink;
+            if (driveData?.folder) setDriveFolder(driveData.folder);
+            fetchDriveBackupFiles(activeToken);
+          }
+        } catch {}
+      }
 
       setSelectedPrOverride('');
       refreshMetadata();
       setStatusBanner({
         type: 'success',
-        message: `✓ Saved & Downloaded numbered archive "${filename}" (${prLabel}) + Backed up to Server & GitHub! Next save will automatically increment to the next PR number.`,
+        message: driveUploadedFolderLink
+          ? `✓ Built "${filename}" (${prLabel}), downloaded to your device, AND loaded into "${TIDYUPS_DRIVE_FOLDER_NAME}" in Google Drive!`
+          : `✓ Built numbered archive "${filename}" (${prLabel} • ${Math.round((built.sizeBytes || 0) / 1024)} KB)! Click "Download ZIP File" on the right if your browser blocked the automatic download, or click "Upload to Google Drive".`,
+        folderLink: driveUploadedFolderLink || driveFolder?.webViewLink,
+        downloadUrl,
+        downloadFilename: filename,
       });
     } catch (err: any) {
       setStatusBanner({
         type: 'error',
-        message: err?.message || 'Failed to download numbered project ZIP.',
+        message: err?.message || 'Failed to build numbered project ZIP.',
       });
     } finally {
       setIsDownloadingLocal(false);
@@ -426,13 +489,23 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                 <CheckCircle2 className="w-5 h-5 shrink-0" />
                 <span>{statusBanner.message}</span>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                {statusBanner.downloadUrl && (
+                  <a
+                    href={statusBanner.downloadUrl}
+                    download={statusBanner.downloadFilename || true}
+                    className="px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-black flex items-center gap-1.5 shrink-0 shadow-md"
+                  >
+                    <FileArchive className="w-3.5 h-3.5" />
+                    <span>⬇️ Download ZIP File</span>
+                  </a>
+                )}
                 {statusBanner.folderLink && (
                   <a
                     href={statusBanner.folderLink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shrink-0"
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shrink-0 shadow-md"
                   >
                     <FolderOpen className="w-3.5 h-3.5" />
                     <span>Open Drive Folder</span>
@@ -567,30 +640,30 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                     <button
                       type="button"
                       disabled={isUploadingDrive || isDownloadingLocal || isLoggingIn}
-                      onClick={handleDownloadNumberedZip}
+                      onClick={() => handleOneClickUploadToDriveFolder(true)}
                       className="flex-1 py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-xl cursor-pointer disabled:opacity-50 transition-all active:scale-99"
-                      title={`Build, save & download ${activePrLabel} ZIP directly from app.tidyupscleaning.com (Computer + Server + GitHub — Zero Popups)`}
+                      title={`Build fresh ${activePrLabel} ZIP on server and load it directly into your "${TIDYUPS_DRIVE_FOLDER_NAME}" Google Drive folder`}
                     >
-                      <FileArchive className="w-5 h-5 shrink-0" />
+                      <CloudUpload className="w-5 h-5 shrink-0" />
                       <span>
-                        {isDownloadingLocal
-                          ? `Building & Downloading ${activePrLabel} Backup ZIP...`
-                          : `1-Click Save & Download ${activePrLabel} Backup ZIP (Computer + Server + GitHub)`}
+                        {isUploadingDrive && !uploadingFilename
+                          ? `Building & Loading ${activePrLabel} ZIP to Google Drive...`
+                          : `☁️ 1-Click Build & Load ${activePrLabel} ZIP to Google Drive`}
                       </span>
                     </button>
 
                     <button
                       type="button"
                       disabled={isUploadingDrive || isDownloadingLocal || isLoggingIn}
-                      onClick={() => handleOneClickUploadToDriveFolder(true)}
-                      className="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 font-black text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
-                      title={`Also upload ${activePrLabel} ZIP into your "${TIDYUPS_DRIVE_FOLDER_NAME}" Google Drive folder`}
+                      onClick={handleDownloadNumberedZip}
+                      className="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/40 font-black text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
+                      title={`Build & download ${activePrLabel} ZIP directly to your computer (and also upload to Drive if connected)`}
                     >
-                      <CloudUpload className="w-4 h-4 text-emerald-400" />
+                      <FileArchive className="w-4 h-4 text-cyan-400" />
                       <span>
-                        {isUploadingDrive
-                          ? `Uploading ${activePrLabel} to Drive...`
-                          : `Upload ${activePrLabel} to Google Drive`}
+                        {isDownloadingLocal
+                          ? `Building ${activePrLabel} ZIP...`
+                          : `⬇️ Build & Download ${activePrLabel} ZIP`}
                       </span>
                     </button>
                   </div>
@@ -599,8 +672,8 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                   {needsAuth || !token ? (
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
                       <span className="text-xs text-slate-400">
-                        Clicking the 1-Click button above will automatically connect Google Drive and upload to{' '}
-                        <strong className="text-slate-200">{TIDYUPS_DRIVE_FOLDER_NAME}</strong>, or sign in below:
+                        Click <strong>1-Click Build &amp; Load to Google Drive</strong> above (or sign in here) to connect folder{' '}
+                        <strong className="text-slate-200">{TIDYUPS_DRIVE_FOLDER_NAME}</strong>:
                       </span>
                       <button
                         type="button"
@@ -666,11 +739,10 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                     </summary>
                     <div className="mt-2 p-3 rounded-2xl bg-slate-950/90 border border-amber-500/30 space-y-2">
                       <p className="text-[11px] text-slate-300 leading-relaxed">
-                        Google Sign-In now automatically uses Firebase Auth popup routing on preview URLs. To also authorize direct Google Identity Services on every domain for <code className="text-amber-300">cleaningserviceyeg@gmail.com</code>, add these <strong>Authorized JavaScript origins</strong> in Google Cloud Console &rarr; APIs &amp; Services &rarr; Credentials (Client ID <code className="text-emerald-300">230358145142-cs2b932r0uoc0fvm8kner4ipkr6qvng9</code>):
+                        Google Sign-In automatically routes through your authorized Cloud Run bridge (<code className="text-emerald-300">cleaning-service-dispatch-board-230358145142.us-east1.run.app</code>). To also authorize direct Google Identity Services on every domain for <code className="text-amber-300">cleaningserviceyeg@gmail.com</code>, add these <strong>Authorized JavaScript origins</strong> in Google Cloud Console &rarr; APIs &amp; Services &rarr; Credentials (Client ID <code className="text-emerald-300">230358145142-cs2b932r0uoc0fvm8kner4ipkr6qvng9</code>):
                       </p>
                       <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 font-mono text-[11px] text-emerald-300 space-y-0.5 select-all">
                         <div>https://app.tidyupscleaning.com</div>
-                        <div>https://book.tidyupscleaning.com</div>
                         <div>https://cleaning-service-dispatch-board-230358145142.us-east1.run.app</div>
                         <div>https://ais-dev-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app</div>
                         <div>https://ais-pre-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app</div>
@@ -680,7 +752,7 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                 </div>
               </div>
 
-              {/* Saved Numbered PR6+ Backups on Server (Works 100% Without Google Sign-In) */}
+              {/* Saved Numbered PR6+ Backups on Server (Download or Load to Google Drive in 1 Click) */}
               {savedLocalBackups.length > 0 && (
                 <div className="bg-[#171b29] border border-emerald-500/30 rounded-3xl p-5 space-y-3">
                   <div className="flex items-center justify-between gap-2">
@@ -688,10 +760,10 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                       <FileArchive className="w-5 h-5 text-emerald-400 shrink-0" />
                       <div>
                         <h4 className="text-sm font-black text-white">
-                          Saved Numbered Backups on Server (<span className="text-emerald-300 font-mono">PR6+</span>)
+                          Built &amp; Saved Numbered ZIP Backups (<span className="text-emerald-300 font-mono">PR6+</span>)
                         </h4>
                         <p className="text-[11px] text-slate-400">
-                          Click any saved archive below to download it immediately to your computer or phone (no Google login needed).
+                          Click <strong>Load to Google Drive</strong> to send any built archive straight to your Drive folder, or click <strong>Download ZIP</strong> to save to your device.
                         </p>
                       </div>
                     </div>
@@ -708,7 +780,7 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                     {savedLocalBackups.map((b) => (
                       <div
                         key={b.filename}
-                        className="p-3 rounded-2xl bg-[#10131d] border border-slate-800 flex items-center justify-between gap-3 text-xs"
+                        className="p-3 rounded-2xl bg-[#10131d] border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                       >
                         <div className="min-w-0">
                           <div className="font-bold text-white truncate flex items-center gap-2">
@@ -721,14 +793,30 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                             {new Date(b.createdAt).toLocaleString()} • {(b.sizeBytes / 1024).toFixed(0)} KB
                           </div>
                         </div>
-                        <a
-                          href={`/api/project/download-saved-zip?filename=${encodeURIComponent(b.filename)}`}
-                          download={b.filename}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1.5 shrink-0"
-                        >
-                          <FileArchive className="w-3.5 h-3.5" />
-                          <span>Download ZIP</span>
-                        </a>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={isUploadingDrive}
+                            onClick={() => handleOneClickUploadToDriveFolder(false, b.filename)}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                            title={`Load ${b.filename} directly into "${TIDYUPS_DRIVE_FOLDER_NAME}" in your Google Drive`}
+                          >
+                            <CloudUpload className="w-3.5 h-3.5" />
+                            <span>
+                              {isUploadingDrive && uploadingFilename === b.filename
+                                ? 'Loading to Drive...'
+                                : 'Load to Google Drive'}
+                            </span>
+                          </button>
+                          <a
+                            href={`/api/project/download-saved-zip?filename=${encodeURIComponent(b.filename)}`}
+                            download={b.filename}
+                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/40 font-black flex items-center gap-1.5 shrink-0"
+                          >
+                            <FileArchive className="w-3.5 h-3.5" />
+                            <span>Download ZIP</span>
+                          </a>
+                        </div>
                       </div>
                     ))}
                   </div>

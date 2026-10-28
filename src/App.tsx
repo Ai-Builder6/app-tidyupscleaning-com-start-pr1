@@ -3992,6 +3992,16 @@ export function App() {
                 >
                   /privacy
                 </button>
+                <span>•</span>
+                <button
+                  onClick={() => {
+                    setActiveTopView('CUSTOMER_PORTAL');
+                  }}
+                  className="text-emerald-300 hover:text-emerald-200 font-bold cursor-pointer"
+                  title="Open Customer Booking Page (https://app.tidyupscleaning.com/booking)"
+                >
+                  /booking
+                </button>
               </div>
 
               {/* Rearrange Header & Footer Buttons Control */}
@@ -4231,21 +4241,15 @@ export function App() {
                   btnNode = (
                     <button
                       type="button"
-                      onClick={async () => {
-                        try {
-                          setSyncAllStatusMessage('📦 Preparing numbered Backup ZIP download...');
-                          const res = await saveAndDownloadNumberedProjectBackupZip();
-                          setSyncAllStatusMessage(`✅ Downloaded ${res.fileName} to your device!`);
-                          setTimeout(() => setSyncAllStatusMessage(null), 5000);
-                        } catch {
-                          setIsProjectBackupModalOpen(true);
-                        }
+                      onClick={() => {
+                        setProjectBackupInitialTab('BACKUP_DRIVE');
+                        setIsProjectBackupModalOpen(true);
                       }}
                       className="px-2 py-0.5 rounded-md bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-[10px] flex items-center gap-1 border border-cyan-300/50 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
-                      title="1-Click Download Numbered Project Backup ZIP directly from app.tidyupscleaning.com (No Google popup needed)"
+                      title="Open Project Backup ZIP & Google Drive Loader (Build PR# ZIP, Load to Google Drive, or Download)"
                     >
                       <FileArchive className="w-3 h-3 text-white shrink-0" />
-                      <span>Backup ZIP</span>
+                      <span>Backup ZIP &amp; Drive</span>
                     </button>
                   );
                 } else if (btnKey === 'BLOCK_SPAM') {
