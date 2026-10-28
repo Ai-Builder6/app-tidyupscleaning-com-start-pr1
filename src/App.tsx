@@ -90,7 +90,7 @@ import { MobileBottomNav } from './components/MobileBottomNav';
 import { BookMyCleaningLogo } from './components/BookMyCleaningLogo';
 import { AddressSearchRadarView } from './components/AddressSearchRadarView';
 import { QuickMapScheduleRadarView } from './components/QuickMapScheduleRadarView';
-import { JobberQuote, JobberInvoice } from './services/jobberSyncModules';
+import { JobberQuote, JobberInvoice, isFakeOrPurgedJobberQuote } from './services/jobberSyncModules';
 import {
   AppUser,
   APP_USERS,
@@ -176,6 +176,14 @@ export function isFakeSimulationItem(item: any): boolean {
     name.includes('chloe bennett') ||
     name.includes('liam & chloe') ||
     name.includes('al-mansoor') ||
+    name.includes('sheralee') ||
+    name.includes('donna noel') ||
+    name.includes('blaze (phone lead)') ||
+    name.includes('aniket deb (sonia ai') ||
+    name.includes('new call [') ||
+    name.includes('rahum') ||
+    name.includes('sync test') ||
+    name.includes('john doe') ||
     name.includes('simulation') ||
     name.includes('fake')
   ) {
@@ -269,7 +277,7 @@ function dedupeQuotesList(rawQuotes: any[]): JobberQuote[] {
   const uniqueByKey: JobberQuote[] = [];
 
   for (const q of rawQuotes) {
-    if (!q || isFakeSimulationItem(q)) continue;
+    if (!q || isFakeSimulationItem(q) || isFakeOrPurgedJobberQuote(q)) continue;
     const id = String(q.id || '').trim();
     const num = String(q.quoteNumber || '').trim();
     if (!id && !num) continue;
@@ -603,7 +611,11 @@ export function App() {
     return CANONICAL_JOBBER_STAFF;
   });
   const [clientsList, setClientsList] = useState<ClientRecord[]>(() => {
-    const base = (storedData?.clients && storedData.clients.length > 0) ? storedData.clients : INITIAL_CLIENTS;
+    const rawBase = (storedData?.clients && storedData.clients.length > 0) ? storedData.clients : INITIAL_CLIENTS;
+    const base = rawBase.filter((c: ClientRecord) => {
+      const n = String(c?.name || '').toLowerCase();
+      return !n.includes('sheralee') && !n.includes('donna noel') && !isFakeSimulationItem(c);
+    });
     const hasDevon = base.some((c: ClientRecord) => c.name?.toLowerCase().includes('devon clark') || (c.phone || '').includes('802-4918'));
     return hasDevon ? base : [INITIAL_CLIENTS[0], ...base];
   });

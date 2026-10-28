@@ -334,6 +334,14 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
 
   // Block known fake/sample names, test webhook rows, and non-cleaning solicitors
   const fakeNames = [
+    'sheralee cave',
+    'sheralee',
+    'donna noel',
+    'blaze (phone lead)',
+    'aniket deb (sonia ai',
+    'new call [',
+    'sync test',
+    'john doe',
     'rahum',
     'raheem',
     'sarah jenkins',
@@ -372,8 +380,14 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
   if (
     email.includes('@example.com') ||
     email === 'test@meta.com' ||
+    email === 'sheraleew@live.com' ||
+    email === 'dnoelcha@yahoo.ca' ||
     email.includes('<test lead') ||
     email === 'leadtest@tidyupscleaning.com' ||
+    phone.includes('364-0177') ||
+    phone.includes('3640177') ||
+    phone.includes('597-4229') ||
+    phone.includes('5974229') ||
     phone.includes('555-0148') ||
     phone.includes('555-0194') ||
     phone.includes('555-0271') ||
@@ -391,6 +405,8 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
     notes.includes('business funding') ||
     notes.includes('north advance') ||
     notes.includes('squarespace advisor') ||
+    notes.includes('[draft for owner review]') ||
+    notes.includes('january 24') ||
     (campaign.includes('direct webhook') && name.includes('test'))
   ) {
     return true;
@@ -490,6 +506,11 @@ export function isFalseOrCatalogLeadRow(rawName?: string): boolean {
     n.startsWith('[') ||
     n.startsWith('http://') ||
     n.startsWith('https://') ||
+    n.startsWith('new call [') ||
+    n.includes('sheralee cave') ||
+    n.includes('donna noel') ||
+    n.includes('blaze (phone lead)') ||
+    n.includes('aniket deb (sonia ai') ||
     /^\d+\s*lead\(s\)/i.test(n) ||
     /^\d+bed\s+\d+(\.\d+)?bath/i.test(n) ||
     n.includes('discount $') ||
@@ -501,6 +522,14 @@ export function isFalseOrCatalogLeadRow(rawName?: string): boolean {
     return true;
   }
   const banned = [
+    'sheralee cave',
+    'sheralee',
+    'donna noel',
+    'rahum',
+    'rahum (raheem)',
+    'raheem',
+    'sync test',
+    'john doe',
     'client name',
     'customer name',
     'full_name',

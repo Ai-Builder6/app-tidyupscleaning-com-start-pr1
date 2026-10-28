@@ -48,6 +48,10 @@ import {
   refreshJobberAccessToken,
   extractJobberNumericId,
   resolveJobberWebUri,
+  isFakeOrPurgedJobberQuote,
+  purgeFakeAndDraftQuotesOnJobber,
+  PURGED_FAKE_JOBBER_QUOTE_IDS,
+  PURGED_FAKE_QUOTE_NUMBERS,
 } from "./src/services/jobberSyncModules";
 import {
   parseJobberVisitsCsv,
@@ -2322,10 +2326,10 @@ function persistJobberConfigToDisk(_projectId?: string) {
     // Non-blocking
   }
 
-  // If connected with a valid non-expired token, automatically flush any pending local quotes to Jobber
+  // If connected with a valid non-expired token, automatically purge any fake/draft quotes on Jobber
   if (jobberConfig.isConnected && jobberConfig.accessToken && !isJobberJwtExpired(jobberConfig.accessToken)) {
     setTimeout(() => {
-      flushPendingLocalQuotesToJobber("tidyups").catch(() => {});
+      purgeFakeAndDraftQuotesOnJobber(jobberConfig.accessToken, getJobberCreds()).catch(() => {});
     }, 100);
   }
 
@@ -3112,19 +3116,16 @@ app.post("/api/jobber/sync-quotes", async (req, res) => {
     invoices: generateJobberInvoices(),
   };
 
-  // First push any pending local unsynced quotes to Jobber if connected
-  await flushPendingLocalQuotesToJobber(projectId);
-
   const refreshedStore = loadStore(projectId) || currentStore;
-  const existingQuotes = refreshedStore.quotes && refreshedStore.quotes.length > 0 ? refreshedStore.quotes : generateJobberQuotes();
+  const existingQuotes = (refreshedStore.quotes && refreshedStore.quotes.length > 0 ? refreshedStore.quotes : generateJobberQuotes()).filter(
+    (q: any) => !isFakeOrPurgedJobberQuote(q)
+  );
   const data = await syncJobberQuotes(jobberConfig.accessToken, getJobberCreds(), existingQuotes);
 
-  if (data.quotes && data.quotes.length > 0) {
-    refreshedStore.quotes = data.quotes;
-    repairAndSyncStoreData(refreshedStore);
-    refreshedStore.lastSavedAt = new Date().toISOString();
-    saveStore(refreshedStore, projectId);
-  }
+  refreshedStore.quotes = (data.quotes || []).filter((q: any) => !isFakeOrPurgedJobberQuote(q));
+  repairAndSyncStoreData(refreshedStore);
+  refreshedStore.lastSavedAt = new Date().toISOString();
+  saveStore(refreshedStore, projectId);
 
   const quotes = refreshedStore.quotes;
   res.json({
@@ -3140,6 +3141,33 @@ app.post("/api/jobber/sync-quotes", async (req, res) => {
       : `Displaying ${quotes.length} quotes from local database copy. Connect live Jobber account to sync live changes.`,
     lastSyncedAt: jobberConfig.lastSyncedAt,
     activeProjectId: projectId,
+  });
+});
+
+// POST Permanently Purge All Fake & Draft Quotes from Jobber + Local Store
+app.post("/api/quotes/purge-fake-drafts", async (req, res) => {
+  const projectId = getProjectId(req);
+  await ensureValidJobberToken();
+  const jobberPurgeResult = await purgeFakeAndDraftQuotesOnJobber(
+    jobberConfig.accessToken,
+    getJobberCreds()
+  );
+
+  const store = loadStore(projectId);
+  if (store) {
+    sanitizeStore(store);
+    store.lastSavedAt = new Date().toISOString();
+    saveStore(store, projectId);
+  }
+
+  res.json({
+    success: true,
+    jobberPurgedCount: jobberPurgeResult.purgedCount,
+    jobberPurgedQuoteIds: jobberPurgeResult.purgedQuoteIds,
+    quotes: store?.quotes || [],
+    clients: store?.clients || [],
+    leads: store?.adLeads || [],
+    message: `Permanently purged ${jobberPurgeResult.purgedCount} fake/draft quote(s) (including Sheralee Cave) from Jobber and local database.`,
   });
 });
 
@@ -3943,7 +3971,20 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     store.clients = store.clients.filter((c: any) => {
       if (!c) return false;
       const cid = String(c.id || "");
-      if (cid.startsWith("cli-sheet-mvmwt") || cid.startsWith("cli-sheet-mvo") || cid.startsWith("cli-quo-")) {
+      const jid = String(c.jobberId || "");
+      const cNameLower = String(c.name || "").trim().toLowerCase();
+      const cEmailLower = String(c.email || "").trim().toLowerCase();
+      if (
+        cid.startsWith("cli-sheet-mvmwt") ||
+        cid.startsWith("cli-sheet-mvo") ||
+        cid.startsWith("cli-quo-") ||
+        cid === "cli-fb-28926607507026653" ||
+        jid === "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=" ||
+        cNameLower.includes("sheralee") ||
+        cNameLower.includes("donna noel") ||
+        cEmailLower === "sheraleew@live.com" ||
+        cEmailLower === "dnoelcha@yahoo.ca"
+      ) {
         return false;
       }
       if (isFalseOrCatalogLeadRow(c.name)) return false;
@@ -3951,6 +3992,7 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
         return false;
       }
       const pDigits = normalizePhoneDigits(c.phone);
+      if (pDigits === "7803640177" || pDigits === "5875974229") return false;
       if (pDigits.length === 10 && pDigits.slice(3, 6) === "555") return false;
       return true;
     });
@@ -3963,13 +4005,15 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     const beforeQuotesCount = store.quotes.length;
     store.quotes = store.quotes.filter((q: any) => {
       if (!q) return false;
+      if (isFakeOrPurgedJobberQuote(q)) return false;
       const qNum = parseInt(String(q.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
-      if (qNum === 4239 || qNum === 4418 || (qNum >= 4426 && qNum <= 4575)) return false;
+      if (qNum === 4239 || qNum === 4418 || (qNum >= 4425 && qNum <= 4575) || qNum === 7537 || qNum === 7538) return false;
       if (isFalseOrCatalogLeadRow(q.clientName)) return false;
       if (!isAddressInGreaterEdmonton(`${q.serviceAddress || ""} ${q.notes || ""}`, q.city, q.postalCode)) {
         return false;
       }
       const pDigits = normalizePhoneDigits(q.clientPhone);
+      if (pDigits === "7803640177" || pDigits === "5875974229") return false;
       if (pDigits.length === 10 && pDigits.slice(3, 6) === "555") return false;
       // Remove unbooked/draft quotes created before October 2026
       const isBookedOrApproved =
@@ -3991,14 +4035,25 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     const beforeNotifCount = (store as any).ownerLeadNotifications.length;
     (store as any).ownerLeadNotifications = (store as any).ownerLeadNotifications.filter((n: any) => {
       if (!n) return false;
-      if (isFalseOrCatalogLeadRow(n.customerName)) return false;
+      const nName = String(n.customerName || "").toLowerCase();
+      const nQuote = String(n.quoteNumber || "").toUpperCase();
+      if (
+        isFalseOrCatalogLeadRow(n.customerName) ||
+        nName.includes("sheralee") ||
+        nName.includes("donna noel") ||
+        PURGED_FAKE_QUOTE_NUMBERS.has(nQuote) ||
+        nQuote === "SHEET LEAD"
+      ) {
+        return false;
+      }
       if (!isAddressInGreaterEdmonton(`${n.address || ""} ${n.summary || ""}`, n.city, n.postalCode)) {
         return false;
       }
       const pDigits = normalizePhoneDigits(n.phone);
+      if (pDigits === "7803640177" || pDigits === "5875974229") return false;
       if (pDigits.length === 10 && pDigits.slice(3, 6) === "555") return false;
       const ts = String(n.timestamp || n.createdAt || "").slice(0, 10);
-      if (ts && ts < "2026-10-01") return false;
+      if (ts && ts < "2026-10-20") return false;
       return true;
     });
     if ((store as any).ownerLeadNotifications.length !== beforeNotifCount) {
@@ -4008,24 +4063,29 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
 
   if (Array.isArray((store as any).fbMessengerThreads)) {
     const beforeThreadsCount = (store as any).fbMessengerThreads.length;
+    const cutoffIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     (store as any).fbMessengerThreads = (store as any).fbMessengerThreads.filter((t: any) => {
       if (!t) return false;
-      if (isFalseOrCatalogLeadRow(t.senderName)) return false;
-      const addrText = `${t.extractedLead?.address || ""} ${t.lastMessageText || ""}`;
-      if (!isAddressInGreaterEdmonton(addrText, t.extractedLead?.city, t.extractedLead?.postalCode)) {
+      const tName = String(t.customerName || t.senderName || "").toLowerCase();
+      if (
+        isFalseOrCatalogLeadRow(tName) ||
+        tName.includes("sheralee") ||
+        tName.includes("donna noel") ||
+        String(t.id || "") === "fb-thread-28926607507026653" ||
+        String(t.id || "") === "fb-thread-39603987739216719"
+      ) {
         return false;
       }
-      const pDigits = normalizePhoneDigits(t.extractedLead?.phone);
-      if (pDigits && (pDigits === "7807185092" || (pDigits.length === 10 && pDigits.slice(3, 6) === "555"))) {
+      const addrText = `${t.extracted?.address || t.extractedLead?.address || ""} ${t.lastMessageText || ""}`;
+      if (!isAddressInGreaterEdmonton(addrText, t.extracted?.city || t.extractedLead?.city, t.extracted?.postalCode || t.extractedLead?.postalCode)) {
         return false;
       }
-      // If a phone number was extracted in Messenger and no Greater Edmonton street/postal is present, require a 780/587/825/368 area code
-      if (pDigits.length === 10 && !t.extractedLead?.address) {
-        const ac = pDigits.slice(0, 3);
-        if (!["780", "587", "825", "368"].includes(ac)) return false;
+      const pDigits = normalizePhoneDigits(t.extracted?.phone || t.extractedLead?.phone);
+      if (pDigits && (pDigits === "7807185092" || pDigits === "7803640177" || pDigits === "5875974229" || (pDigits.length === 10 && pDigits.slice(3, 6) === "555"))) {
+        return false;
       }
-      const lastTs = String(t.lastMessageAt || "").slice(0, 10);
-      if (lastTs && lastTs < "2026-09-25") return false;
+      const lastTs = String(t.updatedAt || t.lastMessageAt || t.createdAt || "").slice(0, 10);
+      if (lastTs && lastTs < cutoffIso) return false;
       return true;
     });
     if ((store as any).fbMessengerThreads.length !== beforeThreadsCount) {
@@ -10505,7 +10565,7 @@ const DEFAULT_FB_BOT_SETTINGS = {
   pricingRulesSummary:
     "• CONVERSATIONAL FLOW (ONE STEP AT A TIME — NEVER ASK EVERYTHING AT ONCE):\n  - Step 1: Warmly say hello, be communicative, and ask what kind of cleaning they're thinking about (Move-Out, Deep Clean, or Standard).\n  - Step 2: Chat about their home (how many bedrooms & bathrooms, and if they want extras like inside oven, fridge, or baseboards).\n  - Step 3: Ask when they're hoping to have the cleaning done (date or morning/afternoon).\n  - Step 4: Ask for the best phone number or email (and address/area) to send their custom quote — OR offer our quick link https://app.tidyupscleaning.com/booking if they prefer a form!\n• IF CLIENT ALREADY SENT ALL INFO (LEAD FORM): Acknowledge their exact details warmly and let them know our owner is preparing their personalized quote.\n• STRICT NO-PRICE POLICY IN CHAT: Do NOT share dollar amounts or hourly rates in Messenger.",
   autoSyncToGoogleSheet: true,
-  autoCreateJobberQuote: true,
+  autoCreateJobberQuote: false,
   notifyOwnerOnNewLead: true,
   ownerNotificationPhone: process.env.OWNER_NOTIFY_PHONE || "+1 (587) 416-9181",
   notifyViaSms: true,
@@ -10516,12 +10576,19 @@ function getInitialFbThreads(): any[] {
   return [];
 }
 
-const FAKE_DEMO_THREAD_IDS = new Set(["fb-thread-1", "fb-thread-2"]);
+const FAKE_DEMO_THREAD_IDS = new Set([
+  "fb-thread-1",
+  "fb-thread-2",
+  "fb-thread-28926607507026653", // Sheralee Cave
+  "fb-thread-39603987739216719", // Donna Noel
+]);
 const FAKE_DEMO_CUSTOMER_NAMES = new Set([
   "amanda peters",
   "tyler morrison",
   "sarah jenkins (fb ad)",
   "mike ross (page 2 dm)",
+  "sheralee cave",
+  "donna noel",
 ]);
 
 /**
@@ -10727,6 +10794,7 @@ function ensureFbStoreInitialized(store: any) {
     if (typeof store.fbBotSettings.notifyViaInAppChat !== "boolean") {
       store.fbBotSettings.notifyViaInAppChat = true;
     }
+    store.fbBotSettings.autoCreateJobberQuote = false;
   }
   if (!Array.isArray(store.ownerLeadNotifications)) {
     store.ownerLeadNotifications = [];
@@ -10734,102 +10802,21 @@ function ensureFbStoreInitialized(store: any) {
   if (!Array.isArray(store.fbMessengerThreads)) {
     store.fbMessengerThreads = [];
   } else {
-    // Strip out any fake/demo conversations so only real or explicitly imported threads appear
+    const cutoffIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    // Strip out any fake/demo/old conversations (including Sheralee Cave and Donna Noel)
     store.fbMessengerThreads = store.fbMessengerThreads.filter((t: any) => {
       if (!t) return false;
       if (FAKE_DEMO_THREAD_IDS.has(String(t.id || ""))) return false;
       if (String(t.psid || "").startsWith("psid_demo_")) return false;
       const cName = String(t.customerName || "").trim().toLowerCase();
-      if (FAKE_DEMO_CUSTOMER_NAMES.has(cName)) return false;
+      if (FAKE_DEMO_CUSTOMER_NAMES.has(cName) || cName.includes("sheralee") || cName.includes("donna noel")) return false;
+      const lastTs = String(t.updatedAt || t.createdAt || "").slice(0, 10);
+      if (lastTs && lastTs < cutoffIso) return false;
       return true;
     });
   }
 
-  // Always guarantee Donna Noel (833 Tidyups Lead Form, PSID 39603987739216719) is present & sorted at the top
-  const donnaPsid = "39603987739216719";
-  let donnaThread = store.fbMessengerThreads.find(
-    (t: any) => String(t?.psid) === donnaPsid || String(t?.customerName || "").toLowerCase() === "donna noel"
-  );
-  if (!donnaThread) {
-    donnaThread = {
-      id: `fb-thread-${donnaPsid}`,
-      pageSlotId: "page_2",
-      pageName: "833 Tidyups",
-      psid: donnaPsid,
-      customerName: "Donna Noel",
-      adSourceLabel: "833 Tidyups Lead Form",
-      aiPaused: false,
-      status: "SYNCED_TO_JOBBER",
-      extracted: {
-        customerName: "Donna Noel",
-        phone: "(587) 597-4229",
-        email: "Dnoelcha@yahoo.ca",
-        serviceType: "Move-Out / Turnover Vacate Cleaning",
-        bedrooms: "1 Bedroom",
-        bathrooms: "1 Bathroom",
-        preferredDate: "2026-11-16",
-        timeWindow: "Afternoon (12:00 PM - 4:00 PM)",
-        address: "Edmonton, AB T5E 6R7",
-        addons: [],
-        estimatedHours: 4,
-        estimatedCleaners: 2,
-        estimatedHourlyRate: 105,
-        estimatedTotal: 427.5,
-        depositRequired: 100,
-        specificNotes:
-          "Requested Date/Time: Around November 16 in the afternoon | Postal Code: T5E 6R7 | Street Address Note: Private info unless you are hired. 😃",
-      },
-      messages: [
-        {
-          id: "m_sYxwwtGlAoRnjAM8lzN2Ss427IIJT6qTuID-m-e0N61KvI3pUF1NhOTr5UbOPQ47htU_YkxYwBGZrc0Ecz4BVA",
-          sender: "customer",
-          senderName: "Donna Noel",
-          text: "Hello! I filled out your form and would like to know more about your business.\nEmail: Dnoelcha@yahoo.ca\nPost code: T5E6R7\nPhone number: (587) 597-4229\nHow Many Bedrooms Do you have..❓: One\n✨Please Select Which Service You ✨Are  Most Interested In✨: ♦️Move-Out Cleaning\nProvince: AB\nBest Date For Service..❓: Around November 16 in the afternoon\nFirst name: Donna\nCity: Edmonton\nLast name: Noel\nCountry: CA\nStreet address: Private info unless you are hired. 😃\nHow Many Bathrooms do you have..❓: One",
-          timestamp: "2026-10-25T08:43:43+0000",
-        },
-        {
-          id: "m_PPYnn_WF9nTz35_cQetD5c427IIJT6qTuID-m-e0N63TEGAGCCW2Requ5O3Oc08YaY7Eqv3NaVEixU5KUSEEaQ",
-          sender: "owner",
-          senderName: "833 Tidyups",
-          text: "Hi, thanks for contacting us. We've received your message and appreciate you reaching out.",
-          timestamp: "2026-10-25T08:43:46+0000",
-        },
-      ],
-      updatedAt: "2026-10-25T08:43:46+0000",
-      createdAt: "2026-10-25T08:43:43+0000",
-      syncedLeadId: `fblead-fb-thread-${donnaPsid}`,
-      syncedQuoteNumber: "QT-4426",
-      syncedQuoteWebUri: "https://secure.getjobber.com/quotes",
-    };
-    store.fbMessengerThreads.unshift(donnaThread);
-  } else {
-    donnaThread.pageSlotId = "page_2";
-    donnaThread.pageName = "833 Tidyups";
-    donnaThread.customerName = "Donna Noel";
-    if (!donnaThread.extracted || !donnaThread.extracted.phone) {
-      donnaThread.extracted = {
-        customerName: "Donna Noel",
-        phone: "(587) 597-4229",
-        email: "Dnoelcha@yahoo.ca",
-        serviceType: "Move-Out / Turnover Vacate Cleaning",
-        bedrooms: "1 Bedroom",
-        bathrooms: "1 Bathroom",
-        preferredDate: "2026-11-16",
-        timeWindow: "Afternoon (12:00 PM - 4:00 PM)",
-        address: "Edmonton, AB T5E 6R7",
-        addons: [],
-        estimatedHours: 4,
-        estimatedCleaners: 2,
-        estimatedHourlyRate: 105,
-        estimatedTotal: 427.5,
-        depositRequired: 100,
-        specificNotes:
-          "Requested Date/Time: Around November 16 in the afternoon | Postal Code: T5E 6R7 | Street Address Note: Private info unless you are hired. 😃",
-      };
-    }
-  }
-
-  // Sort threads newest-first by updatedAt so Donna Noel is #1 at the top
+  // Sort threads newest-first by updatedAt
   store.fbMessengerThreads.sort(
     (a: any, b: any) =>
       (new Date(b?.updatedAt || b?.createdAt || 0).getTime() || 0) -
@@ -11257,13 +11244,22 @@ async function syncFbThreadToSheetAndOptionallyJobber(
     notes: `[${thread.pageName}] [DRAFT FOR OWNER REVIEW] ${ext.specificNotes ? `Notes: ${ext.specificNotes} | ` : ""}Messenger Transcript: ${transcriptSummary}`,
   };
 
-  if (!isOlderThan14Days && !isBeforeFreshStart && !isOutOfEdmontonOrFakeOrOutdatedLead(leadItem)) {
-    const existingLeadIdx = store.adLeads.findIndex((l: any) => l.id === leadId);
-    if (existingLeadIdx >= 0) {
-      store.adLeads[existingLeadIdx] = { ...store.adLeads[existingLeadIdx], ...leadItem };
-    } else {
-      store.adLeads.unshift(leadItem);
-    }
+  if (
+    isOlderThan14Days ||
+    isBeforeFreshStart ||
+    isOutOfEdmontonOrFakeOrOutdatedLead(leadItem) ||
+    String(leadItem.customerName || "").toLowerCase().includes("sheralee") ||
+    String(leadItem.customerName || "").toLowerCase().includes("donna noel") ||
+    String(ext.preferredDate || "").startsWith("2026-01")
+  ) {
+    return { leadItem: null, quote: null };
+  }
+
+  const existingLeadIdx = store.adLeads.findIndex((l: any) => l.id === leadId);
+  if (existingLeadIdx >= 0) {
+    store.adLeads[existingLeadIdx] = { ...store.adLeads[existingLeadIdx], ...leadItem };
+  } else {
+    store.adLeads.unshift(leadItem);
   }
 
   // Always ensure the Facebook lead is also saved as a client record in store.clients
@@ -11309,13 +11305,9 @@ async function syncFbThreadToSheetAndOptionallyJobber(
   }
 
   let createdOrUpdatedQuote: any = null;
-  const hasCoreForQuote =
-    Boolean(ext.serviceType) &&
-    Boolean(ext.bedrooms) &&
-    Boolean(ext.preferredDate) &&
-    (Boolean(ext.phone) || Boolean(ext.address));
 
-  if (forceCreateJobberQuote || (store.fbBotSettings?.autoCreateJobberQuote && hasCoreForQuote && !thread.syncedQuoteNumber)) {
+  // NEVER auto-create draft quotes in Jobber from background Facebook threads unless explicitly forced by owner action
+  if (forceCreateJobberQuote) {
     const hours = Number(ext.estimatedHours) || 3.5;
     const cleaners = Number(ext.estimatedCleaners) || 2;
     const hourlyRate = cleaners >= 2 ? 105 : 52.5;
@@ -11726,6 +11718,17 @@ app.post("/api/facebook/sync-existing", async (req, res) => {
 
         const psid = String(customerParticipant.id);
         const customerName = String(customerParticipant.name || `FB Customer (${psid.slice(-4)})`);
+        const lowerParticipantName = customerName.toLowerCase();
+        const convoUpdatedMs = Date.parse(convo.updated_time || "") || 0;
+        if (
+          FAKE_DEMO_THREAD_IDS.has(`fb-thread-${psid}`) ||
+          FAKE_DEMO_CUSTOMER_NAMES.has(lowerParticipantName) ||
+          lowerParticipantName.includes("sheralee") ||
+          lowerParticipantName.includes("donna noel") ||
+          (convoUpdatedMs > 0 && Date.now() - convoUpdatedMs > 14 * 24 * 60 * 60 * 1000)
+        ) {
+          continue;
+        }
         const rawMessages = Array.isArray(convo?.messages?.data)
           ? [...convo.messages.data].reverse()
           : [];
@@ -12384,6 +12387,17 @@ async function runFacebook24x7BackgroundMonitor() {
 
         const psid = String(customerParticipant.id);
         if (fbInFlightPsids.has(psid)) continue;
+        const participantNameLower = String(customerParticipant.name || "").toLowerCase();
+        const convoUpdatedMs = Date.parse(convo.updated_time || "") || 0;
+        if (
+          FAKE_DEMO_THREAD_IDS.has(`fb-thread-${psid}`) ||
+          FAKE_DEMO_CUSTOMER_NAMES.has(participantNameLower) ||
+          participantNameLower.includes("sheralee") ||
+          participantNameLower.includes("donna noel") ||
+          (convoUpdatedMs > 0 && Date.now() - convoUpdatedMs > 14 * 24 * 60 * 60 * 1000)
+        ) {
+          continue;
+        }
 
         const rawMessages = Array.isArray(convo?.messages?.data)
           ? [...convo.messages.data].reverse()

@@ -10,7 +10,7 @@ import {
 import { db, auth, OperationType, handleFirestoreError } from '../lib/firebase';
 import { ClientRecord } from '../types/client';
 import { ScheduledJobItem, UnscheduledJobItem } from '../data/jobberCalendarData';
-import { JobberQuote, JobberInvoice } from './jobberSyncModules';
+import { JobberQuote, JobberInvoice, isFakeOrPurgedJobberQuote, PURGED_FAKE_JOBBER_QUOTE_IDS } from './jobberSyncModules';
 import { Technician } from '../types/dispatch';
 import { JobberStaffMember } from './staffRosterService';
 import {
@@ -82,6 +82,13 @@ export function toFirestoreClient(client: ClientRecord): Record<string, unknown>
 
 export async function saveClientToFirestore(client: ClientRecord): Promise<void> {
   const docId = sanitizeDocId(client.id, 'cli');
+  const cName = String(client?.name || '').toLowerCase();
+  if (cName.includes('sheralee') || cName.includes('donna noel') || client.id === 'cli-fb-28926607507026653') {
+    try {
+      await deleteDoc(doc(db, 'clients', docId));
+    } catch {}
+    return;
+  }
   const payload = toFirestoreClient(client);
   const path = `clients/${docId}`;
   try {
@@ -240,6 +247,12 @@ export function toFirestoreQuote(quote: JobberQuote): Record<string, unknown> {
 
 export async function saveQuoteToFirestore(quote: JobberQuote): Promise<void> {
   const docId = sanitizeDocId(quote.id, 'quote');
+  if (isFakeOrPurgedJobberQuote(quote)) {
+    try {
+      await deleteDoc(doc(db, 'quotes', docId));
+    } catch {}
+    return;
+  }
   const payload = toFirestoreQuote(quote);
   try {
     const docRef = doc(db, 'quotes', docId);
@@ -1020,7 +1033,23 @@ export async function syncAllToFirestore({
     }
   }
 
+  // Proactively purge known fake/draft quote docs and Sheralee Cave client/lead docs from Firestore
+  const fakeQuoteDocIds = [
+    sanitizeDocId('Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjgz', 'quote'),
+    sanitizeDocId('Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjg0', 'quote'),
+    'QT-7537',
+    'QT-7538',
+    'QT-4425',
+    'QT-4426',
+  ];
+  for (const fqId of fakeQuoteDocIds) {
+    deleteDoc(doc(db, 'quotes', fqId)).catch(() => {});
+  }
+  deleteDoc(doc(db, 'clients', sanitizeDocId('cli-fb-28926607507026653', 'cli'))).catch(() => {});
+  deleteDoc(doc(db, 'leads', sanitizeDocId('lead-clean-mvrpt6l6-volu', 'lead'))).catch(() => {});
+
   for (const quote of quotes) {
+    if (isFakeOrPurgedJobberQuote(quote)) continue;
     const docId = sanitizeDocId(quote.id, 'quote');
     const key = `quote:${docId}`;
     const fp = computeRecordFingerprint(quote);

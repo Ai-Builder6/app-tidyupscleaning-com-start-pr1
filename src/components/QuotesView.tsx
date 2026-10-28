@@ -22,7 +22,7 @@ import {
   ClipboardList,
   Sparkles,
 } from 'lucide-react';
-import { JobberQuote, extractJobberNumericId } from '../services/jobberSyncModules';
+import { JobberQuote, extractJobberNumericId, isFakeOrPurgedJobberQuote } from '../services/jobberSyncModules';
 import { getCustomerIntelligence } from '../services/customerIntelligenceService';
 import { CustomerIntelligenceBadge } from './CustomerIntelligenceBadge';
 import { QuoteDetailModal } from './QuoteDetailModal';
@@ -140,7 +140,7 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
     const seenIds = new Set<string>();
     const seenNums = new Set<string>();
     const deduped = quotes.filter((q) => {
-      if (!q) return false;
+      if (!q || isFakeOrPurgedJobberQuote(q)) return false;
       const id = String(q.id || '').trim();
       const num = String(q.quoteNumber || '').trim();
       if ((id && seenIds.has(id)) || (num && seenNums.has(num))) return false;

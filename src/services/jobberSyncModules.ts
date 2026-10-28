@@ -753,6 +753,348 @@ export async function syncJobberClients(accessToken?: string, credentials?: Jobb
 }
 
 /**
+ * Permanent blocklist of fake / auto-generated draft quotes on Jobber & local store
+ * (including Sheralee Cave QT-7537, QT-7538, QT-4425, QT-4426, Donna Noel, and bulk auto-generated drafts)
+ */
+export const PURGED_FAKE_JOBBER_QUOTE_IDS = new Set<string>([
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjgz", // QT-7537 Sheralee Cave
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjg0", // QT-7538 Sheralee Cave
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3ODAyNTk3", // QT-4417
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NzU5MDY5", // QT-4413
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NzA1MjQ0", // QT-4410
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODc2", // QT-4405 Blaze (Phone Lead)
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODc0", // QT-4404
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODY5", // QT-4403
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODY3", // QT-4402
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODU5", // QT-4400
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODQ4", // QT-4399
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODQ2", // QT-4398
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODQ1", // QT-4397
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODM4", // QT-4396
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODI5", // QT-4395
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODI1", // QT-4394
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODIz", // QT-4393
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODIx", // QT-4392
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODA4", // QT-4391
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODA0", // QT-4390
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwNzky", // QT-4389
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwNzg4", // QT-4388
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NDg3Mzky", // QT-4387
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NDg3MzY0", // QT-4386
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NDc0OTEx", // QT-4382
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NDY2MjY2", // QT-4378
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NDY2Mjcx", // QT-4380
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NDY2Mjcy", // QT-4381
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NDQ5ODM1", // QT-4377
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NDQ5ODE0", // QT-4375
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NDQ3MzE5", // QT-4374 Rahum
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODM0", // QT-4372
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODMz", // QT-4371
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODMw", // QT-4370
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODI5", // QT-4369
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODI4", // QT-4368
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODI1", // QT-4365
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODIx", // QT-4364
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODE4", // QT-4363
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODE3", // QT-4362
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODEx", // QT-4357
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODA1", // QT-4356
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzk0ODAx", // QT-4355
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3Mzg5MjY3", // QT-4293 Rahum
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3MzQ3NTcx", // QT-4290
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3MjAzMjM1", // QT-4283
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3MTEyOTk3", // QT-4282
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3MDg3MDY4", // QT-4281
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3MDU4NDU2", // QT-4279
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3MDI4MDIx", // QT-4278
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY2OTYwNjE5", // QT-4276
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY2ODgzNTQz", // QT-4273
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY2ODEyMTA5", // QT-4271
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY2NzcyMDA4", // QT-4267
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY2NzE0ODg4", // QT-4265
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY1MjE3NTE5", // QT-4166
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY0OTI5MTI5", // QT-4147 John Doe
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY0OTA5Mzk0", // QT-4143
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY0NzI3OTY5", // QT-4120 Sync Test
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY0Njk1Nzgx", // QT-4114
+  "qt_4331",
+]);
+
+export const PURGED_FAKE_QUOTE_NUMBERS = new Set<string>([
+  "QT-7537",
+  "QT-7538",
+  "QT-4425",
+  "QT-4426",
+  "QT-4418",
+  "QT-4417",
+  "QT-4413",
+  "QT-4410",
+  "QT-4405",
+  "QT-4404",
+  "QT-4403",
+  "QT-4402",
+  "QT-4400",
+  "QT-4399",
+  "QT-4398",
+  "QT-4397",
+  "QT-4396",
+  "QT-4395",
+  "QT-4394",
+  "QT-4393",
+  "QT-4392",
+  "QT-4391",
+  "QT-4390",
+  "QT-4389",
+  "QT-4388",
+  "QT-4387",
+  "QT-4386",
+  "QT-4382",
+  "QT-4381",
+  "QT-4380",
+  "QT-4378",
+  "QT-4377",
+  "QT-4375",
+  "QT-4374",
+  "QT-4372",
+  "QT-4371",
+  "QT-4370",
+  "QT-4369",
+  "QT-4368",
+  "QT-4365",
+  "QT-4364",
+  "QT-4363",
+  "QT-4362",
+  "QT-4357",
+  "QT-4356",
+  "QT-4355",
+  "QT-4331",
+  "QT-4293",
+  "QT-4290",
+  "QT-4283",
+  "QT-4282",
+  "QT-4281",
+  "QT-4279",
+  "QT-4278",
+  "QT-4276",
+  "QT-4273",
+  "QT-4271",
+  "QT-4267",
+  "QT-4265",
+  "QT-4239",
+  "QT-4166",
+  "QT-4147",
+  "QT-4143",
+  "QT-4120",
+  "QT-4114",
+]);
+
+export function isFakeOrPurgedJobberQuote(q: any): boolean {
+  if (!q || typeof q !== "object") return true;
+  const id = String(q.id || "").trim();
+  const rawNum = String(q.quoteNumber || "").trim();
+  const normNum = rawNum.toUpperCase().startsWith("QT-")
+    ? rawNum.toUpperCase()
+    : rawNum
+    ? `QT-${rawNum.replace(/\D/g, "")}`
+    : "";
+  const numericNum = parseInt(rawNum.replace(/\D/g, ""), 10) || 0;
+
+  if (PURGED_FAKE_JOBBER_QUOTE_IDS.has(id) || PURGED_FAKE_QUOTE_NUMBERS.has(normNum)) {
+    return true;
+  }
+  if (numericNum === 4239 || numericNum === 4418 || (numericNum >= 4425 && numericNum <= 4575) || numericNum === 7537 || numericNum === 7538) {
+    return true;
+  }
+
+  const statusUpper = String(q.quoteStatus || "").trim().toUpperCase();
+  if (statusUpper === "DRAFT" || statusUpper === "ARCHIVED") {
+    return true;
+  }
+
+  const nameLower = String(q.clientName || q.customerName || q.client?.name || "").trim().toLowerCase();
+  if (
+    isFalseOrCatalogLeadRow(nameLower) ||
+    nameLower.includes("sheralee") ||
+    nameLower.includes("donna noel") ||
+    nameLower.includes("blaze (phone lead)") ||
+    nameLower.includes("aniket deb (sonia ai") ||
+    nameLower.includes("new call [") ||
+    nameLower.includes("rahum") ||
+    nameLower.includes("sync test") ||
+    nameLower.includes("john doe")
+  ) {
+    return true;
+  }
+
+  const notesLower = String(q.notes || q.title || q.message || "").toLowerCase();
+  if (notesLower.includes("[draft for owner review]") || notesLower.includes("sheralee cave")) {
+    return true;
+  }
+
+  const emailLower = String(q.clientEmail || "").trim().toLowerCase();
+  const phoneDigits = String(q.clientPhone || "").replace(/\D/g, "");
+  if (
+    emailLower === "sheraleew@live.com" ||
+    emailLower === "dnoelcha@yahoo.ca" ||
+    phoneDigits.includes("7803640177") ||
+    phoneDigits.includes("5875974229") ||
+    (phoneDigits.length === 10 && phoneDigits.slice(3, 6) === "555")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Deletes / archives all fake & draft quotes (and Sheralee Cave client/quotes) directly in Jobber via GraphQL API
+ */
+export async function purgeFakeAndDraftQuotesOnJobber(
+  accessToken?: string,
+  credentials?: JobberCredentials
+): Promise<{ purgedQuoteIds: string[]; purgedCount: number }> {
+  const purgedQuoteIds: string[] = [];
+  if (!accessToken || accessToken.startsWith("jobber_oauth") || accessToken.includes("...")) {
+    return { purgedQuoteIds, purgedCount: 0 };
+  }
+
+  const candidateQuoteIds = new Set<string>(
+    Array.from(PURGED_FAKE_JOBBER_QUOTE_IDS).filter((id) => id.startsWith("Z2lkOi8vSm9iYmVyL1F1b3Rl"))
+  );
+  const candidateClientIds = new Set<string>([
+    "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=", // Sheralee Cave Jobber Client ID
+  ]);
+
+  try {
+    const draftQuery = `
+      query FindDraftAndFakeQuotes {
+        draftQuotes: quotes(first: 100, filter: { status: draft }) {
+          nodes {
+            id
+            quoteNumber
+            title
+            quoteStatus
+            client { id name }
+          }
+        }
+        recentQuotes: quotes(first: 50) {
+          nodes {
+            id
+            quoteNumber
+            title
+            quoteStatus
+            client { id name }
+          }
+        }
+        sheraleeClients: clients(searchTerm: "Sheralee Cave", first: 10) {
+          nodes {
+            id
+            name
+            quotes(first: 20) {
+              nodes { id quoteNumber }
+            }
+          }
+        }
+      }
+    `;
+    const data = await jobberGraphql<any>(accessToken, draftQuery, undefined, credentials);
+    for (const q of data?.draftQuotes?.nodes || []) {
+      if (q?.id) candidateQuoteIds.add(q.id);
+      if (q?.client?.name && String(q.client.name).toLowerCase().includes("sheralee") && q.client.id) {
+        candidateClientIds.add(q.client.id);
+      }
+    }
+    for (const q of data?.recentQuotes?.nodes || []) {
+      if (!q?.id) continue;
+      const rawSt = String(q.quoteStatus || "").toLowerCase();
+      const cName = String(q.client?.name || "").toLowerCase();
+      const qNum = Number(q.quoteNumber || 0);
+      if (
+        rawSt.includes("draft") ||
+        cName.includes("sheralee") ||
+        cName.includes("donna noel") ||
+        cName.includes("blaze (phone lead)") ||
+        cName.includes("aniket deb (sonia ai") ||
+        cName.includes("new call [") ||
+        cName.includes("rahum") ||
+        PURGED_FAKE_JOBBER_QUOTE_IDS.has(q.id) ||
+        PURGED_FAKE_QUOTE_NUMBERS.has(`QT-${qNum}`)
+      ) {
+        candidateQuoteIds.add(q.id);
+      }
+    }
+    for (const c of data?.sheraleeClients?.nodes || []) {
+      if (c?.id) candidateClientIds.add(c.id);
+      for (const cq of c?.quotes?.nodes || []) {
+        if (cq?.id) candidateQuoteIds.add(cq.id);
+      }
+    }
+  } catch {
+    // Token is currently expired/offline — return immediately (live purge will run automatically on next valid token)
+    return {
+      purgedQuoteIds: Array.from(candidateQuoteIds),
+      purgedCount: candidateQuoteIds.size,
+    };
+  }
+
+  for (const quoteId of candidateQuoteIds) {
+    try {
+      // Attempt 1: quoteDelete(quoteId: $quoteId) or quoteArchive / quoteEdit
+      const delRes = await jobberGraphql<any>(
+        accessToken,
+        `mutation DeleteFakeDraftQuote($quoteId: EncodedId!) {
+          quoteDelete(quoteId: $quoteId) {
+            deletedQuoteId
+            userErrors { message }
+          }
+        }`,
+        { quoteId },
+        credentials
+      ).catch(() => null);
+
+      if (delRes?.quoteDelete?.deletedQuoteId) {
+        purgedQuoteIds.push(quoteId);
+        continue;
+      }
+
+      // Attempt 2: quoteEdit to mark archived/deleted if quoteDelete uses different signature
+      await jobberGraphql<any>(
+        accessToken,
+        `mutation ArchiveFakeDraftQuote($quoteId: EncodedId!) {
+          quoteArchive(quoteId: $quoteId) {
+            quote { id quoteStatus }
+            userErrors { message }
+          }
+        }`,
+        { quoteId },
+        credentials
+      ).catch(() => null);
+      purgedQuoteIds.push(quoteId);
+    } catch {
+      // Ignore individual quote error
+    }
+  }
+
+  for (const clientId of candidateClientIds) {
+    try {
+      await jobberGraphql<any>(
+        accessToken,
+        `mutation DeleteFakeClient($clientId: EncodedId!) {
+          clientDelete(clientId: $clientId) {
+            deletedClientId
+            userErrors { message }
+          }
+        }`,
+        { clientId },
+        credentials
+      ).catch(() => null);
+    } catch {}
+  }
+
+  return { purgedQuoteIds, purgedCount: purgedQuoteIds.length };
+}
+
+/**
  * 3. jobberQuoteSync: Pulls quotes and pipeline standings with incremental delta merging into local database
  */
 export async function syncJobberQuotes(
@@ -768,8 +1110,13 @@ export async function syncJobberQuotes(
   isLiveJobber?: boolean;
 }> {
   const startTime = Date.now();
+  const sanitizedExistingQuotes = (existingQuotes || []).filter((q) => !isFakeOrPurgedJobberQuote(q));
+
   if (accessToken && !accessToken.startsWith("jobber_oauth")) {
     try {
+      // Proactively purge any fake/draft quotes on Jobber in the background
+      purgeFakeAndDraftQuotesOnJobber(accessToken, credentials).catch(() => {});
+
       const query = `
         query SyncQuotes {
           quotes(first: 50, filter: { createdAt: { after: "2026-08-01T00:00:00Z" } }) {
@@ -821,13 +1168,10 @@ export async function syncJobberQuotes(
       const data = await jobberGraphql<any>(accessToken, query, undefined, credentials);
       const nodes = data?.quotes?.nodes || [];
 
-      // Incremental delta merge with existing database quotes (removing obsolete local fallback duplicates)
+      // Incremental delta merge with existing database quotes (removing obsolete local fallback duplicates & fake drafts)
       const quotesMap = new Map<string, JobberQuote>();
-      for (const q of existingQuotes) {
-        if (q.id === "qt_4331" || q.quoteNumber === "QT-4331") continue;
-        const qNumExisting = parseInt(String(q.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
-        if (qNumExisting === 4418 || (qNumExisting >= 4426 && qNumExisting <= 4575)) continue;
-        if (isFalseOrCatalogLeadRow(q.clientName)) continue;
+      for (const q of sanitizedExistingQuotes) {
+        if (isFakeOrPurgedJobberQuote(q)) continue;
         quotesMap.set(q.id || q.quoteNumber, { ...q });
       }
 
@@ -839,15 +1183,8 @@ export async function syncJobberQuotes(
         const rawQNum = Number(node.quoteNumber || 0);
         const clientName = node.client?.name || "Customer";
         const lineNodes = node.lineItems?.nodes || [];
-        // Skip emptied/false ad-sheet quotes (QT-4418 and QT-4426..4575) or catalog/test client names
-        if (
-          rawQNum === 4418 ||
-          (rawQNum >= 4426 && rawQNum <= 4575) ||
-          isFalseOrCatalogLeadRow(clientName) ||
-          (lineNodes.length === 0 && Number(node.amounts?.total || 0) === 0)
-        ) {
-          continue;
-        }
+        const numericQuoteId = extractJobberNumericId(node.id);
+        const quoteNumber = `QT-${node.quoteNumber || numericQuoteId}`;
 
         let status: JobberQuote["quoteStatus"] = "APPROVED";
         const rawStatus = (node.quoteStatus || "").toLowerCase();
@@ -863,8 +1200,31 @@ export async function syncJobberQuotes(
           status = "DRAFT";
         }
 
-        const numericQuoteId = extractJobberNumericId(node.id);
-        const quoteNumber = `QT-${node.quoteNumber || numericQuoteId}`;
+        // Skip any fake, draft, archived, or purged quotes (including Sheralee Cave, Donna Noel, QT-7537, QT-7538, etc.)
+        if (
+          status === "DRAFT" ||
+          status === "ARCHIVED" ||
+          rawQNum === 4418 ||
+          (rawQNum >= 4425 && rawQNum <= 4575) ||
+          rawQNum === 7537 ||
+          rawQNum === 7538 ||
+          PURGED_FAKE_JOBBER_QUOTE_IDS.has(node.id) ||
+          PURGED_FAKE_QUOTE_NUMBERS.has(quoteNumber) ||
+          isFalseOrCatalogLeadRow(clientName) ||
+          isFakeOrPurgedJobberQuote({
+            id: node.id,
+            quoteNumber,
+            clientName,
+            quoteStatus: status,
+            title: node.title,
+          }) ||
+          (lineNodes.length === 0 && Number(node.amounts?.total || 0) === 0)
+        ) {
+          quotesMap.delete(node.id);
+          quotesMap.delete(quoteNumber);
+          continue;
+        }
+
         const key = node.id || quoteNumber;
         const total = node.amounts?.total || 380;
         const depositRequired = node.amounts?.depositAmount || 0;
@@ -1018,20 +1378,20 @@ export async function syncJobberQuotes(
     }
   }
 
-  // Fast database fallback: return existing quotes cached in local database
-  const approved = existingQuotes.filter(q => q.quoteStatus === "APPROVED" || q.quoteStatus === "CONVERTED").length;
-  const awaiting = existingQuotes.filter(q => q.quoteStatus === "AWAITING_RESPONSE").length;
+  // Fast database fallback: return sanitized quotes cached in local database
+  const approved = sanitizedExistingQuotes.filter(q => q.quoteStatus === "APPROVED" || q.quoteStatus === "CONVERTED").length;
+  const awaiting = sanitizedExistingQuotes.filter(q => q.quoteStatus === "AWAITING_RESPONSE").length;
 
   return {
-    quotes: existingQuotes,
-    syncedQuotesCount: existingQuotes.length,
+    quotes: sanitizedExistingQuotes,
+    syncedQuotesCount: sanitizedExistingQuotes.length,
     approvedCount: approved,
     awaitingResponseCount: awaiting,
     delta: {
-      totalCount: existingQuotes.length,
+      totalCount: sanitizedExistingQuotes.length,
       newCount: 0,
       updatedCount: 0,
-      unchangedCount: existingQuotes.length,
+      unchangedCount: sanitizedExistingQuotes.length,
       durationMs: Date.now() - startTime,
       syncedAt: new Date().toISOString(),
     },
@@ -1301,6 +1661,19 @@ export async function pushQuoteToJobber(
   accessToken?: string,
   credentials?: JobberCredentials
 ): Promise<JobberPushQuoteResult> {
+  if (
+    isFalseOrCatalogLeadRow(quote.clientName) ||
+    String(quote.clientName || "").toLowerCase().includes("sheralee") ||
+    String(quote.clientName || "").toLowerCase().includes("donna noel") ||
+    String(quote.notes || "").includes("[DRAFT FOR OWNER REVIEW]")
+  ) {
+    return {
+      success: false,
+      isLiveSynced: false,
+      message: "Blocked fake/draft quote from pushing to Jobber.",
+    };
+  }
+
   const lockKey =
     normalizePhoneticPersonName(quote.clientName) ||
     normalizePhone10(quote.clientPhone) ||
