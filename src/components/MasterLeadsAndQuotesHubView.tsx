@@ -45,8 +45,11 @@ import { ScheduledJobItem } from './ScheduledJobsView';
 import { getEdmontonToday, getCleanerColor } from '../data/jobberCalendarData';
 import { JobberQuote, JobberInvoice, extractJobberNumericId } from '../services/jobberSyncModules';
 import { ClientRecord } from '../types/client';
-import { LEADS_SPREADSHEET_ID } from '../services/leadSheetSync';
 import {
+  DEFAULT_NEW_CLEAN_SHEET_URL,
+  DEFAULT_NEW_CLEAN_SHEET_ID,
+  isArchivedOldSheetUrlOrId,
+  createNewCleanLeadsSheetInDrive,
   syncLeadsToLiveGoogleSheetInDrive,
   pullNewLeadsFromGoogleSheetInDrive,
 } from '../services/googleDriveBackupService';
@@ -328,9 +331,10 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
   const [screenedCallFilter, setScreenedCallFilter] = useState<'ALL' | 'CLEANING' | 'POTENTIAL' | 'BLOCKED'>('ALL');
   const [callEvaluatorSearch, setCallEvaluatorSearch] = useState<string>('');
   const [togglingCallId, setTogglingCallId] = useState<string | null>(null);
-  const [sheetUrl, setSheetUrl] = useState(`https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`);
-  const [spreadsheetId, setSpreadsheetId] = useState(LEADS_SPREADSHEET_ID);
+  const [sheetUrl, setSheetUrl] = useState(DEFAULT_NEW_CLEAN_SHEET_URL);
+  const [spreadsheetId, setSpreadsheetId] = useState(DEFAULT_NEW_CLEAN_SHEET_ID);
   const [isSyncingGoogleDriveSheet, setIsSyncingGoogleDriveSheet] = useState(false);
+  const [isCreatingNewDriveSheet, setIsCreatingNewDriveSheet] = useState(false);
   const [isPullingSheetsLeads, setIsPullingSheetsLeads] = useState(false);
   const [isUploadingSheetFile, setIsUploadingSheetFile] = useState(false);
   const [localBanner, setLocalBanner] = useState<string | null>(null);
@@ -442,17 +446,22 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
       .sort((a, b) => String(a.startAt || '').localeCompare(String(b.startAt || '')));
   }, [scheduledJobs, selectedDateFilter]);
 
-  // Load connected Google Sheet URL
+  // Load connected Clean Google Sheet URL (never defaults to the archived old 1TifULi7 sheet)
   useEffect(() => {
     fetch('/api/google-sheets/config')
       .then((r) => r.json())
       .then((d) => {
-        if (d?.createdDriveSheetUrl) {
+        if (d?.createdDriveSheetUrl && !isArchivedOldSheetUrlOrId(d.createdDriveSheetUrl)) {
           setSheetUrl(d.createdDriveSheetUrl);
           if (d.createdDriveSheetId) setSpreadsheetId(d.createdDriveSheetId);
-        } else if (d?.sheetUrl) {
+        } else if (d?.sheetUrl && !isArchivedOldSheetUrlOrId(d.sheetUrl)) {
           setSheetUrl(d.sheetUrl);
-          if (d.spreadsheetId) setSpreadsheetId(d.spreadsheetId);
+          if (d.spreadsheetId && !isArchivedOldSheetUrlOrId(d.spreadsheetId)) {
+            setSpreadsheetId(d.spreadsheetId);
+          }
+        } else {
+          setSheetUrl(DEFAULT_NEW_CLEAN_SHEET_URL);
+          setSpreadsheetId(DEFAULT_NEW_CLEAN_SHEET_ID);
         }
       })
       .catch(() => {});
@@ -1303,27 +1312,41 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
               <span>{isUploadingSheetFile ? 'Importing...' : '📥 Upload FB Form (.CSV/.XLSX)'}</span>
             </button>
 
-            <a
-              href={sheetUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3.5 py-2.5 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Open your formatted TidyUps Master Google Sheet in Google Drive"
+            <button
+              type="button"
+              onClick={onNavigateToFullLeadsSheet}
+              className="px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+              title="Open the dedicated Brand-New 7-Tab Clean Leads Sheet (Facebook Leads 1, Facebook Leads 2, Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo)"
             >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-              <span>Open Master Google Sheet</span>
-              <ExternalLink className="w-3.5 h-3.5 text-emerald-300" />
-            </a>
+              <FileSpreadsheet className="w-4 h-4 text-slate-950" />
+              <span>✨ Open 7-Tab Clean Leads Sheet ({categorizedMasterData.totalLeadsCount})</span>
+            </button>
 
             <button
               type="button"
-              onClick={handleSyncToGoogleDriveSheet}
-              disabled={isSyncingGoogleDriveSheet}
+              onClick={async () => {
+                setIsCreatingNewDriveSheet(true);
+                try {
+                  const res = await createNewCleanLeadsSheetInDrive();
+                  setSheetUrl(res.sheetUrl);
+                  setSpreadsheetId(res.spreadsheetId);
+                  setLocalBanner(
+                    res.sheetUrl.includes('docs.google.com/spreadsheets')
+                      ? `✓ Created brand-new 7-Tab Google Sheet (${res.sheetName}) in your Google Drive and connected it!`
+                      : `✓ Initialized Brand-New 7-Tab Clean Leads Sheet! Click "✨ Open 7-Tab Clean Leads Sheet" to view all 7 tabs.`
+                  );
+                } catch (e: any) {
+                  setLocalBanner(`Could not create sheet in Drive: ${e?.message}`);
+                } finally {
+                  setIsCreatingNewDriveSheet(false);
+                }
+              }}
+              disabled={isCreatingNewDriveSheet}
               className="px-3.5 py-2.5 rounded-2xl bg-emerald-800/80 hover:bg-emerald-700 border border-emerald-500/40 text-emerald-100 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-              title="Pulls any new sheet rows first, then formats & pushes color-coded sections and frozen headers to Google Drive Sheet"
+              title="Create a brand-new 7-tab Google Sheet in your Google Drive and connect its URL"
             >
               <CloudUpload className="w-4 h-4 text-emerald-300" />
-              <span>{isSyncingGoogleDriveSheet ? 'Syncing Sheet...' : 'Push Styled Colors to Google Sheet'}</span>
+              <span>{isCreatingNewDriveSheet ? 'Creating 7-Tab Sheet...' : '+ Create New 7-Tab Sheet in Drive'}</span>
             </button>
           </div>
         </div>

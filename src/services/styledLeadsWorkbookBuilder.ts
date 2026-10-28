@@ -307,9 +307,11 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
   const notes = String(lead.notes || '').trim().toLowerCase();
   const campaign = String(lead.campaignName || '').trim().toLowerCase();
 
-  // Block all legacy hardcoded/seed IDs & auto-converted historical quote seeds
+  // Block all legacy hardcoded/seed IDs, old sheet imports & auto-converted historical quote seeds
   if (
     id === 'lead-clean-rahum-4293' ||
+    id.startsWith('lead-sheet-mvmw') ||
+    id.startsWith('lead-sheet-mvo') ||
     id.startsWith('lead-quote-qt-2026-') ||
     id.startsWith('qt-2026-') ||
     id.startsWith('lead-quo-2026') ||
@@ -326,7 +328,11 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
     return true;
   }
 
-  // Block known fake/sample names & test webhook rows
+  if (isFalseOrCatalogLeadRow(name)) {
+    return true;
+  }
+
+  // Block known fake/sample names, test webhook rows, and non-cleaning solicitors
   const fakeNames = [
     'rahum',
     'raheem',
@@ -336,6 +342,15 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
     'sarah (fb ad test)',
     'david (google ad test)',
     'test customer',
+    'test lead',
+    'sync verification canary',
+    'sample campaign',
+    'sample ad',
+    'nick wilson',
+    'nick (squarespace)',
+    'squarespace',
+    'north advance',
+    'ferro capital',
     'simulation',
     'fake',
     'sample',
@@ -356,11 +371,14 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
   // Block fake sample emails / phones
   if (
     email.includes('@example.com') ||
+    email === 'test@meta.com' ||
+    email.includes('<test lead') ||
     email === 'leadtest@tidyupscleaning.com' ||
     phone.includes('555-0148') ||
     phone.includes('555-0194') ||
     phone.includes('555-0271') ||
-    phone.includes('555-0100')
+    phone.includes('555-0100') ||
+    phone.includes('555-0199')
   ) {
     return true;
   }
@@ -369,7 +387,11 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
   if (
     notes.includes('test inbound lead') ||
     notes.includes('simulation') ||
-    campaign.includes('direct webhook') && name.includes('test')
+    notes.includes('canary row') ||
+    notes.includes('business funding') ||
+    notes.includes('north advance') ||
+    notes.includes('squarespace advisor') ||
+    (campaign.includes('direct webhook') && name.includes('test'))
   ) {
     return true;
   }
@@ -424,9 +446,9 @@ export function isOutOfEdmontonOrFakeOrOutdatedLead(lead: any): boolean {
     return true;
   }
 
-  // 3. Parse lead date for 14-day & 7-day rules
+  // 3. Parse lead creation/received date FIRST (never let dateOfServiceRequested mask an old dateAdded from months ago!)
   const rawDateStr = String(
-    lead.dateReceived || lead.createdAt || lead.dateOfServiceRequested || lead.scheduledDate || ''
+    lead.dateAdded || lead.dateReceived || lead.createdAt || lead.dateOfServiceRequested || lead.scheduledDate || ''
   ).trim();
 
   if (!rawDateStr) {
@@ -462,6 +484,22 @@ export function isOutOfEdmontonOrFakeOrOutdatedLead(lead: any): boolean {
 export function isFalseOrCatalogLeadRow(rawName?: string): boolean {
   const n = String(rawName || '').trim().toLowerCase();
   if (!n || n.length < 2) return true;
+  if (
+    n.startsWith('✨') ||
+    n.startsWith('📊') ||
+    n.startsWith('[') ||
+    n.startsWith('http://') ||
+    n.startsWith('https://') ||
+    /^\d+\s*lead\(s\)/i.test(n) ||
+    /^\d+bed\s+\d+(\.\d+)?bath/i.test(n) ||
+    n.includes('discount $') ||
+    n.includes('fuel surcharge') ||
+    n.includes('online booking') ||
+    n.includes('pro cleaner') ||
+    n.includes('lead row')
+  ) {
+    return true;
+  }
   const banned = [
     'client name',
     'customer name',
@@ -486,8 +524,11 @@ export function isFalseOrCatalogLeadRow(rawName?: string): boolean {
     'dummy',
     'simulation',
     'sample',
+    'sample campaign name',
+    'sample ad name',
+    'sync verification canary',
   ];
-  return banned.some((b) => n === b || n.startsWith('✨') || n.startsWith('📊'));
+  return banned.some((b) => n === b);
 }
 
 /**

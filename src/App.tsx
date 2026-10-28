@@ -497,6 +497,9 @@ export function App() {
       if (p === '/fb-messenger' || p === '/messenger' || h === '#fb-messenger') {
         return 'FB_MESSENGER_AI';
       }
+      if (p === '/clean-sheet' || p === '/leads' || h === '#clean-sheet' || h === '#leads') {
+        return 'LEADS';
+      }
       try {
         const isAuth = localStorage.getItem('tidyups_verified_password_session') === 'true';
         if (!isAuth) return 'CUSTOMER_PORTAL';
@@ -591,7 +594,7 @@ export function App() {
     return hasDevon ? base : [INITIAL_CLIENTS[0], ...base];
   });
   const [leadsList, setLeadsList] = useState<AdLeadItem[]>(() => {
-    const base = (storedData?.adLeads && storedData.adLeads.length > 0) ? storedData.adLeads : INITIAL_AD_LEADS;
+    const base = Array.isArray(storedData?.adLeads) ? storedData.adLeads : [];
     return filterValidRecentLeads(base);
   });
   const [isQuickQuoteModalOpen, setIsQuickQuoteModalOpen] = useState<boolean>(false);
@@ -663,6 +666,7 @@ export function App() {
   // Streamlined Top Header Main Workflow Buttons (All secondary owner buttons live inside MANAGEMENT / Owner Hub)
   const DEFAULT_HEADER_NAV_ORDER = [
     'MASTER_HUB',
+    'LEADS',
     'QUOTES',
     'FB_MESSENGER_AI',
     'QUICK_QUOTE',
@@ -699,7 +703,7 @@ export function App() {
   const [headerNavOrder, setHeaderNavOrder] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('tidyups_header_nav_order_v3');
+        const saved = localStorage.getItem('tidyups_header_nav_order_v4');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1851,6 +1855,8 @@ export function App() {
         setActiveTopView('MAP');
       } else if (path === '/voice' || hash === '#voice' || path === '/quote' || hash === '#quote' || path === '/intake' || hash === '#intake') {
         setActiveTopView('QUICK_QUOTE');
+      } else if (path === '/clean-sheet' || hash === '#clean-sheet' || path === '/leads' || hash === '#leads') {
+        setActiveTopView('LEADS');
       } else if (path === '/intakes' || hash === '#intakes') {
         setActiveTopView('INTAKES');
       } else if (path === '/clients' || hash === '#clients') {
@@ -2915,6 +2921,27 @@ export function App() {
                             activeTopView === 'MASTER_HUB' ? 'bg-white/20 text-white' : 'bg-emerald-200/80 text-emerald-900'
                           }`}>
                             {leadsList.length + quotesList.length}
+                          </span>
+                        </button>
+                      );
+                    } else if (btnKey === 'LEADS') {
+                      buttonElement = (
+                        <button
+                          id="nav-tab-clean-leads-sheet"
+                          onClick={() => setActiveTopView('LEADS')}
+                          className={`min-h-[34px] px-3.5 py-1 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+                            activeTopView === 'LEADS'
+                              ? 'bg-gradient-to-r from-teal-600 via-emerald-600 to-green-600 text-white shadow-sm ring-2 ring-teal-500/30'
+                              : 'bg-teal-50 text-teal-950 hover:bg-teal-100 border border-teal-300'
+                          }`}
+                          title="Brand-New 7-Tab Clean Leads Sheet (Facebook Leads 1, Facebook Leads 2, Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo)"
+                        >
+                          <FileSpreadsheet className={`w-3.5 h-3.5 ${activeTopView === 'LEADS' ? 'text-white' : 'text-teal-600'}`} />
+                          <span>✨ 7-Tab Clean Leads Sheet</span>
+                          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                            activeTopView === 'LEADS' ? 'bg-white/20 text-white' : 'bg-teal-200/80 text-teal-900'
+                          }`}>
+                            {leadsList.length}
                           </span>
                         </button>
                       );

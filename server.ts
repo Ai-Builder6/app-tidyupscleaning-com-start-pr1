@@ -3263,10 +3263,36 @@ app.get("/api/database/quotes", (req, res) => {
 // Helper: Repairs Base64 Jobber URLs, removes obsolete fake seed records, and maintains the Clean Google Sheet leads
 function repairAndSyncStoreData(store: AppPersistentStore): boolean {
   let mutated = false;
-  const googleSheetUrl = `https://docs.google.com/spreadsheets/d/${googleSheetsSyncState?.spreadsheetId || LEADS_SPREADSHEET_ID}/edit`;
+
+  // Upgrade any legacy archived spreadsheet ID in cleanSheetConfig so Connected Google Sheet URL is always the new clean sheet
+  if ((store as any).cleanSheetConfig) {
+    const cfg = (store as any).cleanSheetConfig;
+    if (
+      cfg.spreadsheetId === LEADS_SPREADSHEET_ID ||
+      cfg.spreadsheetId === SECONDARY_LEADS_SPREADSHEET_ID ||
+      String(cfg.sheetUrl || "").includes(LEADS_SPREADSHEET_ID) ||
+      String(cfg.sheetUrl || "").includes(SECONDARY_LEADS_SPREADSHEET_ID)
+    ) {
+      const newDriveId =
+        cfg.createdDriveSheetId &&
+        cfg.createdDriveSheetId !== LEADS_SPREADSHEET_ID &&
+        cfg.createdDriveSheetId !== SECONDARY_LEADS_SPREADSHEET_ID
+          ? cfg.createdDriveSheetId
+          : "tidyups-new-7tab-clean-sheet-2026";
+      cfg.spreadsheetId = newDriveId;
+      cfg.sheetUrl =
+        newDriveId === "tidyups-new-7tab-clean-sheet-2026"
+          ? "https://app.tidyupscleaning.com/clean-sheet"
+          : `https://docs.google.com/spreadsheets/d/${newDriveId}/edit`;
+      mutated = true;
+    }
+  }
 
   // 1. Keep store.adLeads strictly filtered to valid Edmonton leads within the last 14 days (<7 days if uncommunicated) with zero fake/simulated rows
-  const obsoleteLeadPrefixes = ["lead-auto-", "lead-fb-10", "lead-goog-10", "lead-ig-10", "lead-web-10"];
+  const obsoleteLeadPrefixes = ["lead-auto-", "lead-fb-10", "lead-goog-10", "lead-ig-10", "lead-web-10", "lead-sheet-mvmw", "lead-sheet-mvo"];
+  const freshStartMs = (store as any).cleanSheetConfig?.freshStartFromIso
+    ? Date.parse((store as any).cleanSheetConfig.freshStartFromIso)
+    : NaN;
   if (!Array.isArray(store.adLeads)) {
     store.adLeads = [];
     mutated = true;
@@ -3279,6 +3305,11 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
         if (l.customerName?.toLowerCase().includes("devon clark")) return false;
         if (l.quoteId === "qt_4331" || l.quoteNumber === "QT-4331") return false;
         if (isOutOfEdmontonOrFakeOrOutdatedLead(l)) return false;
+        if (!Number.isNaN(freshStartMs)) {
+          const leadDateRaw = String(l.dateReceived || l.dateAdded || l.createdAt || "").trim();
+          const leadMs = leadDateRaw ? Date.parse(leadDateRaw) : NaN;
+          if (!Number.isNaN(leadMs) && leadMs < freshStartMs) return false;
+        }
         return true;
       })
       .map((l: any) => {
@@ -6629,39 +6660,79 @@ const CLEAN_SHEET_TABS = [
   "Quo",
 ] as const;
 
+const DEFAULT_NEW_CLEAN_SHEET_ID = "tidyups-new-7tab-clean-sheet-2026";
+const DEFAULT_NEW_CLEAN_SHEET_URL = "https://app.tidyupscleaning.com/clean-sheet";
+
+function isArchivedOldSpreadsheetId(rawId?: string): boolean {
+  const s = String(rawId || "").trim();
+  return s === LEADS_SPREADSHEET_ID || s === SECONDARY_LEADS_SPREADSHEET_ID;
+}
+
 function sanitizeSpreadsheetId(rawId?: string): string {
   const trimmed = String(rawId || "").trim();
-  if (!trimmed || trimmed.includes("clean_sheet") || trimmed.includes("YOUR_") || trimmed.length < 25) {
-    return LEADS_SPREADSHEET_ID;
+  if (
+    !trimmed ||
+    trimmed.includes("clean_sheet") ||
+    trimmed.includes("YOUR_") ||
+    isArchivedOldSpreadsheetId(trimmed) ||
+    trimmed === DEFAULT_NEW_CLEAN_SHEET_ID ||
+    trimmed.length < 20
+  ) {
+    return DEFAULT_NEW_CLEAN_SHEET_ID;
   }
   return trimmed;
 }
 
-const initialValidSheetId = sanitizeSpreadsheetId((initialStored as any)?.cleanSheetConfig?.spreadsheetId);
+function buildActiveSheetUrlFromId(sheetId: string, customUrl?: string): string {
+  const cleanId = sanitizeSpreadsheetId(sheetId);
+  if (cleanId === DEFAULT_NEW_CLEAN_SHEET_ID) {
+    return DEFAULT_NEW_CLEAN_SHEET_URL;
+  }
+  if (customUrl && customUrl.includes(cleanId) && !isArchivedOldSpreadsheetId(cleanId)) {
+    return customUrl;
+  }
+  return `https://docs.google.com/spreadsheets/d/${cleanId}/edit`;
+}
+
+const initialValidSheetId = sanitizeSpreadsheetId(
+  (initialStored as any)?.cleanSheetConfig?.createdDriveSheetId ||
+    (initialStored as any)?.cleanSheetConfig?.spreadsheetId
+);
 
 let googleSheetsSyncState = {
   spreadsheetId: initialValidSheetId,
-  sheetUrl: `https://docs.google.com/spreadsheets/d/${initialValidSheetId}/edit`,
+  sheetUrl: buildActiveSheetUrlFromId(initialValidSheetId, (initialStored as any)?.cleanSheetConfig?.sheetUrl),
   primarySpreadsheetId: LEADS_SPREADSHEET_ID,
   primarySheetUrl: `https://docs.google.com/spreadsheets/d/${LEADS_SPREADSHEET_ID}/edit`,
   secondarySpreadsheetId: SECONDARY_LEADS_SPREADSHEET_ID,
   secondarySheetUrl: `https://docs.google.com/spreadsheets/d/${SECONDARY_LEADS_SPREADSHEET_ID}/edit`,
-  createdDriveSheetId: (initialStored as any)?.cleanSheetConfig?.createdDriveSheetId || "",
-  createdDriveSheetUrl: (initialStored as any)?.cleanSheetConfig?.createdDriveSheetUrl || "",
-  createdDriveSheetName: (initialStored as any)?.cleanSheetConfig?.createdDriveSheetName || "",
+  createdDriveSheetId: isArchivedOldSpreadsheetId((initialStored as any)?.cleanSheetConfig?.createdDriveSheetId)
+    ? ""
+    : (initialStored as any)?.cleanSheetConfig?.createdDriveSheetId || "",
+  createdDriveSheetUrl: isArchivedOldSpreadsheetId((initialStored as any)?.cleanSheetConfig?.createdDriveSheetId)
+    ? ""
+    : (initialStored as any)?.cleanSheetConfig?.createdDriveSheetUrl || "",
+  createdDriveSheetName:
+    (initialStored as any)?.cleanSheetConfig?.createdDriveSheetName ||
+    "TidyUps Brand-New 7-Tab Clean Leads Sheet (Fresh Start)",
   webhookUrl: (initialStored as any)?.cleanSheetConfig?.webhookUrl || "https://app.tidyupscleaning.com/api/leads/webhook",
+  freshStartFromIso: (initialStored as any)?.cleanSheetConfig?.freshStartFromIso || new Date().toISOString(),
   targetTab: "All Clean Leads",
   tabs: CLEAN_SHEET_TABS,
   headers: APP_LEAD_HEADERS,
   lastSyncedAt: new Date().toISOString(),
-  syncedRowsCount: 1,
+  syncedRowsCount: 0,
 };
 
 app.get("/api/google-sheets/config", (_req, res) => {
-  // Always ensure spreadsheetId is valid and never a fake placeholder
-  const validId = sanitizeSpreadsheetId(googleSheetsSyncState.spreadsheetId);
+  // Never return the archived old Google Sheets as the active Connected Google Sheet URL
+  const candidateId =
+    googleSheetsSyncState.createdDriveSheetId && !isArchivedOldSpreadsheetId(googleSheetsSyncState.createdDriveSheetId)
+      ? googleSheetsSyncState.createdDriveSheetId
+      : googleSheetsSyncState.spreadsheetId;
+  const validId = sanitizeSpreadsheetId(candidateId);
   googleSheetsSyncState.spreadsheetId = validId;
-  googleSheetsSyncState.sheetUrl = `https://docs.google.com/spreadsheets/d/${validId}/edit`;
+  googleSheetsSyncState.sheetUrl = buildActiveSheetUrlFromId(validId, googleSheetsSyncState.createdDriveSheetUrl);
   res.json(googleSheetsSyncState);
 });
 
@@ -6680,15 +6751,23 @@ app.post("/api/google-sheets/config", (req, res) => {
     const match = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
     if (match) extractedId = match[1];
   }
-  if (extractedId && !extractedId.includes("clean_sheet") && extractedId.length >= 20) {
+  if (extractedId && !extractedId.includes("clean_sheet") && !isArchivedOldSpreadsheetId(extractedId) && extractedId.length >= 20) {
     googleSheetsSyncState.spreadsheetId = extractedId;
-    googleSheetsSyncState.sheetUrl = `https://docs.google.com/spreadsheets/d/${extractedId}/edit`;
+    googleSheetsSyncState.sheetUrl =
+      extractedId === DEFAULT_NEW_CLEAN_SHEET_ID
+        ? DEFAULT_NEW_CLEAN_SHEET_URL
+        : `https://docs.google.com/spreadsheets/d/${extractedId}/edit`;
+  } else if (sheetUrl === DEFAULT_NEW_CLEAN_SHEET_URL || extractedId === DEFAULT_NEW_CLEAN_SHEET_ID) {
+    googleSheetsSyncState.spreadsheetId = DEFAULT_NEW_CLEAN_SHEET_ID;
+    googleSheetsSyncState.sheetUrl = DEFAULT_NEW_CLEAN_SHEET_URL;
   }
-  if (createdDriveSheetId) {
+  if (createdDriveSheetId && !isArchivedOldSpreadsheetId(createdDriveSheetId)) {
     googleSheetsSyncState.createdDriveSheetId = String(createdDriveSheetId).trim();
     googleSheetsSyncState.createdDriveSheetUrl =
       createdDriveSheetUrl ||
       `https://docs.google.com/spreadsheets/d/${googleSheetsSyncState.createdDriveSheetId}/edit`;
+    googleSheetsSyncState.spreadsheetId = googleSheetsSyncState.createdDriveSheetId;
+    googleSheetsSyncState.sheetUrl = googleSheetsSyncState.createdDriveSheetUrl;
     if (createdDriveSheetName) {
       googleSheetsSyncState.createdDriveSheetName = String(createdDriveSheetName).trim();
     }
@@ -6701,6 +6780,7 @@ app.post("/api/google-sheets/config", (req, res) => {
   const store = loadStore(projectId);
   if (store) {
     (store as any).cleanSheetConfig = {
+      ...((store as any).cleanSheetConfig || {}),
       spreadsheetId: googleSheetsSyncState.spreadsheetId,
       sheetUrl: googleSheetsSyncState.sheetUrl,
       webhookUrl: googleSheetsSyncState.webhookUrl,
@@ -6715,7 +6795,7 @@ app.post("/api/google-sheets/config", (req, res) => {
   res.json({
     success: true,
     config: googleSheetsSyncState,
-    message: "Connected your Clean Google Sheet URL!",
+    message: "Connected your Brand-New 7-Tab Clean Google Sheet URL!",
   });
 });
 
@@ -8142,10 +8222,11 @@ app.post("/api/leads/:id/sync-jobber", async (req, res) => {
   });
 });
 
-// POST /api/leads/clear-sheet: Reset Clean Google Sheet to Blank (or keep only Rahum #4293)
-app.post("/api/leads/clear-sheet", (req, res) => {
+// POST /api/leads/clear-sheet (and /api/leads/start-fresh): Reset Clean Google Sheet to Blank starting from now on
+app.post(["/api/leads/clear-sheet", "/api/leads/start-fresh"], (req, res) => {
   const projectId = getProjectId(req);
   const { keepSyncedQuotes = false } = req.body || {};
+  const nowIso = new Date().toISOString();
   const store = loadStore(projectId);
   if (store) {
     if (keepSyncedQuotes && Array.isArray(store.adLeads)) {
@@ -8155,15 +8236,27 @@ app.post("/api/leads/clear-sheet", (req, res) => {
       store.adLeads = [];
       (store as any).cleanSheetExplicitlyBlank = true;
     }
-    store.lastSavedAt = new Date().toISOString();
+    if (isArchivedOldSpreadsheetId(googleSheetsSyncState.spreadsheetId)) {
+      googleSheetsSyncState.spreadsheetId = DEFAULT_NEW_CLEAN_SHEET_ID;
+      googleSheetsSyncState.sheetUrl = DEFAULT_NEW_CLEAN_SHEET_URL;
+    }
+    googleSheetsSyncState.freshStartFromIso = nowIso;
+    (store as any).cleanSheetConfig = {
+      ...((store as any).cleanSheetConfig || {}),
+      spreadsheetId: googleSheetsSyncState.spreadsheetId,
+      sheetUrl: googleSheetsSyncState.sheetUrl,
+      freshStartFromIso: nowIso,
+    };
+    store.lastSavedAt = nowIso;
     saveStore(store, projectId);
   }
   res.json({
     success: true,
     leads: store?.adLeads || [],
+    config: googleSheetsSyncState,
     message: keepSyncedQuotes
       ? "Clean Sheet reset to only live Jobber-synced quotes!"
-      : "Clean Google Sheet is now 100% blank and ready for new FB Leads, Google Leads, Voice Quotes, and Pasted Leads!",
+      : "Brand-New 7-Tab Clean Google Sheet is now 100% fresh starting from right now (0 old leads)!",
   });
 });
 
@@ -10787,10 +10880,19 @@ async function syncFbThreadToSheetAndOptionallyJobber(
   const leadId = thread.syncedLeadId || `fblead-${thread.id}`;
   thread.syncedLeadId = leadId;
 
+  const threadCreatedIso = thread.createdAt || new Date().toISOString();
+  const threadCreatedMs = Date.parse(threadCreatedIso);
+  const freshStartMs = store.cleanSheetConfig?.freshStartFromIso
+    ? Date.parse(store.cleanSheetConfig.freshStartFromIso)
+    : NaN;
+  const ageMs = !Number.isNaN(threadCreatedMs) ? Date.now() - threadCreatedMs : 0;
+  const isOlderThan14Days = ageMs > 14 * 24 * 60 * 60 * 1000;
+  const isBeforeFreshStart = !Number.isNaN(freshStartMs) && !Number.isNaN(threadCreatedMs) && threadCreatedMs < freshStartMs;
+
   const leadItem: any = {
     id: leadId,
-    source: "Facebook",
-    sourceTab: "FB Leads",
+    source: "Facebook AI",
+    sourceTab: "Facebook AI",
     customerName: ext.customerName || thread.customerName || "Facebook Messenger Lead",
     phone: ext.phone || "(780) 555-0199",
     email: ext.email || "",
@@ -10801,7 +10903,8 @@ async function syncFbThreadToSheetAndOptionallyJobber(
     bedrooms: ext.bedrooms || "3 Bedrooms",
     bathrooms: ext.bathrooms || "2 Bathrooms",
     dateOfServiceRequested: ext.preferredDate || new Date().toISOString().slice(0, 10),
-    dateAdded: thread.createdAt || new Date().toISOString(),
+    dateReceived: threadCreatedIso,
+    dateAdded: threadCreatedIso,
     status: thread.syncedQuoteNumber ? "Quoted" : "New",
     verdict: "Good lead",
     quotedAmount: Number(ext.estimatedTotal) || 280,
@@ -10809,12 +10912,13 @@ async function syncFbThreadToSheetAndOptionallyJobber(
     notes: `[${thread.pageName}] [DRAFT FOR OWNER REVIEW] ${ext.specificNotes ? `Notes: ${ext.specificNotes} | ` : ""}Messenger Transcript: ${transcriptSummary}`,
   };
 
-  const existingLeadIdx = store.adLeads.findIndex((l: any) => l.id === leadId);
-  const isFirstLeadSync = existingLeadIdx < 0;
-  if (existingLeadIdx >= 0) {
-    store.adLeads[existingLeadIdx] = { ...store.adLeads[existingLeadIdx], ...leadItem };
-  } else {
-    store.adLeads.unshift(leadItem);
+  if (!isOlderThan14Days && !isBeforeFreshStart && !isOutOfEdmontonOrFakeOrOutdatedLead(leadItem)) {
+    const existingLeadIdx = store.adLeads.findIndex((l: any) => l.id === leadId);
+    if (existingLeadIdx >= 0) {
+      store.adLeads[existingLeadIdx] = { ...store.adLeads[existingLeadIdx], ...leadItem };
+    } else {
+      store.adLeads.unshift(leadItem);
+    }
   }
 
   // Always ensure the Facebook lead is also saved as a client record in store.clients

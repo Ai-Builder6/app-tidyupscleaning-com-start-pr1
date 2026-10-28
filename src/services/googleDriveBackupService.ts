@@ -1,7 +1,28 @@
 import { User } from 'firebase/auth';
-import { getAccessTokenSync, googleSignIn } from '../lib/firebase';
+import { getAccessTokenSync, googleSignIn, requestGoogleDriveAccessTokenPopup } from '../lib/firebase';
 
 export const TIDYUPS_DRIVE_FOLDER_NAME = 'TidyUps Cleaning App Backup Zips';
+
+export const ARCHIVED_OLD_SPREADSHEET_IDS = new Set([
+  '1TifULi7n2BylQdvla-8DRvYHul_A1wXXzypUdBJwEeA',
+  '1TifULi7n2BylQdvla-8DRVYHul_A1wXXzypUdBJ_bB8',
+  '1-1palHco2hOEKDh8ivnLYX6-PuzeQtHhLQGkaD_Dp4I',
+  '1-1palHc3s80-c8p44-eb19344bf42a01fa28ba5c',
+]);
+
+export const DEFAULT_NEW_CLEAN_SHEET_URL = 'https://app.tidyupscleaning.com/clean-sheet';
+export const DEFAULT_NEW_CLEAN_SHEET_ID = 'tidyups-new-7tab-clean-sheet-2026';
+
+export function isArchivedOldSheetUrlOrId(val?: string | null): boolean {
+  const s = String(val || '').trim();
+  if (!s) return false;
+  for (const oldId of ARCHIVED_OLD_SPREADSHEET_IDS) {
+    if (s.includes(oldId) || s.includes('1TifULi7n2Byl') || s.includes('1-1palHc')) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export interface DriveFolderInfo {
   id: string;
@@ -571,28 +592,39 @@ async function performServerSideGoogleSheetSync(options?: {
   sheetTitle?: string;
   downloadXlsx?: boolean;
 }): Promise<LiveDriveSheetResult> {
-  const fallbackSheetId =
+  const candidateOptId =
     options?.spreadsheetId &&
     !options.spreadsheetId.includes('clean_sheet') &&
-    options.spreadsheetId.length >= 20
+    options.spreadsheetId.length >= 20 &&
+    !isArchivedOldSheetUrlOrId(options.spreadsheetId)
       ? options.spreadsheetId.trim()
-      : '1TifULi7n2BylQdvla-8DRvYHul_A1wXXzypUdBJwEeA';
-  let resolvedSpreadsheetId = fallbackSheetId;
-  let resolvedSheetUrl = `https://docs.google.com/spreadsheets/d/${resolvedSpreadsheetId}/edit`;
+      : '';
+  let resolvedSpreadsheetId = candidateOptId || DEFAULT_NEW_CLEAN_SHEET_ID;
+  let resolvedSheetUrl = candidateOptId
+    ? `https://docs.google.com/spreadsheets/d/${candidateOptId}/edit`
+    : DEFAULT_NEW_CLEAN_SHEET_URL;
   let resolvedSheetName =
-    options?.sheetTitle || 'TidyUps Clean Leads & Ads Hub (FB & Google Ads)';
+    options?.sheetTitle || 'TidyUps Brand-New Leads Hub (7 Tabs • Fresh Start)';
 
   try {
     const cfgRes = await fetch('/api/google-sheets/config?project=tidyups');
     if (cfgRes.ok) {
       const cfg = await cfgRes.json();
       const cfgId = cfg?.createdDriveSheetId || cfg?.spreadsheetId;
-      if (cfgId && !String(cfgId).includes('clean_sheet') && String(cfgId).length >= 20) {
+      if (
+        cfgId &&
+        !String(cfgId).includes('clean_sheet') &&
+        String(cfgId).length >= 20 &&
+        !isArchivedOldSheetUrlOrId(cfgId) &&
+        cfgId !== DEFAULT_NEW_CLEAN_SHEET_ID
+      ) {
         resolvedSpreadsheetId = String(cfgId);
         resolvedSheetUrl =
-          cfg?.createdDriveSheetUrl ||
-          cfg?.sheetUrl ||
-          `https://docs.google.com/spreadsheets/d/${resolvedSpreadsheetId}/edit`;
+          cfg?.createdDriveSheetUrl && !isArchivedOldSheetUrlOrId(cfg.createdDriveSheetUrl)
+            ? cfg.createdDriveSheetUrl
+            : cfg?.sheetUrl && !isArchivedOldSheetUrlOrId(cfg.sheetUrl)
+            ? cfg.sheetUrl
+            : `https://docs.google.com/spreadsheets/d/${resolvedSpreadsheetId}/edit`;
       }
       if (cfg?.createdDriveSheetName) {
         resolvedSheetName = cfg.createdDriveSheetName;
@@ -604,14 +636,16 @@ async function performServerSideGoogleSheetSync(options?: {
 
   // 1. Pull any new rows from connected Google Sheets first so nothing is ever overwritten
   let pullSnap: PullGoogleSheetLeadsResult | null = null;
-  try {
-    pullSnap = await pullNewLeadsFromGoogleSheetInDrive({
-      sheetUrl: resolvedSheetUrl,
-      projectId: 'tidyups',
-      promptAuthIfNeeded: false,
-    });
-  } catch {
-    // ignore pre-pull warning
+  if (resolvedSheetUrl.includes('docs.google.com/spreadsheets/d/') && !isArchivedOldSheetUrlOrId(resolvedSheetUrl)) {
+    try {
+      pullSnap = await pullNewLeadsFromGoogleSheetInDrive({
+        sheetUrl: resolvedSheetUrl,
+        projectId: 'tidyups',
+        promptAuthIfNeeded: false,
+      });
+    } catch {
+      // ignore pre-pull warning
+    }
   }
 
   // 2. Sync Jobber quotes + clients + leads on the server and generate formatted 20-column headers + TSV
@@ -636,7 +670,7 @@ async function performServerSideGoogleSheetSync(options?: {
     const dateStr = new Date().toISOString().slice(0, 10);
     await downloadFileFromApiWithoutNavigation(
       '/api/leads/export.xlsx?project=tidyups',
-      `TidyUps_Clean_Leads_Google_Sheet_${dateStr}.xlsx`
+      `TidyUps_New_7_Tab_Clean_Leads_Sheet_${dateStr}.xlsx`
     ).catch(() => {});
   }
 
@@ -659,17 +693,28 @@ async function performServerSideGoogleSheetSync(options?: {
 }
 
 /**
- * 1-Click: Creates or syncs the multi-tab Clean Google Sheet ("FB Leads", "Google Leads",
- * "Voice & Quick Quotes", "Pasted Leads", and 20-column "ScrubbyBuilder Leads" schema).
- * If no browser Google OAuth token is present, runs 100% server-side and downloads the formatted
- * multi-tab .xlsx workbook without opening any blocked Google OAuth popup.
+ * 1-Click: Creates a brand-new 7-tab Clean Google Sheet ("Facebook Leads 1", "Facebook Leads 2",
+ * "Google Leads 1", "Google Leads 2", "Other Ads", "Facebook AI", "Quo") in the user's Google Drive
+ * and connects its new URL as the active Connected Google Sheet URL!
  */
 export async function createNewCleanLeadsSheetInDrive(options?: {
   sheetTitle?: string;
   accessToken?: string | null;
 }): Promise<LiveDriveSheetResult> {
-  const token = options?.accessToken || getAccessTokenSync();
-  const userEmail: string | null = 'cleaningserviceyeg@gmail.com';
+  let token = options?.accessToken || getAccessTokenSync();
+  let userEmail: string | null = 'cleaningserviceyeg@gmail.com';
+
+  if (!token) {
+    try {
+      const popupAuth = await requestGoogleDriveAccessTokenPopup();
+      if (popupAuth?.accessToken) {
+        token = popupAuth.accessToken;
+        userEmail = popupAuth.user?.email || userEmail;
+      }
+    } catch {
+      // Fallback below if popup skipped
+    }
+  }
 
   if (!token) {
     return performServerSideGoogleSheetSync({

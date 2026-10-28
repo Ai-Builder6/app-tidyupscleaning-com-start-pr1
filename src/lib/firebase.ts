@@ -167,8 +167,7 @@ export const initAuth = (
  * avoiding the "The requested action is invalid" popup completely.
  */
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
-  // Never open a browser Google OAuth popup (which triggers "Error 400: origin_mismatch" on app.tidyupscleaning.com).
-  // All Google Sheets lead pulling, header formatting, and server backups run directly via server-side endpoints without requiring OAuth popups.
+  // Background syncs never open a browser Google OAuth popup (preventing unsolicited "Error 400: origin_mismatch" on app.tidyupscleaning.com).
   if (cachedAccessToken) {
     try {
       return await finalizeAccessTokenSession(cachedAccessToken);
@@ -177,6 +176,78 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
   }
   return null;
+};
+
+/**
+ * Explicit user-click OAuth flow for creating a brand-new 7-tab Google Sheet in Google Drive.
+ * Uses the already-authorized Cloud Run /oauth-bridge popup when on custom domains (app.tidyupscleaning.com)
+ * so it never triggers Error 400: origin_mismatch.
+ */
+export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
+  user: User;
+  accessToken: string;
+} | null> => {
+  if (cachedAccessToken) {
+    try {
+      return await finalizeAccessTokenSession(cachedAccessToken);
+    } catch {}
+  }
+
+  if (typeof window === 'undefined') return null;
+
+  return new Promise((resolve) => {
+    const bridgeOrigin = OAUTH_BRIDGE_PRIMARY_ORIGIN;
+    const currentOrigin = window.location.origin.replace(/\/$/, '');
+    const bridgeUrl =
+      currentOrigin.includes('.run.app')
+        ? `${currentOrigin}/oauth-bridge`
+        : `${bridgeOrigin}/oauth-bridge`;
+
+    const popup = window.open(
+      bridgeUrl,
+      'tidyups_google_drive_oauth',
+      'width=480,height=620,menubar=no,toolbar=no,location=no,status=no'
+    );
+
+    if (!popup) {
+      resolve(null);
+      return;
+    }
+
+    let settled = false;
+    const cleanup = () => {
+      window.removeEventListener('message', onMessage);
+      clearInterval(checkClosed);
+    };
+
+    const onMessage = async (event: MessageEvent) => {
+      if (!event?.data || event.data.type !== 'TIDYUPS_GOOGLE_OAUTH_SUCCESS') return;
+      const token = String(event.data.accessToken || '').trim();
+      if (!token || settled) return;
+      settled = true;
+      cleanup();
+      try {
+        const session = await finalizeAccessTokenSession(
+          token,
+          event.data.user?.email,
+          event.data.user?.name
+        );
+        resolve(session);
+      } catch {
+        resolve(null);
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+
+    const checkClosed = setInterval(() => {
+      if (popup.closed && !settled) {
+        settled = true;
+        cleanup();
+        resolve(null);
+      }
+    }, 500);
+  });
 };
 
 export const getAccessTokenSync = (): string | null => {
