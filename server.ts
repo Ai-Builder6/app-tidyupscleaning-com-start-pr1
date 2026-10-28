@@ -250,13 +250,43 @@ app.get("/api/oauth/origin-status", (req, res) => {
   });
 });
 
-// Active in-memory Google Drive session token cache (expires after 55 minutes)
+// Persistent Google Drive session token cache (survives server restarts & browser reloads)
+const GOOGLE_DRIVE_SESSION_FILE = path.join(process.cwd(), "data", "tidyups_google_drive_session.json");
+
 let activeGoogleDriveSession: {
   accessToken: string;
   email: string;
   displayName: string;
   expiresAt: number;
-} | null = null;
+} | null = (() => {
+  try {
+    if (fs.existsSync(GOOGLE_DRIVE_SESSION_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(GOOGLE_DRIVE_SESSION_FILE, "utf-8"));
+      if (parsed?.accessToken && Number(parsed.expiresAt) > Date.now()) {
+        return parsed;
+      }
+    }
+  } catch {}
+  return null;
+})();
+
+function saveGoogleDriveSessionToDisk(session: {
+  accessToken: string;
+  email: string;
+  displayName: string;
+  expiresAt: number;
+} | null) {
+  activeGoogleDriveSession = session;
+  try {
+    const dir = path.dirname(GOOGLE_DRIVE_SESSION_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (session) {
+      fs.writeFileSync(GOOGLE_DRIVE_SESSION_FILE, JSON.stringify(session, null, 2), "utf-8");
+    } else if (fs.existsSync(GOOGLE_DRIVE_SESSION_FILE)) {
+      fs.unlinkSync(GOOGLE_DRIVE_SESSION_FILE);
+    }
+  } catch {}
+}
 
 app.options("/api/google-drive/session-token", (_req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -273,6 +303,7 @@ app.get("/api/google-drive/session-token", (_req, res) => {
       accessToken: activeGoogleDriveSession.accessToken,
       email: activeGoogleDriveSession.email,
       displayName: activeGoogleDriveSession.displayName,
+      expiresAt: activeGoogleDriveSession.expiresAt,
     });
   }
   res.json({ active: false, accessToken: null });
@@ -282,13 +313,14 @@ app.post("/api/google-drive/session-token", (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   const { accessToken, email, displayName } = req.body || {};
   if (accessToken && typeof accessToken === "string") {
-    activeGoogleDriveSession = {
+    const session = {
       accessToken,
       email: email || "cleaningserviceyeg@gmail.com",
       displayName: displayName || "TidyUps Admin",
-      expiresAt: Date.now() + 55 * 60 * 1000,
+      expiresAt: Date.now() + 58 * 60 * 1000,
     };
-    return res.json({ success: true });
+    saveGoogleDriveSessionToDisk(session);
+    return res.json({ success: true, expiresAt: session.expiresAt });
   }
   res.status(400).json({ error: "Missing accessToken" });
 });
@@ -427,10 +459,14 @@ app.get("/oauth-bridge", (_req, res) => {
           }
         }
       });
-      client.requestAccessToken({ prompt: "select_account" });
+      client.requestAccessToken({
+        prompt: "",
+        login_hint: "cleaningserviceyeg@gmail.com"
+      });
     }
 
     document.getElementById("auth-btn").addEventListener("click", startOAuth);
+    window.addEventListener("load", () => setTimeout(startOAuth, 150));
   </script>
 </body>
 </html>`);
@@ -17209,29 +17245,19 @@ async function startServer() {
   const distPath = path.join(process.cwd(), "dist");
   const hasDist = fs.existsSync(distPath) && fs.existsSync(path.join(distPath, "index.html"));
 
-  // Self-healing Service Worker endpoints: immediately unregister any stale cached Service Workers in visitors' browsers
+  // Self-healing Service Worker endpoints: silently unregister any stale cached Service Workers WITHOUT ever reloading the page
   app.get(["/sw.js", "/dev-sw.js"], (_req, res) => {
     res.setHeader("Content-Type", "application/javascript; charset=UTF-8");
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-    res.setHeader("Clear-Site-Data", '"cache"');
     res.send(`
       self.addEventListener('install', function() {
         self.skipWaiting();
       });
       self.addEventListener('activate', function(event) {
         event.waitUntil(
-          self.clients.claim().then(function() {
-            return caches.keys();
-          }).then(function(names) {
+          caches.keys().then(function(names) {
             return Promise.all(names.map(function(name) { return caches.delete(name); }));
           }).then(function() {
-            return self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-          }).then(function(clients) {
-            clients.forEach(function(client) {
-              if (client.url && 'navigate' in client) {
-                client.navigate(client.url);
-              }
-            });
             return self.registration.unregister();
           })
         );

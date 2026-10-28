@@ -2051,15 +2051,13 @@ export function App() {
               localStorage.setItem('tidyups_footer_side_v2', data.footerButtonsSide);
             } catch {}
           }
-          // Restore last workspace state from server if user didn't already have a local tab or deep-link URL
+          // Do not overwrite activeTopView after mount so clicking Apply or switching tabs never jumps back or restarts the view
           if (data.workspaceState && typeof window !== 'undefined') {
-            const path = window.location.pathname.toLowerCase();
-            const hash = window.location.hash.toLowerCase();
-            const isRoot = (path === '/' || path === '') && !hash;
-            const localSavedTab = localStorage.getItem('tidyups_active_tab');
-            if (isRoot && !localSavedTab && data.workspaceState.activeTopView) {
-              setActiveTopView(data.workspaceState.activeTopView as any);
-            }
+            try {
+              if (!localStorage.getItem('tidyups_active_tab')) {
+                localStorage.setItem('tidyups_active_tab', activeTopView);
+              }
+            } catch {}
           }
         }
       })

@@ -114,13 +114,30 @@ export const initAuth = (
     authSuccessListeners.add(onAuthSuccess);
   }
 
-  // Check if backend already has an active Google Drive session token cached from this session
+  // Check if backend or primary Cloud Run bridge already has an active Google Drive session token cached
   if (!cachedAccessToken && typeof window !== 'undefined') {
     fetch('/api/google-drive/session-token')
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+      .then(async (data) => {
         if (data?.accessToken && !cachedAccessToken) {
-          finalizeAccessTokenSession(data.accessToken, data.email, data.displayName).catch(() => {});
+          await finalizeAccessTokenSession(data.accessToken, data.email, data.displayName);
+          return;
+        }
+        // Fallback: check primary Cloud Run bridge so preview & live domains share authorization seamlessly
+        if (!cachedAccessToken) {
+          try {
+            const bridgeRes = await fetch(`${OAUTH_BRIDGE_PRIMARY_ORIGIN}/api/google-drive/session-token`);
+            if (bridgeRes.ok) {
+              const bridgeData = await bridgeRes.json();
+              if (bridgeData?.accessToken && !cachedAccessToken) {
+                await finalizeAccessTokenSession(
+                  bridgeData.accessToken,
+                  bridgeData.email,
+                  bridgeData.displayName
+                );
+              }
+            }
+          } catch {}
         }
       })
       .catch(() => {});
@@ -177,7 +194,7 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
     } catch {}
   }
 
-  // Check if backend session already has a valid token cached
+  // Check if local backend or Cloud Run bridge session already has a valid token cached
   try {
     const cachedRes = await fetch('/api/google-drive/session-token');
     if (cachedRes.ok) {
@@ -187,6 +204,20 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
           cachedData.accessToken,
           cachedData.email,
           cachedData.displayName
+        );
+      }
+    }
+  } catch {}
+
+  try {
+    const bridgeCachedRes = await fetch(`${OAUTH_BRIDGE_PRIMARY_ORIGIN}/api/google-drive/session-token`);
+    if (bridgeCachedRes.ok) {
+      const bridgeCachedData = await bridgeCachedRes.json();
+      if (bridgeCachedData?.accessToken) {
+        return await finalizeAccessTokenSession(
+          bridgeCachedData.accessToken,
+          bridgeCachedData.email,
+          bridgeCachedData.displayName
         );
       }
     }

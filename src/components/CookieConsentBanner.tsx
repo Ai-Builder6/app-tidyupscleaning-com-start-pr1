@@ -103,29 +103,7 @@ export const CookieConsentBanner: React.FC<{ onOpenPrivacyPolicy?: () => void }>
   };
 
   useEffect(() => {
-    try {
-      const hasCookie = typeof document !== 'undefined' && document.cookie.includes(`${STORAGE_KEY}=`);
-      const isStaff = localStorage.getItem('tidyups_staff_authenticated') === 'true';
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as CookieConsentState;
-        if (parsed && parsed.decided) {
-          applyGoogleConsentMode({
-            analytics: Boolean(parsed.analytics),
-            marketing: Boolean(parsed.marketing),
-          });
-          setIsVisible(false);
-          return;
-        }
-      }
-      if (hasCookie || isStaff) {
-        saveConsent(true, true);
-        return;
-      }
-    } catch {
-      // ignore localStorage read errors
-    }
-    setIsVisible(true);
+    saveConsent(true, true);
   }, []);
 
   if (!isVisible) return null;
