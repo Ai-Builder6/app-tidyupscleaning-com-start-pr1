@@ -367,12 +367,20 @@ export function App() {
     return false;
   });
 
-  // Detect if visitor is on the dedicated customer-only /booking, /book, or /thank-you path
+  // Detect if visitor is on the dedicated customer-only /booking, /book, book.tidyupscleaning.com, or /thank-you path
   const [isStandaloneBookingDomain] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
+      const host = window.location.hostname.toLowerCase();
       const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
       const search = window.location.search.toLowerCase();
+      const isBookSubdomain = host.startsWith('book.') || host.startsWith('www.book.');
+      if (isBookSubdomain && path !== '/thank-you' && path !== '/thankyou') {
+        try {
+          window.history.replaceState({}, '', `/booking${window.location.search}`);
+        } catch {}
+      }
       if (
+        isBookSubdomain ||
         path === '/thank-you' ||
         path === '/thankyou' ||
         path === '/booking/thank-you' ||
@@ -397,9 +405,12 @@ export function App() {
   // Staff & Owner Authentication state
   const [isStaffAuthenticated, setIsStaffAuthenticated] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
+      const host = window.location.hostname.toLowerCase();
       const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
       const search = window.location.search.toLowerCase();
+      const isBookSubdomain = host.startsWith('book.') || host.startsWith('www.book.');
       if (
+        isBookSubdomain ||
         path === '/thank-you' ||
         path === '/thankyou' ||
         path === '/booking/thank-you' ||

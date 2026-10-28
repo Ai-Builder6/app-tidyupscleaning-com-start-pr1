@@ -100,6 +100,26 @@ const PORT = cliPort || (process.env.PORT ? parseInt(process.env.PORT, 10) : (pr
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+// Automatically redirect anyone visiting book.tidyupscleaning.com to https://app.tidyupscleaning.com/booking (preserving all FB/Google Ad query params)
+app.use((req, res, next) => {
+  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").toLowerCase();
+  if (
+    (host.startsWith("book.tidyupscleaning.com") || host.startsWith("www.book.tidyupscleaning.com")) &&
+    req.method === "GET" &&
+    !req.path.startsWith("/api/") &&
+    !req.path.startsWith("/assets/")
+  ) {
+    const queryIndex = req.originalUrl.indexOf("?");
+    const querySuffix = queryIndex !== -1 ? req.originalUrl.slice(queryIndex) : "";
+    const targetPath =
+      req.path.toLowerCase().startsWith("/thank-you") || req.path.toLowerCase().startsWith("/thankyou")
+        ? "/thank-you"
+        : "/booking";
+    return res.redirect(302, `https://app.tidyupscleaning.com${targetPath}${querySuffix}`);
+  }
+  next();
+});
+
 // Health check endpoints for orchestration & container probes
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "healthy" });
@@ -7449,19 +7469,22 @@ async function pullLeadsFromConnectedGoogleSheets(
       }
     }
 
-    // Strategy C: Public gviz CSV export across all common tab names
+    // Strategy C: Public gviz CSV export across all 7 new tab names & common fallbacks
     if (!parsedViaXlsx) {
       for (const tabName of [
+        "Facebook Leads 1",
+        "Facebook Leads 2",
+        "Google Leads 1",
+        "Google Leads 2",
+        "Other Ads",
+        "Facebook AI",
+        "Quo",
+        "All New Leads (14-Day)",
         "Facebook Leads",
         "FB Leads",
-        "ScrubbyBuilder Leads",
         "Google Leads",
-        "Master Leads & Quotes",
-        "Voice & Quick Quotes",
-        "Pasted Leads",
         "Form 1",
         "Sheet1",
-        "Leads",
         "",
       ]) {
         try {
@@ -7484,7 +7507,7 @@ async function pullLeadsFromConnectedGoogleSheets(
           scannedTabsSet.add(tabName || "Default Tab");
           extractLeadsFromSheetMatrix({
             matrix,
-            tabName: tabName || "FB Leads",
+            tabName: tabName || "Facebook Leads 1",
             spreadsheetId: sid,
             store,
             newlyImportedLeads,
@@ -8434,6 +8457,9 @@ app.post("/api/public/book", async (req, res) => {
       specialInstructions,
       heardAbout,
       utmSource,
+      adTab,
+      fbclid,
+      gclid,
       bookingFormVariant,
     } = req.body || {};
 
@@ -8595,11 +8621,20 @@ app.post("/api/public/book", async (req, res) => {
     const depositRequired = matchedCatalog?.depositRequired || 100;
 
     const reqDate = preferredDate || new Date().toISOString().slice(0, 10);
-    const routePathLabel = bookingFormVariant === "CALCULATOR" ? "app.tidyupscleaning.com/book" : "app.tidyupscleaning.com/booking";
+    const routePathLabel = "app.tidyupscleaning.com/booking";
 
-    // Determine source tab for Master Leads & Quotes Table (Facebook Leads, Google Leads, or Website Booking)
-    const rawOriginSource = String(utmSource || heardAbout || routePathLabel);
-    const { sourceTab: resolvedSourceTab } = resolveCleanSheetTab(rawOriginSource);
+    // Determine exact tab in the 7-tab Google Sheet (Facebook Leads 1, Facebook Leads 2, Google Leads 1, Google Leads 2, Other Ads, Facebook AI, Quo)
+    const rawOriginSource = [
+      adTab,
+      utmSource,
+      heardAbout,
+      fbclid ? "Facebook Leads 1" : "",
+      gclid ? "Google Leads 1" : "",
+      "Other Ads",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const { sourceTab: resolvedSourceTab, source: resolvedSourceLabel } = resolveCleanSheetTab(rawOriginSource);
 
     const fullDetailsNote = [
       `Online Booking (${routePathLabel} • ${canonicalServiceLabel} • ${crewLabel})`,
@@ -8752,14 +8787,12 @@ app.post("/api/public/book", async (req, res) => {
       bedrooms: bedrooms || "3 Bedrooms",
       bathrooms: bathrooms || "2 Bathrooms",
       dateOfServiceRequested: reqDate,
-      source: (resolvedSourceTab === "FB Leads"
-        ? "Facebook Lead Ads"
-        : resolvedSourceTab === "Google Leads"
-        ? "Google Ads / Search"
-        : `Online Booking (${routePathLabel})`) as any,
+      source: resolvedSourceLabel as any,
       sourceTab: resolvedSourceTab,
-      campaignName: `${routePathLabel} (${heardAbout || "Direct Online Booking"})`,
+      campaignName: `${routePathLabel} (${heardAbout || resolvedSourceTab})`,
       dateReceived: new Date().toISOString(),
+      communicatedAt: new Date().toISOString(),
+      hasCommunicated: true,
       status: "Quoted" as any,
       verdict: "Good lead" as const,
       isJobberSynced: Boolean(jobberClientId),

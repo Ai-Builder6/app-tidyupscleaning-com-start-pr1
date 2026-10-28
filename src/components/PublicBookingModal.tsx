@@ -112,13 +112,104 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
   const [bedrooms, setBedrooms] = useState('3 Bedrooms');
   const [bathrooms, setBathrooms] = useState('2 Bathrooms');
   const [cleanerCount, setCleanerCount] = useState<1 | 2>(2);
+  // Auto-detect Facebook Ads & Google Ads parameters (?source=..., ?utm_source=..., ?fbclid=..., ?gclid=...) on app.tidyupscleaning.com/booking
+  const detectedAdRouting = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return {
+        defaultHeardAbout: 'Google Search / Ad',
+        adTab: 'Other Ads',
+        utmSource: 'app.tidyupscleaning.com/booking',
+        fbclid: '',
+        gclid: '',
+      };
+    }
+    const params = new URLSearchParams(window.location.search);
+    const rawSource = (
+      params.get('source') ||
+      params.get('utm_source') ||
+      params.get('tab') ||
+      params.get('utm_campaign') ||
+      ''
+    ).toLowerCase();
+    const fbclid = params.get('fbclid') || '';
+    const gclid = params.get('gclid') || '';
+    const ref = (document.referrer || '').toLowerCase();
+
+    if (rawSource.includes('facebook_leads_2') || rawSource.includes('fb2') || rawSource.includes('facebook 2')) {
+      return {
+        defaultHeardAbout: 'Facebook Ad (Campaign 2)',
+        adTab: 'Facebook Leads 2',
+        utmSource: 'Facebook Leads 2',
+        fbclid,
+        gclid,
+      };
+    }
+    if (rawSource.includes('facebook_ai') || rawSource.includes('messenger')) {
+      return {
+        defaultHeardAbout: 'Facebook Messenger AI',
+        adTab: 'Facebook AI',
+        utmSource: 'Facebook AI',
+        fbclid,
+        gclid,
+      };
+    }
+    if (
+      rawSource.includes('fb') ||
+      rawSource.includes('facebook') ||
+      rawSource.includes('instagram') ||
+      rawSource.includes('meta') ||
+      Boolean(fbclid) ||
+      ref.includes('facebook.com') ||
+      ref.includes('instagram.com')
+    ) {
+      return {
+        defaultHeardAbout: 'Facebook / Instagram Ad',
+        adTab: 'Facebook Leads 1',
+        utmSource: 'Facebook Leads 1',
+        fbclid,
+        gclid,
+      };
+    }
+    if (rawSource.includes('google_leads_2') || rawSource.includes('google2') || rawSource.includes('google 2')) {
+      return {
+        defaultHeardAbout: 'Google Search / Ad (Campaign 2)',
+        adTab: 'Google Leads 2',
+        utmSource: 'Google Leads 2',
+        fbclid,
+        gclid,
+      };
+    }
+    if (
+      rawSource.includes('google') ||
+      rawSource.includes('gmb') ||
+      rawSource.includes('lsa') ||
+      Boolean(gclid) ||
+      ref.includes('google.')
+    ) {
+      return {
+        defaultHeardAbout: 'Google Search / Ad',
+        adTab: 'Google Leads 1',
+        utmSource: 'Google Leads 1',
+        fbclid,
+        gclid,
+      };
+    }
+    return {
+      defaultHeardAbout: 'Website (app.tidyupscleaning.com/booking)',
+      adTab: 'Other Ads',
+      utmSource: rawSource || 'app.tidyupscleaning.com/booking',
+      fbclid,
+      gclid,
+    };
+  }, []);
+
   const [preferredDate, setPreferredDate] = useState(() => {
     const tmrw = new Date();
     tmrw.setDate(tmrw.getDate() + 1);
     return tmrw.toISOString().slice(0, 10);
   });
   const [preferredTime, setPreferredTime] = useState('Morning (8:00 AM - 12:00 PM)');
-  const [heardAbout, setHeardAbout] = useState('Website (tidyupscleaning.com)');
+  const [heardAbout, setHeardAbout] = useState(() => detectedAdRouting.defaultHeardAbout);
   const [specialInstructions, setSpecialInstructions] = useState('');
 
   // Continuous Voice Dictation & Box Lighting State (Never shuts off on pause until Stop is clicked)
@@ -613,6 +704,16 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
     setIsSubmitting(true);
     setErrorMsg(null);
 
+    const resolvedAdTab = (() => {
+      if (detectedAdRouting.adTab !== 'Other Ads') return detectedAdRouting.adTab;
+      const h = heardAbout.toLowerCase();
+      if (h.includes('facebook') && h.includes('2')) return 'Facebook Leads 2';
+      if (h.includes('facebook') || h.includes('instagram')) return 'Facebook Leads 1';
+      if (h.includes('google') && h.includes('2')) return 'Google Leads 2';
+      if (h.includes('google')) return 'Google Leads 1';
+      return 'Other Ads';
+    })();
+
     const bookingPayload = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
@@ -629,6 +730,10 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
       preferredDate: preferredDate || new Date().toISOString().slice(0, 10),
       preferredTime,
       heardAbout,
+      utmSource: resolvedAdTab,
+      adTab: resolvedAdTab,
+      fbclid: detectedAdRouting.fbclid,
+      gclid: detectedAdRouting.gclid,
       specialInstructions: specialInstructions.trim(),
       bookingFormVariant: 'SIMPLE_3_OPTION',
     };
@@ -1284,16 +1389,39 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                   </select>
                 </div>
 
+                {/* HOW DID YOU HEAR ABOUT US BOX (Auto-selects Facebook or Google Ad when clicked from an ad) */}
+                <div className="sm:col-span-6 p-3.5 rounded-2xl border-2 border-zinc-800 bg-zinc-900/90">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-black text-white">How Did You Hear About Us?</label>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-pink-500/20 border border-pink-400/50 text-pink-300 text-[10px] font-bold">
+                      Auto-Detected ✓
+                    </span>
+                  </div>
+                  <select
+                    value={heardAbout}
+                    onChange={(e) => setHeardAbout(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-black/90 border border-zinc-700 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-pink-500"
+                  >
+                    <option value="Google Search / Ad">Google Search / Ad</option>
+                    <option value="Google Search / Ad (Campaign 2)">Google Search / Ad (Campaign 2)</option>
+                    <option value="Facebook / Instagram Ad">Facebook / Instagram Ad</option>
+                    <option value="Facebook Ad (Campaign 2)">Facebook Ad (Campaign 2)</option>
+                    <option value="Website (app.tidyupscleaning.com/booking)">Website (tidyupscleaning.com / book.tidyupscleaning.com)</option>
+                    <option value="Friend / Family Referral">Friend / Family / Realtor Referral</option>
+                    <option value="Repeat TidyUps Client">Repeat TidyUps Client</option>
+                  </select>
+                </div>
+
                 {/* SPECIAL INSTRUCTIONS BOX */}
                 <div
-                  className={`sm:col-span-12 p-3.5 rounded-2xl border-2 ${getLitBoxClass(
+                  className={`sm:col-span-6 p-3.5 rounded-2xl border-2 ${getLitBoxClass(
                     'specialInstructions',
                     Boolean(specialInstructions.trim())
                   )}`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs font-black text-white">
-                      Tell Us About Your Home (Appliances, Basement, Pets, Lockbox, or Special Requests)
+                      Special Requests (Appliances, Basement, Pets, Lockbox)
                     </label>
                     {renderLitBadge('specialInstructions', Boolean(specialInstructions.trim()), false)}
                   </div>
@@ -1301,7 +1429,7 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                     rows={2}
                     value={specialInstructions}
                     onChange={(e) => setSpecialInstructions(e.target.value)}
-                    placeholder="e.g. Main floor + basement, inside oven & fridge needed, key in lockbox, or any specific areas you'd like us to quote & focus on..."
+                    placeholder="e.g. Main floor + basement, inside oven & fridge needed, key in lockbox..."
                     className="w-full px-3.5 py-2 bg-black/90 border border-zinc-700 rounded-xl text-xs font-medium text-white placeholder-zinc-500 focus:outline-none focus:border-pink-500"
                   />
                 </div>
@@ -1436,67 +1564,98 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
   if (mode === 'STANDALONE_PAGE') {
     return (
       <div className="min-h-screen w-full bg-gradient-to-b from-black via-zinc-950 to-black py-6 sm:py-10 px-4 text-white">
-        {/* Owner Quick-Switch Bar (Only visible when Owner is logged in inside app.tidyupscleaning.com) */}
+        {/* Owner & Jess Ad Reconnection Bar (Only visible when Owner/Staff is logged in inside app.tidyupscleaning.com) */}
         {isOwnerViewing && (
-          <div className="max-w-4xl mx-auto mb-4 bg-zinc-950 text-white rounded-2xl border-2 border-pink-500 p-3.5 flex flex-wrap items-center justify-between gap-2.5 shadow-lg">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-pink-500 to-red-600 text-white font-black text-[10px] uppercase">
-                👑 Owner Controls
-              </span>
-              <span className="font-bold text-zinc-200">
-                Viewing <code className="text-pink-400 font-mono">/booking</code> (3-Option Voice &amp; Lit-Box Form: Move-Out • Basic • Deep)
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  handleCopyBookingUrl('https://app.tidyupscleaning.com/booking', 'booking')
-                }
-                className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                {copiedUrl === 'booking' ? (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Copied /booking Link!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copy /booking Link</span>
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  handleCopyBookingUrl('https://app.tidyupscleaning.com/thank-you', 'thankyou')
-                }
-                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer"
-                title="Copy Google Ads Conversion Page Link (https://app.tidyupscleaning.com/thank-you)"
-              >
-                {copiedUrl === 'thankyou' ? (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Copied /thank-you!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copy /thank-you Ads Link</span>
-                  </>
-                )}
-              </button>
-              {onSwitchToCalculatorMode && (
+          <div className="max-w-4xl mx-auto mb-4 bg-zinc-950 text-white rounded-2xl border-2 border-pink-500 p-4 space-y-3 shadow-lg">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 text-xs flex-wrap">
+                <span className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-pink-500 to-red-600 text-white font-black text-[10px] uppercase">
+                  👑 Jess &amp; Owner Ad Links
+                </span>
+                <span className="font-bold text-zinc-200">
+                  Official Booking URL:{' '}
+                  <code className="text-pink-400 font-mono font-black">https://app.tidyupscleaning.com/booking</code>{' '}
+                  <span className="text-zinc-400">(anyone visiting <code className="text-emerald-300">book.tidyupscleaning.com</code> auto-redirects here!)</span>
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={onSwitchToCalculatorMode}
-                  className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  onClick={() =>
+                    handleCopyBookingUrl('https://app.tidyupscleaning.com/booking', 'booking')
+                  }
+                  className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Calculator className="w-3.5 h-3.5" />
-                  <span>Switch to /book (Quote Calculator Variation)</span>
+                  {copiedUrl === 'booking' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Copied app.tidyupscleaning.com/booking!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Main /booking Link</span>
+                    </>
+                  )}
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopyBookingUrl('https://app.tidyupscleaning.com/thank-you', 'thankyou')
+                  }
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer"
+                  title="Copy Google Ads Conversion Page Link (https://app.tidyupscleaning.com/thank-you)"
+                >
+                  {copiedUrl === 'thankyou' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Copied /thank-you!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy /thank-you Ads Link</span>
+                    </>
+                  )}
+                </button>
+                {onSwitchToCalculatorMode && (
+                  <button
+                    type="button"
+                    onClick={onSwitchToCalculatorMode}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-pink-500/40 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Calculator className="w-3.5 h-3.5 text-pink-400" />
+                    <span>Switch to Quote Calculator View</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 1-Click Campaign Links for Jess to Reconnect Facebook Ads 1 & 2, Google Ads 1 & 2, and Other Ads */}
+            <div className="pt-2.5 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="text-zinc-300 font-bold">
+                🔗 <strong>For Jess — 1-Click Ad Destination URLs</strong> (auto-routes each booking into its matching Google Sheet tab):
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { key: 'fb1', label: '🔵 Facebook Leads 1', url: 'https://app.tidyupscleaning.com/booking?source=facebook_leads_1', cls: 'bg-[#1877F2] hover:bg-blue-500 text-white' },
+                  { key: 'fb2', label: '🔷 Facebook Leads 2', url: 'https://app.tidyupscleaning.com/booking?source=facebook_leads_2', cls: 'bg-[#0A66C2] hover:bg-sky-500 text-white' },
+                  { key: 'gg1', label: '🟢 Google Leads 1', url: 'https://app.tidyupscleaning.com/booking?source=google_leads_1', cls: 'bg-[#0F9D58] hover:bg-emerald-500 text-white' },
+                  { key: 'gg2', label: '🌲 Google Leads 2', url: 'https://app.tidyupscleaning.com/booking?source=google_leads_2', cls: 'bg-[#0D9488] hover:bg-teal-500 text-white' },
+                  { key: 'oth', label: '🟠 Other Ads', url: 'https://app.tidyupscleaning.com/booking?source=other_ads', cls: 'bg-[#D97706] hover:bg-amber-500 text-white' },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => handleCopyBookingUrl(item.url, item.key)}
+                    className={`px-2.5 py-1 rounded-lg font-black flex items-center gap-1 cursor-pointer transition-all ${item.cls}`}
+                    title={`Copy ${item.url}`}
+                  >
+                    {copiedUrl === item.key ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedUrl === item.key ? `Copied ${item.label}!` : item.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
