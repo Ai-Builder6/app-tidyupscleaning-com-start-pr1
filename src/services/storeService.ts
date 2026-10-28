@@ -98,6 +98,9 @@ if (!fs.existsSync(DATA_DIR)) {
   }
 }
 
+let inMemoryStoreCache: AppPersistentStore | null = null;
+let inMemoryStoreMtimeMs = 0;
+
 /**
  * Loads stored data from disk exclusively for TidyUps Cleaning (app.tidyupscleaning.com)
  */
@@ -106,19 +109,29 @@ export function loadStore(_projectId?: string): AppPersistentStore | null {
   const bundledFile = resolveBundledStoreFilePath();
 
   try {
-    const candidateFiles = [targetFile, bundledFile];
+    if (inMemoryStoreCache && fs.existsSync(targetFile)) {
+      const currentMtime = fs.statSync(targetFile).mtimeMs;
+      if (currentMtime === inMemoryStoreMtimeMs) {
+        return inMemoryStoreCache;
+      }
+    }
+
+    const candidateFiles = Array.from(new Set([targetFile, bundledFile]));
 
     let newestStore: AppPersistentStore | null = null;
     let newestTime = 0;
+    let chosenMtime = 0;
 
     for (const file of candidateFiles) {
       if (fs.existsSync(file)) {
         try {
+          const stat = fs.statSync(file);
           const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as AppPersistentStore;
           const ts = parsed?.lastSavedAt ? new Date(parsed.lastSavedAt).getTime() : 1;
           if (!newestStore || ts > newestTime) {
             newestStore = parsed;
             newestTime = ts;
+            chosenMtime = stat.mtimeMs;
           }
         } catch {
           // skip unreadable candidate
@@ -148,6 +161,8 @@ export function loadStore(_projectId?: string): AppPersistentStore | null {
         }
         newestStore.quoCallLogs = Array.from(deduped.values());
       }
+      inMemoryStoreCache = newestStore;
+      inMemoryStoreMtimeMs = chosenMtime;
       return newestStore;
     }
   } catch (err) {
@@ -338,6 +353,10 @@ export function saveStore(
     const json = JSON.stringify(merged, null, 2).replace(/AC([0-9a-f]{32})/gi, "QUO_$1");
 
     fs.writeFileSync(targetFile, json, "utf-8");
+    inMemoryStoreCache = merged;
+    try {
+      inMemoryStoreMtimeMs = fs.statSync(targetFile).mtimeMs;
+    } catch {}
 
     return true;
   } catch (err) {

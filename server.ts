@@ -17251,14 +17251,113 @@ async function startServer() {
     `);
   });
 
+  const server = http.createServer(app);
+
+  // Attach WebSocket server for real-time internal messaging
+  const wss = new WebSocketServer({ server, path: "/ws/chat" });
+
+  wss.on("error", (e: any) => {
+    console.warn("WebSocket server notice:", e?.message || e);
+  });
+
+  wss.on("connection", (ws: WebSocket) => {
+    const clientEntry = { ws, userId: undefined as string | undefined };
+    connectedChatClients.add(clientEntry);
+
+    ws.send(JSON.stringify({ type: "CONNECTED", count: chatMessages.length }));
+
+    ws.on("message", (data) => {
+      try {
+        const parsed = JSON.parse(data.toString());
+        if (parsed.type === "REGISTER_USER") {
+          clientEntry.userId = parsed.userId;
+        } else if (parsed.type === "SEND_MESSAGE") {
+          const { senderId, senderName, senderRole, recipientId, recipientName, text, ticketId } = parsed;
+          if (senderId && text) {
+            const newMsg: StoredChatMessage = {
+              id: `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+              senderId,
+              senderName: senderName || "Team Member",
+              senderRole: senderRole || "CLEANER",
+              recipientId: recipientId || "BROADCAST_ALL",
+              recipientName: recipientName || (recipientId === "BROADCAST_ALL" ? "All Team Members" : "Team Member"),
+              text: String(text).trim(),
+              timestamp: new Date().toISOString(),
+              ticketId: ticketId || undefined,
+              read: false,
+            };
+            persistChatMessage(newMsg);
+          }
+        }
+      } catch (e) {
+        console.warn("Error parsing websocket message:", e);
+      }
+    });
+
+    ws.on("close", () => {
+      connectedChatClients.delete(clientEntry);
+    });
+
+    ws.on("error", (e) => {
+      console.warn("WebSocket client error:", e);
+      connectedChatClients.delete(clientEntry);
+    });
+  });
+
+  // Start listening on port 3000 IMMEDIATELY so supervisor health probes succeed without waiting for Vite initialization
+  let activeListenPort = PORT;
+  server.listen(activeListenPort, "0.0.0.0", () => {
+    console.log(`\n  ➜  Local:   http://localhost:${activeListenPort}/`);
+    console.log(`  ➜  Network: http://0.0.0.0:${activeListenPort}/`);
+    console.log(`  Dispatch Server ready on port ${activeListenPort} (WebSocket at /ws/chat)\n`);
+  });
+
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE" && activeListenPort !== 3000) {
+      console.warn(`Port ${activeListenPort} is occupied by supervisor; falling back to port 3000...`);
+      activeListenPort = 3000;
+      server.listen(3000, "0.0.0.0");
+    } else if (err.code === "EADDRINUSE") {
+      console.error(`Port ${activeListenPort} is already in use. Exiting to allow supervisor restart.`);
+      process.exit(1);
+    } else {
+      console.error("Server error:", err);
+    }
+  });
+
+  const shutdown = () => {
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+
   // Vite middleware for development or fallback if dist is unbuilt
   if (process.env.NODE_ENV !== "production" || !hasDist) {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
-      appType: "spa",
+    let viteMiddlewares: any = null;
+    const viteInitPromise = (async () => {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true, hmr: false },
+        appType: "spa",
+      });
+      viteMiddlewares = vite.middlewares;
+    })();
+
+    app.use(async (req, res, next) => {
+      if (!viteMiddlewares) {
+        try {
+          await viteInitPromise;
+        } catch (err) {
+          return next(err);
+        }
+      }
+      if (viteMiddlewares) {
+        return viteMiddlewares(req, res, next);
+      }
+      next();
     });
-    app.use(vite.middlewares);
   } else {
     app.use(
       express.static(distPath, {
@@ -17305,89 +17404,6 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
-
-  const server = http.createServer(app);
-
-  // Attach WebSocket server for real-time internal messaging
-  const wss = new WebSocketServer({ server, path: "/ws/chat" });
-
-  wss.on("error", (e: any) => {
-    console.warn("WebSocket server notice:", e?.message || e);
-  });
-
-  wss.on("connection", (ws: WebSocket, req) => {
-    let clientEntry = { ws, userId: undefined as string | undefined };
-    connectedChatClients.add(clientEntry);
-
-    // Initial greeting / ack
-    ws.send(JSON.stringify({ type: "CONNECTED", count: chatMessages.length }));
-
-    ws.on("message", (data) => {
-      try {
-        const parsed = JSON.parse(data.toString());
-        if (parsed.type === "REGISTER_USER") {
-          clientEntry.userId = parsed.userId;
-        } else if (parsed.type === "SEND_MESSAGE") {
-          const { senderId, senderName, senderRole, recipientId, recipientName, text, ticketId } = parsed;
-          if (senderId && text) {
-            const newMsg: StoredChatMessage = {
-              id: `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-              senderId,
-              senderName: senderName || "Team Member",
-              senderRole: senderRole || "CLEANER",
-              recipientId: recipientId || "BROADCAST_ALL",
-              recipientName: recipientName || (recipientId === "BROADCAST_ALL" ? "All Team Members" : "Team Member"),
-              text: String(text).trim(),
-              timestamp: new Date().toISOString(),
-              ticketId: ticketId || undefined,
-              read: false,
-            };
-            persistChatMessage(newMsg);
-          }
-        }
-      } catch (e) {
-        console.warn("Error parsing websocket message:", e);
-      }
-    });
-
-    ws.on("close", () => {
-      connectedChatClients.delete(clientEntry);
-    });
-
-    ws.on("error", (e) => {
-      console.warn("WebSocket client error:", e);
-      connectedChatClients.delete(clientEntry);
-    });
-  });
-
-  let activeListenPort = PORT;
-  server.listen(activeListenPort, "0.0.0.0", () => {
-    console.log(`\n  ➜  Local:   http://localhost:${activeListenPort}/`);
-    console.log(`  ➜  Network: http://0.0.0.0:${activeListenPort}/`);
-    console.log(`  Dispatch Server ready on port ${activeListenPort} (WebSocket at /ws/chat)\n`);
-  });
-
-  server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE" && activeListenPort !== 3000) {
-      console.warn(`Port ${activeListenPort} is occupied by supervisor; falling back to port 3000...`);
-      activeListenPort = 3000;
-      server.listen(3000, "0.0.0.0");
-    } else if (err.code === "EADDRINUSE") {
-      console.error(`Port ${activeListenPort} is already in use. Exiting to allow supervisor restart.`);
-      process.exit(1);
-    } else {
-      console.error("Server error:", err);
-    }
-  });
-
-  // Graceful termination handling
-  const shutdown = () => {
-    server.close(() => {
-      process.exit(0);
-    });
-  };
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
 }
 
 if (!process.env.VERCEL) {
