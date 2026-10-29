@@ -52,13 +52,65 @@ export const db = (() => {
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 let cachedFallbackUser: User | null = null;
+const rejectedTokens = new Set<string>();
 const authSuccessListeners = new Set<(user: User, token: string) => void>();
+
+export async function verifyGoogleAccessToken(
+  token: string | null | undefined
+): Promise<{ email?: string; expiresIn: number } | null> {
+  const clean = String(token || '').trim();
+  if (!clean || rejectedTokens.has(clean)) {
+    return null;
+  }
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(clean)}`
+    );
+    if (!res.ok) {
+      rejectedTokens.add(clean);
+      if (cachedAccessToken === clean) cachedAccessToken = null;
+      return null;
+    }
+    const info = await res.json();
+    const expiresIn = Number(info?.expires_in || 0);
+    if (info?.error || isNaN(expiresIn) || expiresIn <= 90) {
+      rejectedTokens.add(clean);
+      if (cachedAccessToken === clean) cachedAccessToken = null;
+      return null;
+    }
+    return {
+      email: info.email,
+      expiresIn,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearCachedAccessToken(badToken?: string | null): void {
+  if (badToken) {
+    rejectedTokens.add(String(badToken).trim());
+  }
+  if (cachedAccessToken) {
+    rejectedTokens.add(cachedAccessToken);
+  }
+  cachedAccessToken = null;
+  fetch('/api/google-drive/session-token', {
+    method: 'DELETE',
+  }).catch(() => {});
+}
 
 async function finalizeAccessTokenSession(
   accessToken: string,
   emailHint?: string,
   nameHint?: string
 ): Promise<{ user: User; accessToken: string }> {
+  const verified = await verifyGoogleAccessToken(accessToken);
+  if (!verified) {
+    clearCachedAccessToken(accessToken);
+    throw new Error('GOOGLE_TOKEN_EXPIRED_OR_INVALID');
+  }
+
   cachedAccessToken = accessToken;
   let resolvedUser: User | null = null;
 
@@ -70,7 +122,7 @@ async function finalizeAccessTokenSession(
       const info = await infoRes.json();
       resolvedUser = {
         uid: info.sub || 'google-drive-user',
-        email: info.email || emailHint || 'cleaningserviceyeg@gmail.com',
+        email: info.email || verified.email || emailHint || 'cleaningserviceyeg@gmail.com',
         displayName: info.name || info.email || nameHint || 'TidyUps Admin',
         photoURL: info.picture || null,
       } as unknown as User;
@@ -80,7 +132,7 @@ async function finalizeAccessTokenSession(
   if (!resolvedUser) {
     resolvedUser = {
       uid: 'google-drive-user',
-      email: emailHint || 'cleaningserviceyeg@gmail.com',
+      email: verified.email || emailHint || 'cleaningserviceyeg@gmail.com',
       displayName: nameHint || 'TidyUps Admin',
     } as unknown as User;
   }
@@ -92,7 +144,7 @@ async function finalizeAccessTokenSession(
     } catch {}
   });
 
-  // Also cache the active token on our backend for 55 minutes so any tab/view can reuse it seamlessly
+  // Also cache the verified active token on our backend for 55 minutes so any tab/view can reuse it seamlessly
   fetch('/api/google-drive/session-token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -114,14 +166,18 @@ export const initAuth = (
     authSuccessListeners.add(onAuthSuccess);
   }
 
-  // Check if backend or primary Cloud Run bridge already has an active Google Drive session token cached
+  // Check if backend or primary Cloud Run bridge already has a LIVE, VERIFIED Google Drive session token cached
   if (!cachedAccessToken && typeof window !== 'undefined') {
     fetch('/api/google-drive/session-token')
       .then((r) => (r.ok ? r.json() : null))
       .then(async (data) => {
         if (data?.accessToken && !cachedAccessToken) {
-          await finalizeAccessTokenSession(data.accessToken, data.email, data.displayName);
-          return;
+          try {
+            await finalizeAccessTokenSession(data.accessToken, data.email, data.displayName);
+            return;
+          } catch {
+            clearCachedAccessToken(data.accessToken);
+          }
         }
         // Fallback: check primary Cloud Run bridge so preview & live domains share authorization seamlessly
         if (!cachedAccessToken) {
@@ -130,11 +186,15 @@ export const initAuth = (
             if (bridgeRes.ok) {
               const bridgeData = await bridgeRes.json();
               if (bridgeData?.accessToken && !cachedAccessToken) {
-                await finalizeAccessTokenSession(
-                  bridgeData.accessToken,
-                  bridgeData.email,
-                  bridgeData.displayName
-                );
+                try {
+                  await finalizeAccessTokenSession(
+                    bridgeData.accessToken,
+                    bridgeData.email,
+                    bridgeData.displayName
+                  );
+                } catch {
+                  rejectedTokens.add(String(bridgeData.accessToken).trim());
+                }
               }
             }
           } catch {}
@@ -184,14 +244,20 @@ export const initAuth = (
  * so it works on both `app.tidyupscleaning.com` and AI Studio preview (`ais-dev-*.run.app`)
  * without ever triggering Error 400: origin_mismatch!
  */
-export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
+export const requestGoogleDriveAccessTokenPopup = async (
+  forceInteractive = false
+): Promise<{
   user: User;
   accessToken: string;
 } | null> => {
-  if (cachedAccessToken) {
+  if (forceInteractive) {
+    clearCachedAccessToken();
+  } else if (cachedAccessToken) {
     try {
       return await finalizeAccessTokenSession(cachedAccessToken);
-    } catch {}
+    } catch {
+      clearCachedAccessToken();
+    }
   }
 
   if (typeof window === 'undefined') return null;
@@ -199,49 +265,78 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
   const bridgeOrigin = OAUTH_BRIDGE_PRIMARY_ORIGIN;
   const currentOrigin = window.location.origin.replace(/\/$/, '');
   const targetBridgeBase = currentOrigin === bridgeOrigin ? currentOrigin : bridgeOrigin;
-  const bridgeUrl = `${targetBridgeBase}/oauth-bridge?return_origin=${encodeURIComponent(currentOrigin)}`;
+  const bridgeUrl = `${targetBridgeBase}/oauth-bridge?return_origin=${encodeURIComponent(
+    currentOrigin
+  )}&prompt=select_account&t=${Date.now()}`;
 
   // Open popup SYNCHRONOUSLY during the user click event so Chrome/Safari never block it
   const popup = window.open(
     bridgeUrl,
     'tidyups_google_drive_oauth',
-    'width=480,height=640,menubar=no,toolbar=no,location=no,status=no'
+    'width=500,height=660,menubar=no,toolbar=no,location=no,status=no'
   );
 
-  // Check if local backend or Cloud Run bridge session already has a valid token cached
-  try {
-    const cachedRes = await fetch('/api/google-drive/session-token');
-    if (cachedRes.ok) {
-      const cachedData = await cachedRes.json();
-      if (cachedData?.accessToken) {
-        try {
-          popup?.close();
-        } catch {}
-        return await finalizeAccessTokenSession(
-          cachedData.accessToken,
-          cachedData.email,
-          cachedData.displayName
-        );
+  // Only check pre-existing cached server tokens if forceInteractive is false,
+  // and ONLY accept if Google's tokeninfo endpoint confirms the token is live!
+  if (!forceInteractive) {
+    try {
+      const cachedRes = await fetch('/api/google-drive/session-token');
+      if (cachedRes.ok) {
+        const cachedData = await cachedRes.json();
+        if (cachedData?.accessToken && !rejectedTokens.has(cachedData.accessToken)) {
+          try {
+            const session = await finalizeAccessTokenSession(
+              cachedData.accessToken,
+              cachedData.email,
+              cachedData.displayName
+            );
+            try {
+              popup?.close();
+            } catch {}
+            return session;
+          } catch {
+            clearCachedAccessToken(cachedData.accessToken);
+          }
+        }
       }
-    }
-  } catch {}
+    } catch {}
 
-  try {
-    const bridgeCachedRes = await fetch(`${OAUTH_BRIDGE_PRIMARY_ORIGIN}/api/google-drive/session-token`);
-    if (bridgeCachedRes.ok) {
-      const bridgeCachedData = await bridgeCachedRes.json();
-      if (bridgeCachedData?.accessToken) {
-        try {
-          popup?.close();
-        } catch {}
-        return await finalizeAccessTokenSession(
-          bridgeCachedData.accessToken,
-          bridgeCachedData.email,
-          bridgeCachedData.displayName
-        );
+    try {
+      const bridgeCachedRes = await fetch(`${OAUTH_BRIDGE_PRIMARY_ORIGIN}/api/google-drive/session-token`);
+      if (bridgeCachedRes.ok) {
+        const bridgeCachedData = await bridgeCachedRes.json();
+        if (bridgeCachedData?.accessToken && !rejectedTokens.has(bridgeCachedData.accessToken)) {
+          try {
+            const session = await finalizeAccessTokenSession(
+              bridgeCachedData.accessToken,
+              bridgeCachedData.email,
+              bridgeCachedData.displayName
+            );
+            try {
+              popup?.close();
+            } catch {}
+            return session;
+          } catch {
+            rejectedTokens.add(String(bridgeCachedData.accessToken).trim());
+          }
+        }
       }
-    }
-  } catch {}
+    } catch {}
+  } else {
+    // Snapshot any existing token on the bridge before user finishes interactive login so we don't close the popup early
+    try {
+      const bridgeCachedRes = await fetch(`${OAUTH_BRIDGE_PRIMARY_ORIGIN}/api/google-drive/session-token`);
+      if (bridgeCachedRes.ok) {
+        const bridgeCachedData = await bridgeCachedRes.json();
+        if (bridgeCachedData?.accessToken) {
+          const check = await verifyGoogleAccessToken(bridgeCachedData.accessToken);
+          if (!check) {
+            rejectedTokens.add(String(bridgeCachedData.accessToken).trim());
+          }
+        }
+      }
+    } catch {}
+  }
 
   return new Promise((resolve) => {
     isSigningIn = true;
@@ -253,6 +348,7 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
     }
 
     let settled = false;
+    let isPolling = false;
     const cleanup = () => {
       isSigningIn = false;
       window.removeEventListener('message', onMessage);
@@ -263,73 +359,97 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
       if (!event?.data || event.data.type !== 'TIDYUPS_GOOGLE_OAUTH_SUCCESS') return;
       const token = String(event.data.accessToken || '').trim();
       if (!token || settled) return;
-      settled = true;
-      cleanup();
       try {
         const session = await finalizeAccessTokenSession(
           token,
           event.data.user?.email,
           event.data.user?.name
         );
-        resolve(session);
+        if (!settled) {
+          settled = true;
+          cleanup();
+          try {
+            popup.close();
+          } catch {}
+          resolve(session);
+        }
       } catch {
-        resolve(null);
+        rejectedTokens.add(token);
       }
     };
 
     window.addEventListener('message', onMessage);
 
     const checkClosedAndPoll = setInterval(async () => {
-      if (settled) return;
-      // Poll local and bridge session-token endpoint in case COOP cleared window.opener
+      if (settled || isPolling) return;
+      isPolling = true;
       try {
-        const localTokenRes = await fetch('/api/google-drive/session-token');
-        if (localTokenRes.ok) {
-          const data = await localTokenRes.json();
-          if (data?.accessToken && !settled) {
-            settled = true;
-            cleanup();
-            try {
-              popup.close();
-            } catch {}
-            const session = await finalizeAccessTokenSession(
-              data.accessToken,
-              data.email,
-              data.displayName
-            );
-            resolve(session);
-            return;
+        // Poll local and bridge session-token endpoint in case COOP cleared window.opener
+        try {
+          const localTokenRes = await fetch('/api/google-drive/session-token');
+          if (localTokenRes.ok) {
+            const data = await localTokenRes.json();
+            const candidate = String(data?.accessToken || '').trim();
+            if (candidate && !rejectedTokens.has(candidate) && !settled) {
+              try {
+                const session = await finalizeAccessTokenSession(
+                  candidate,
+                  data.email,
+                  data.displayName
+                );
+                if (!settled) {
+                  settled = true;
+                  cleanup();
+                  try {
+                    popup.close();
+                  } catch {}
+                  resolve(session);
+                  return;
+                }
+              } catch {
+                clearCachedAccessToken(candidate);
+              }
+            }
           }
-        }
-      } catch {}
+        } catch {}
 
-      try {
-        const bridgeTokenRes = await fetch(`${bridgeOrigin}/api/google-drive/session-token`);
-        if (bridgeTokenRes.ok) {
-          const data = await bridgeTokenRes.json();
-          if (data?.accessToken && !settled) {
-            settled = true;
-            cleanup();
-            try {
-              popup.close();
-            } catch {}
-            const session = await finalizeAccessTokenSession(
-              data.accessToken,
-              data.email,
-              data.displayName
-            );
-            resolve(session);
-            return;
+        try {
+          const bridgeTokenRes = await fetch(`${bridgeOrigin}/api/google-drive/session-token`);
+          if (bridgeTokenRes.ok) {
+            const data = await bridgeTokenRes.json();
+            const candidate = String(data?.accessToken || '').trim();
+            if (candidate && !rejectedTokens.has(candidate) && !settled) {
+              try {
+                const session = await finalizeAccessTokenSession(
+                  candidate,
+                  data.email,
+                  data.displayName
+                );
+                if (!settled) {
+                  settled = true;
+                  cleanup();
+                  try {
+                    popup.close();
+                  } catch {}
+                  resolve(session);
+                  return;
+                }
+              } catch {
+                rejectedTokens.add(candidate);
+              }
+            }
           }
-        }
-      } catch {}
+        } catch {}
 
-      if (popup.closed && !settled) {
-        settled = true;
-        cleanup();
-        resolve(null);
+        if (popup.closed && !settled) {
+          settled = true;
+          cleanup();
+          resolve(null);
+        }
+      } finally {
+        isPolling = false;
       }
-    }, 800);
+    }, 900);
   });
 };
 
@@ -337,23 +457,37 @@ export const requestGoogleDriveAccessTokenPopup = async (): Promise<{
  * Interactive Google Drive OAuth Sign-In triggered on user button clicks.
  * Uses the authorized Cloud Run /oauth-bridge popup so it never hits Error 400: origin_mismatch.
  */
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
-  return requestGoogleDriveAccessTokenPopup();
+export const googleSignIn = async (
+  forceInteractive = false
+): Promise<{ user: User; accessToken: string } | null> => {
+  return requestGoogleDriveAccessTokenPopup(forceInteractive);
 };
 
 export const getAccessTokenSync = (): string | null => {
+  if (cachedAccessToken && rejectedTokens.has(cachedAccessToken)) {
+    cachedAccessToken = null;
+  }
   return cachedAccessToken;
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  if (cachedAccessToken) return cachedAccessToken;
+  if (cachedAccessToken) {
+    const check = await verifyGoogleAccessToken(cachedAccessToken);
+    if (check) return cachedAccessToken;
+    clearCachedAccessToken(cachedAccessToken);
+  }
   try {
     const r = await fetch('/api/google-drive/session-token');
     if (r.ok) {
       const data = await r.json();
-      if (data?.accessToken) {
-        cachedAccessToken = data.accessToken;
-        return cachedAccessToken;
+      if (data?.accessToken && !rejectedTokens.has(data.accessToken)) {
+        const check = await verifyGoogleAccessToken(data.accessToken);
+        if (check) {
+          cachedAccessToken = data.accessToken;
+          return cachedAccessToken;
+        } else {
+          clearCachedAccessToken(data.accessToken);
+        }
       }
     }
   } catch {}
@@ -366,13 +500,13 @@ export const logout = async (): Promise<void> => {
   } catch (e) {
     console.warn('Firebase signOut notice:', e);
   }
-  cachedAccessToken = null;
+  clearCachedAccessToken();
   cachedFallbackUser = null;
 };
 
 export async function signInWithGoogle(): Promise<User | null> {
   try {
-    const res = await googleSignIn();
+    const res = await googleSignIn(true);
     return res ? res.user : null;
   } catch (error: any) {
     console.warn('Firebase Google Sign-in notice:', error?.code || error?.message || error);
@@ -381,7 +515,7 @@ export async function signInWithGoogle(): Promise<User | null> {
 }
 
 export async function signOutFirebase(): Promise<void> {
-  cachedAccessToken = null;
+  clearCachedAccessToken();
   cachedFallbackUser = null;
   await signOut(auth);
 }

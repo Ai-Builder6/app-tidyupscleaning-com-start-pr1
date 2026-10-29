@@ -294,34 +294,71 @@ function saveGoogleDriveSessionToDisk(session: {
 
 app.options("/api/google-drive/session-token", (_req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.sendStatus(204);
 });
 
-app.get("/api/google-drive/session-token", (_req, res) => {
+async function verifyServerGoogleToken(token: string): Promise<{ valid: boolean; expiresIn: number; email?: string }> {
+  try {
+    const resp = await fetch(
+      `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`
+    );
+    if (!resp.ok) return { valid: false, expiresIn: 0 };
+    const info: any = await resp.json();
+    const expiresIn = Number(info?.expires_in || 0);
+    if (info?.error || isNaN(expiresIn) || expiresIn <= 90) {
+      return { valid: false, expiresIn: 0 };
+    }
+    return { valid: true, expiresIn, email: info?.email };
+  } catch {
+    return { valid: false, expiresIn: 0 };
+  }
+}
+
+app.get("/api/google-drive/session-token", async (_req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (activeGoogleDriveSession && Date.now() < activeGoogleDriveSession.expiresAt) {
-    return res.json({
-      active: true,
-      accessToken: activeGoogleDriveSession.accessToken,
-      email: activeGoogleDriveSession.email,
-      displayName: activeGoogleDriveSession.displayName,
-      expiresAt: activeGoogleDriveSession.expiresAt,
-    });
+    const check = await verifyServerGoogleToken(activeGoogleDriveSession.accessToken);
+    if (check.valid) {
+      return res.json({
+        active: true,
+        accessToken: activeGoogleDriveSession.accessToken,
+        email: check.email || activeGoogleDriveSession.email,
+        displayName: activeGoogleDriveSession.displayName,
+        expiresAt: Date.now() + check.expiresIn * 1000,
+      });
+    } else {
+      saveGoogleDriveSessionToDisk(null);
+    }
   }
   res.json({ active: false, accessToken: null });
 });
 
-app.post("/api/google-drive/session-token", (req, res) => {
+app.delete("/api/google-drive/session-token", (_req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const { accessToken, email, displayName } = req.body || {};
+  saveGoogleDriveSessionToDisk(null);
+  res.json({ success: true, cleared: true });
+});
+
+app.post("/api/google-drive/session-token", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  const { accessToken, email, displayName, clear } = req.body || {};
+  if (clear) {
+    saveGoogleDriveSessionToDisk(null);
+    return res.json({ success: true, cleared: true });
+  }
   if (accessToken && typeof accessToken === "string") {
+    const check = await verifyServerGoogleToken(accessToken);
+    if (!check.valid) {
+      saveGoogleDriveSessionToDisk(null);
+      return res.status(401).json({ error: "Expired or invalid Google accessToken" });
+    }
     const session = {
       accessToken,
-      email: email || "cleaningserviceyeg@gmail.com",
+      email: check.email || email || "cleaningserviceyeg@gmail.com",
       displayName: displayName || "TidyUps Admin",
-      expiresAt: Date.now() + 58 * 60 * 1000,
+      expiresAt: Date.now() + Math.min(check.expiresIn * 1000, 58 * 60 * 1000),
     };
     saveGoogleDriveSessionToDisk(session);
     return res.json({ success: true, expiresAt: session.expiresAt });
@@ -388,23 +425,21 @@ app.get("/oauth-bridge", (_req, res) => {
     <div style="font-size: 28px; margin-bottom: 8px;">🔐</div>
     <h2 style="margin: 0; font-size: 18px; font-weight: 900;">Connect Google Drive (TidyUps)</h2>
     <p class="sub" id="status-text">
-      Authorized Cloud Run Origin Bridge for <strong>cleaningserviceyeg@gmail.com</strong>
+      Authorized Google Workspace Sign-In for <strong>cleaningserviceyeg@gmail.com</strong>
     </p>
-    <button id="auth-btn" class="btn">Continue with Google Account</button>
+    <button id="auth-btn" class="btn">Sign in with Google Account</button>
   </div>
   <script>
     const CLIENT_ID = "230358145142-cs2b932r0uoc0fvm8kner4ipkr6qvng9.apps.googleusercontent.com";
     const SCOPES = [
-      "https://www.googleapis.com/auth/drive",
       "https://www.googleapis.com/auth/drive.file",
-      "https://www.googleapis.com/auth/drive.metadata",
-      "https://www.googleapis.com/auth/drive.readonly",
       "openid",
       "email",
       "profile"
     ].join(" ");
     const params = new URLSearchParams(window.location.search);
     const returnOrigin = params.get("return_origin") || "";
+    const promptMode = params.get("prompt") || "select_account";
 
     function startOAuth() {
       const statusEl = document.getElementById("status-text");
@@ -456,15 +491,15 @@ app.get("/oauth-bridge", (_req, res) => {
                 }, "*");
               } catch (e) {}
             }
-            statusEl.textContent = "✓ Connected! You can close this window.";
-            setTimeout(() => window.close(), 350);
+            statusEl.textContent = "✓ Connected! Closing window...";
+            setTimeout(() => window.close(), 300);
           } else {
-            statusEl.textContent = (resp && (resp.error_description || resp.error)) || "Sign-in was cancelled.";
+            statusEl.textContent = (resp && (resp.error_description || resp.error)) || "Click the button below to sign in with Google.";
           }
         }
       });
       client.requestAccessToken({
-        prompt: "",
+        prompt: promptMode,
         login_hint: "cleaningserviceyeg@gmail.com"
       });
     }
@@ -9379,15 +9414,17 @@ async function getOrCreateWholeProjectZip(options?: {
   const store = loadStore();
   const existingBackups = listLocalNumberedBackups().filter((b) => b.prNumber >= 6);
   const highestExistingPr = existingBackups.reduce((max, b) => Math.max(max, b.prNumber), 5);
-  const storedCounter = Math.max(Number(store?.zipPrCounter || 0), highestExistingPr, 5);
+  const storedCounter = Math.max(Number(store?.zipPrCounter || 0), highestExistingPr, 6);
 
-  let targetPr = Math.max(6, storedCounter);
+  let targetPr = storedCounter;
   if (options?.requestedPr !== undefined && options?.requestedPr !== "") {
     const m = String(options.requestedPr).match(/(\d+)/);
     if (m) {
       targetPr = Math.max(6, parseInt(m[1], 10));
     }
-  } else if (options?.incrementPr || (options?.forceRebuild && storedCounter >= 5)) {
+  } else if (options?.incrementPr) {
+    targetPr = Math.max(6, storedCounter + 1);
+  } else if (options?.forceRebuild) {
     targetPr = Math.max(6, storedCounter + 1);
   }
 
@@ -9479,10 +9516,10 @@ async function getOrCreateWholeProjectZip(options?: {
     const targetPath = path.join(CACHED_PROJECT_ZIP_DIR, filename);
     fs.writeFileSync(targetPath, zipBuffer);
 
-    // Keep the most recent 8 PR backups on disk so disk stays clean
+    // Keep the most recent 10 PR backups on disk so disk stays clean
     const allBackups = listLocalNumberedBackups();
-    if (allBackups.length > 8) {
-      for (const old of allBackups.slice(8)) {
+    if (allBackups.length > 10) {
+      for (const old of allBackups.slice(10)) {
         try {
           fs.unlinkSync(path.join(CACHED_PROJECT_ZIP_DIR, old.filename));
         } catch {
@@ -9492,7 +9529,7 @@ async function getOrCreateWholeProjectZip(options?: {
     }
 
     if (store) {
-      store.zipPrCounter = Math.max(Number(store.zipPrCounter || 0), targetPr);
+      store.zipPrCounter = targetPr;
       store.lastZipFilename = filename;
       store.lastZipCreatedAt = createdAt;
       saveStore(store);
@@ -9532,7 +9569,7 @@ app.get("/api/project/export-metadata", (_req, res) => {
       latestBackup?.prNumber || 0,
       6
     );
-    const nextPrNumber = latestBackup ? Math.max(6, currentPrNumber + 1) : Math.max(6, currentPrNumber);
+    const nextPrNumber = Math.max(6, currentPrNumber + 1);
     const nextSuggestedZipFilename = buildTidyUpsZipFilename(nextPrNumber);
 
     res.json({
@@ -9564,6 +9601,37 @@ app.get("/api/project/export-metadata", (_req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to load export metadata" });
+  }
+});
+
+// Explicitly set or update the active/next PR number for Whole Project ZIP builds
+app.post("/api/project/set-pr-number", (req, res) => {
+  try {
+    const rawPr = req.body?.prNumber ?? req.body?.prLabel ?? req.body?.requestedPr ?? "";
+    const m = String(rawPr).match(/(\d+)/);
+    if (!m) {
+      return res.status(400).json({ error: "Valid PR number (e.g. PR7, PR8, 7, 8) is required." });
+    }
+    const targetNextPr = Math.max(6, parseInt(m[1], 10));
+    const store = loadStore();
+    if (store) {
+      // Set zipPrCounter to targetNextPr - 1 so the very next build produces PR<targetNextPr>,
+      // and also store targetNextPr metadata cleanly.
+      store.zipPrCounter = Math.max(5, targetNextPr - 1);
+      saveStore(store);
+    }
+    const nextSuggestedZipFilename = buildTidyUpsZipFilename(targetNextPr);
+    return res.json({
+      success: true,
+      currentPrNumber: Math.max(6, targetNextPr - 1),
+      currentPrLabel: `PR${Math.max(6, targetNextPr - 1)}`,
+      nextPrNumber: targetNextPr,
+      nextPrLabel: `PR${targetNextPr}`,
+      nextSuggestedZipFilename,
+      message: `Updated target project ZIP version to PR${targetNextPr} (${nextSuggestedZipFilename}).`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || "Failed to update PR number" });
   }
 });
 
@@ -9658,6 +9726,7 @@ app.post("/api/project/upload-zip-to-drive", async (req, res) => {
     );
 
     if (searchRes.status === 401 || searchRes.status === 403) {
+      saveGoogleDriveSessionToDisk(null);
       return res.status(401).json({
         error: "AUTH_EXPIRED",
         message: "Google Drive session expired. Please sign in with Google again.",
@@ -9695,6 +9764,13 @@ app.post("/api/project/upload-zip-to-drive", async (req, res) => {
         }
       );
       if (!createRes.ok) {
+        if (createRes.status === 401 || createRes.status === 403) {
+          saveGoogleDriveSessionToDisk(null);
+          return res.status(401).json({
+            error: "AUTH_EXPIRED",
+            message: "Google Drive session expired. Please sign in with Google again.",
+          });
+        }
         const errBody: any = await createRes.json().catch(() => ({}));
         return res.status(createRes.status).json({
           error: errBody?.error?.message || "Failed to create Google Drive backup folder.",
@@ -9713,7 +9789,7 @@ app.post("/api/project/upload-zip-to-drive", async (req, res) => {
     try {
       const listQ = encodeURIComponent(`'${folder.id}' in parents and trashed = false`);
       const listRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${listQ}&fields=files(id,name)&pageSize=30`,
+        `https://www.googleapis.com/drive/v3/files?q=${listQ}&fields=files(id,name)&pageSize=50`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       if (listRes.ok) {
@@ -9742,15 +9818,21 @@ app.post("/api/project/upload-zip-to-drive", async (req, res) => {
       zipBuffer = fs.readFileSync(existingFilePath);
       filename = requestedFilename;
       const m = filename.match(/PR(\d+)/i);
-      prNumber = m ? parseInt(m[1], 10) : highestDrivePr + 1;
+      prNumber = m ? parseInt(m[1], 10) : Math.max(6, highestDrivePr + 1);
       prLabel = `PR${prNumber}`;
       reused = true;
     } else {
-      const requestedPr = req.body?.requestedPr || Math.max(6, highestDrivePr + 1);
+      const store = loadStore();
+      const localBackups = listLocalNumberedBackups().filter((b) => b.prNumber >= 6);
+      const highestLocalPr = localBackups.reduce((max, b) => Math.max(max, b.prNumber), 5);
+      const baseCounter = Math.max(Number(store?.zipPrCounter || 0), highestLocalPr, highestDrivePr, 5);
+      const explicitPr = req.body?.requestedPr ? String(req.body.requestedPr).trim() : "";
+      const nextTargetPr = explicitPr || `PR${Math.max(6, baseCounter + 1)}`;
+
       const built = await getOrCreateWholeProjectZip({
         forceRebuild: true,
         incrementPr: true,
-        requestedPr,
+        requestedPr: nextTargetPr,
       });
       zipBuffer = built.buffer;
       filename = built.filename;
@@ -9788,6 +9870,13 @@ app.post("/api/project/upload-zip-to-drive", async (req, res) => {
     );
 
     if (!uploadRes.ok) {
+      if (uploadRes.status === 401 || uploadRes.status === 403) {
+        saveGoogleDriveSessionToDisk(null);
+        return res.status(401).json({
+          error: "AUTH_EXPIRED",
+          message: "Google Drive session expired. Please sign in with Google again.",
+        });
+      }
       const errData: any = await uploadRes.json().catch(() => ({}));
       return res.status(uploadRes.status).json({
         error: errData?.error?.message || `Google Drive upload failed (${uploadRes.status}).`,
@@ -9796,6 +9885,34 @@ app.post("/api/project/upload-zip-to-drive", async (req, res) => {
 
     const uploadedFile: any = await uploadRes.json();
 
+    // 5. Also trigger background GitHub sync so Google Drive & GitHub stay aligned
+    setImmediate(async () => {
+      try {
+        const store = loadStore();
+        const ghToken = resolveServerGithubToken(undefined, store?.githubToken);
+        if (ghToken) {
+          const owner = store?.githubOwner || "Ai-Builder6";
+          const targetRepo = store?.githubRepo || `APP.TIDYUPSCLEANING.COM-START-PR6`;
+          const ghHeaders: Record<string, string> = {
+            Authorization: `Bearer ${ghToken}`,
+            Accept: "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "TidyUps-Cleaning-App-Sync",
+          };
+          const files = collectWorkspaceFilesForGitHub(process.cwd(), "");
+          await pushWorkspaceFilesToGithubRepo({
+            owner,
+            targetRepo,
+            prLabel,
+            commitMessage: `feat(${prLabel}): Google Drive & GitHub whole project build (${filename})`,
+            files,
+            ghHeaders,
+          });
+        }
+      } catch {}
+    });
+
     return res.json({
       success: true,
       folder,
@@ -9803,6 +9920,8 @@ app.post("/api/project/upload-zip-to-drive", async (req, res) => {
       reusedServerZip: reused,
       prNumber,
       prLabel,
+      nextPrNumber: prNumber + 1,
+      nextPrLabel: `PR${prNumber + 1}`,
       filename,
       sizeBytes: zipBuffer.length,
       downloadUrl: `/api/project/download-saved-zip?filename=${encodeURIComponent(filename)}`,

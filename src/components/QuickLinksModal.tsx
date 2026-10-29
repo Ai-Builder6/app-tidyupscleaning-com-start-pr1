@@ -29,6 +29,7 @@ import { JOBBER_TEAM_MEMBERS } from '../data/jobberCalendarData';
 import {
   TIDYUPS_DRIVE_FOLDER_NAME,
   uploadWholeProjectZipToDriveFolder,
+  updateServerProjectPrNumber,
 } from '../services/googleDriveBackupService';
 
 interface QuickLinksModalProps {
@@ -82,12 +83,15 @@ export const QuickLinksModal: React.FC<QuickLinksModalProps> = ({
     setIsUploadingDrive(true);
     setDriveStatus(null);
     try {
+      if (requestedPr) {
+        await updateServerProjectPrNumber(requestedPr).catch(() => {});
+      }
       const res = await uploadWholeProjectZipToDriveFolder({
         requestedPr,
         forceRebuild: true,
       });
       setDriveStatus({
-        message: `✓ Saved "${res.file.name}" (${res.prLabel || 'PR#'}) into Drive folder "${res.folder.name}"!`,
+        message: `✓ Built & Uploaded "${res.file.name}" (${res.prLabel || requestedPr || 'PR#'}) directly into Drive folder "${res.folder.name}"!`,
         folderLink: res.folder.webViewLink,
       });
     } catch (err: any) {
@@ -692,22 +696,22 @@ export const QuickLinksModal: React.FC<QuickLinksModalProps> = ({
               </button>
             </div>
 
-            {/* Explicit PR6, PR7, PR8, PR9, PR10 Checkpoint Buttons */}
+            {/* Explicit PR6–PR12 Checkpoint Buttons */}
             <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-indigo-200/60">
               <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">
-                Save Specific PR# to Drive:
+                Update &amp; Upload Specific PR# to Drive:
               </span>
-              {['PR6', 'PR7', 'PR8', 'PR9', 'PR10'].map((pr) => (
+              {['PR6', 'PR7', 'PR8', 'PR9', 'PR10', 'PR11', 'PR12'].map((pr) => (
                 <button
                   key={pr}
                   type="button"
                   disabled={isUploadingDrive}
                   onClick={() => handleUploadWholeProjectToDrive(pr)}
                   className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg font-mono font-bold flex items-center gap-1 transition-all cursor-pointer text-[11px] active:scale-95 disabled:opacity-50"
-                  title={`Save ${pr} archive into "${TIDYUPS_DRIVE_FOLDER_NAME}" in Google Drive`}
+                  title={`Build & upload ${pr} archive directly into "${TIDYUPS_DRIVE_FOLDER_NAME}" in Google Drive`}
                 >
                   <CloudUpload className="w-3 h-3 text-emerald-600" />
-                  <span>Save {pr}</span>
+                  <span>Upload {pr}</span>
                 </button>
               ))}
             </div>

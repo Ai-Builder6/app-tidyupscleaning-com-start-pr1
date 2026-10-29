@@ -46,8 +46,9 @@ import {
 import { Technician } from '../types/dispatch';
 import {
   TIDYUPS_DRIVE_FOLDER_NAME,
-  saveAndDownloadNumberedProjectBackupZip,
+  buildProjectZipOnServerOnly,
   uploadWholeProjectZipToDriveFolder,
+  updateServerProjectPrNumber,
   downloadFileFromApiWithoutNavigation,
 } from '../services/googleDriveBackupService';
 
@@ -173,26 +174,54 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
     isError?: boolean;
   } | null>(null);
 
-  const handleOneClickDriveUpload = async () => {
+  const [activeHubPrLabel, setActiveHubPrLabel] = useState<string>('PR7');
+
+  const handleSelectHubPr = async (prLabel: string) => {
+    setActiveHubPrLabel(prLabel);
+    try {
+      const updated = await updateServerProjectPrNumber(prLabel);
+      setActiveHubPrLabel(updated.nextPrLabel);
+      setDriveBackupNotice({
+        text: `✓ Updated Whole Project ZIP PR Number to ${updated.nextPrLabel}! Click "☁️ Build & Upload ${updated.nextPrLabel} ZIP to Google Drive" below.`,
+      });
+    } catch (err: any) {
+      setDriveBackupNotice({
+        text: err?.message || 'Could not update PR number.',
+        isError: true,
+      });
+    }
+  };
+
+  const handleOneClickDriveUpload = async (requestedPr?: string) => {
+    const targetPr = requestedPr || activeHubPrLabel || undefined;
     setIsUploadingProjectDrive(true);
     setDriveBackupNotice(null);
     try {
-      const res = await uploadWholeProjectZipToDriveFolder({ forceRebuild: true });
-      const fname = res.file?.name || 'app.tidyups.cleaning-PR6.zip';
+      const res = await uploadWholeProjectZipToDriveFolder({
+        requestedPr: targetPr,
+        forceRebuild: true,
+      });
+      const fname = res.file?.name || `app.tidyups.cleaning-${res.prLabel || 'PR7'}.zip`;
+      if (res.prNumber) {
+        setActiveHubPrLabel(`PR${res.prNumber + 1}`);
+      }
       setDriveBackupNotice({
-        text: `✓ Built & Loaded "${fname}" (${res.prLabel || 'PR6'}) directly into folder "${res.folder.name}" in your Google Drive!`,
+        text: `✓ Built Whole Project "${fname}" (${res.prLabel || targetPr || 'PR7'}) & Uploaded directly into folder "${res.folder.name}" in your Google Drive (no hard-drive download)!`,
         folderUrl: res.folder.webViewLink,
         downloadUrl: `/api/project/download-saved-zip?filename=${encodeURIComponent(fname)}`,
         downloadFilename: fname,
       });
     } catch (err: any) {
-      // Also build on server so the user can still download or open the Backup Modal immediately
+      // Build on server & GitHub only (NEVER force a local hard-drive download!)
       try {
-        const localRes = await saveAndDownloadNumberedProjectBackupZip({ autoGithubBackup: true });
+        const serverRes = await buildProjectZipOnServerOnly({
+          requestedPr: targetPr,
+          autoGithubBackup: true,
+        });
         setDriveBackupNotice({
-          text: `✓ Built "${localRes.filename}" (${localRes.prLabel}) on server! Click "All Backups, Drive & GitHub" to sign in to Google Drive and load it to your Drive.`,
-          downloadUrl: localRes.downloadUrl,
-          downloadFilename: localRes.filename,
+          text: `✓ Built "${serverRes.filename}" (${serverRes.prLabel}) on server & GitHub (no hard-drive download)! Click "Sign in with Google" in the Backup window to upload to your Google Drive.`,
+          downloadUrl: serverRes.downloadUrl,
+          downloadFilename: serverRes.filename,
         });
       } catch {
         setDriveBackupNotice({
@@ -299,12 +328,12 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={handleOneClickDriveUpload}
+            onClick={() => handleOneClickDriveUpload()}
             disabled={isUploadingProjectDrive}
             className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
           >
-            <FileArchive className="w-3.5 h-3.5 text-white shrink-0" />
-            <span>{isUploadingProjectDrive ? 'Saving PR# ZIP...' : '📦 Save Backup ZIP (PR6+)'}</span>
+            <CloudUpload className="w-3.5 h-3.5 text-white shrink-0" />
+            <span>{isUploadingProjectDrive ? `Uploading ${activeHubPrLabel} to Drive...` : `☁️ Upload ${activeHubPrLabel} ZIP to Drive`}</span>
           </button>
           <button
             type="button"
@@ -369,16 +398,16 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
             </button>
           )}
           <button
-            onClick={handleOneClickDriveUpload}
+            onClick={() => handleOneClickDriveUpload()}
             disabled={isUploadingProjectDrive}
             className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
-            title="1-Click: Build, Save & Download Numbered PR6+ Backup ZIP directly from app.tidyupscleaning.com (Computer + Server + GitHub)"
+            title="1-Click: Build Whole Project ZIP and upload directly to your Google Drive folder (without downloading to your hard drive)"
           >
-            <FileArchive className="w-3.5 h-3.5 text-white" />
+            <CloudUpload className="w-3.5 h-3.5 text-white" />
             <span>
               {isUploadingProjectDrive
-                ? 'Building & Saving PR# Backup ZIP...'
-                : '1-Click Save & Download Backup ZIP'}
+                ? `Building & Uploading ${activeHubPrLabel} to Drive...`
+                : `☁️ Build & Upload ${activeHubPrLabel} ZIP to Google Drive`}
             </span>
           </button>
           {onOpenAccessManager && (
@@ -884,10 +913,34 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
               </span>
             </div>
             <div>
-              <h3 className="font-black text-lg text-white">1-Click Numbered Backup ZIP (PR6+)</h3>
+              <h3 className="font-black text-lg text-white">
+                Whole Project Build &rarr; Google Drive ({activeHubPrLabel})
+              </h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                Works directly on <strong className="text-emerald-300">app.tidyupscleaning.com</strong> with zero popups! Builds &amp; downloads your numbered <code className="text-emerald-300 font-mono">.zip</code> (<code className="text-emerald-300">PR6</code>, <code className="text-emerald-300">PR7</code>...) straight to your computer AND saves a copy to the Server &amp; GitHub.
+                Builds the complete <strong className="text-emerald-300">app.tidyups.cleaning</strong> project &amp; workflows archive (<code className="text-emerald-300 font-mono">{activeHubPrLabel}</code>) and uploads it directly into <strong className="text-emerald-300">{TIDYUPS_DRIVE_FOLDER_NAME}</strong> in your Google Drive &mdash; without cluttering your computer hard drive!
               </p>
+
+              {/* Quick PR# Updater Pills right on the Owner Hub Card */}
+              <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Set PR#:
+                </span>
+                {['PR6', 'PR7', 'PR8', 'PR9', 'PR10', 'PR11', 'PR12'].map((pr) => (
+                  <button
+                    key={pr}
+                    type="button"
+                    onClick={() => handleSelectHubPr(pr)}
+                    className={`px-2 py-0.5 rounded-lg text-[11px] font-mono font-black border cursor-pointer transition-all ${
+                      activeHubPrLabel === pr
+                        ? 'bg-emerald-600 text-white border-emerald-400 shadow-xs'
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                    }`}
+                  >
+                    {pr}
+                  </button>
+                ))}
+              </div>
+
               {driveBackupNotice && (
                 <div
                   className={`mt-2 p-2.5 rounded-xl text-[11px] font-bold flex flex-wrap items-center justify-between gap-2 ${
@@ -898,15 +951,6 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
                 >
                   <span>{driveBackupNotice.text}</span>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {driveBackupNotice.downloadUrl && (
-                      <a
-                        href={driveBackupNotice.downloadUrl}
-                        download={driveBackupNotice.downloadFilename || true}
-                        className="px-2 py-1 rounded-lg bg-cyan-600 text-white text-[10px] font-black flex items-center gap-1 shrink-0"
-                      >
-                        <span>⬇️ Download ZIP</span>
-                      </a>
-                    )}
                     {driveBackupNotice.folderUrl && (
                       <a
                         href={driveBackupNotice.folderUrl}
@@ -926,13 +970,15 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
 
           <div className="flex flex-col sm:flex-row gap-2">
             <button
-              onClick={handleOneClickDriveUpload}
+              onClick={() => handleOneClickDriveUpload()}
               disabled={isUploadingProjectDrive}
               className="flex-1 py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:opacity-95 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
             >
               <CloudUpload className="w-3.5 h-3.5" />
               <span>
-                {isUploadingProjectDrive ? 'Building & Loading to Drive...' : '☁️ Build & Load ZIP to Google Drive'}
+                {isUploadingProjectDrive
+                  ? `Building & Uploading ${activeHubPrLabel} to Drive...`
+                  : `☁️ Build & Upload ${activeHubPrLabel} ZIP to Google Drive`}
               </span>
             </button>
             {onOpenProjectBackup && (
@@ -941,7 +987,7 @@ export const ManagementHubView: React.FC<ManagementHubViewProps> = ({
                 className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
-                <span>All Backups, Drive &amp; GitHub</span>
+                <span>Update PR# / Sign In / All Backups</span>
               </button>
             )}
           </div>

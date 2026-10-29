@@ -18,13 +18,14 @@ import {
   Layers,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
-import { initAuth, googleSignIn, getAccessToken, logout } from '../lib/firebase';
+import { initAuth, googleSignIn, getAccessToken, logout, clearCachedAccessToken } from '../lib/firebase';
 import {
   TIDYUPS_DRIVE_FOLDER_NAME,
   DriveFolderInfo,
   DriveBackupFileItem,
   listTidyUpsFolderFiles,
   uploadWholeProjectZipToDriveFolder,
+  updateServerProjectPrNumber,
 } from '../services/googleDriveBackupService';
 
 interface ProjectBackupDriveModalProps {
@@ -58,10 +59,12 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
   const [zipReadyOnServer, setZipReadyOnServer] = useState<boolean>(false);
   const [zipSizeBytes, setZipSizeBytes] = useState<number>(0);
   const [zipCreatedAt, setZipCreatedAt] = useState<string | null>(null);
-  const [nextPrLabel, setNextPrLabel] = useState<string>('PR6');
+  const [nextPrLabel, setNextPrLabel] = useState<string>('PR7');
   const [selectedPrOverride, setSelectedPrOverride] = useState<string>('');
+  const [customPrInput, setCustomPrInput] = useState<string>('');
+  const [isUpdatingPr, setIsUpdatingPr] = useState<boolean>(false);
   const [nextSuggestedZipFilename, setNextSuggestedZipFilename] = useState<string>(
-    'app.tidyups.cleaning-PR6.zip'
+    'app.tidyups.cleaning-PR7.zip'
   );
   const [savedLocalBackups, setSavedLocalBackups] = useState<
     Array<{ filename: string; prLabel: string; prNumber: number; sizeBytes: number; createdAt: string }>
@@ -189,25 +192,25 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
     }
   }, [isOpen, token, needsAuth, fetchDriveBackupFiles]);
 
-  // Sign in with Google to authorize Google Drive access
+  // Sign in with Google to authorize Google Drive access (Always interactive on click!)
   const handleGoogleLogin = async () => {
     setIsLoggingIn(true);
     setStatusBanner(null);
     try {
-      const result = await googleSignIn();
-      if (result) {
+      const result = await googleSignIn(true);
+      if (result && result.accessToken) {
         setToken(result.accessToken);
         setUser(result.user);
         setNeedsAuth(false);
         setStatusBanner({
           type: 'success',
-          message: `Signed in as ${result.user.email || result.user.displayName}. Folder "${TIDYUPS_DRIVE_FOLDER_NAME}" is ready in Google Drive!`,
+          message: `✓ Signed in as ${result.user.email || result.user.displayName}! Folder "${TIDYUPS_DRIVE_FOLDER_NAME}" is connected in Google Drive.`,
         });
         fetchDriveBackupFiles(result.accessToken);
       } else {
         setStatusBanner({
           type: 'error',
-          message: 'Google Sign-In window was closed or blocked. Please allow popups and click Sign in with Google.',
+          message: 'Google Sign-In popup was closed before completing sign-in. Click "Sign in with Google" to try again.',
         });
       }
     } catch (err: any) {
@@ -230,19 +233,57 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
   };
 
   const activePrLabel = selectedPrOverride || nextPrLabel;
+  const activePrNumeric =
+    parseInt(String(activePrLabel).replace(/[^0-9]/g, ''), 10) || 7;
+
+  // Persist PR# update to the server and update UI state immediately
+  const handleUpdatePrNumber = async (targetPr: string | number) => {
+    const cleanNum = parseInt(String(targetPr).replace(/[^0-9]/g, ''), 10);
+    if (!Number.isFinite(cleanNum) || cleanNum < 1) {
+      setStatusBanner({
+        type: 'error',
+        message: 'Please enter or select a valid PR number (e.g. PR7, PR8, PR9, PR10).',
+      });
+      return;
+    }
+    const formattedPr = `PR${cleanNum}`;
+    setSelectedPrOverride(formattedPr);
+    setNextPrLabel(formattedPr);
+    setIsUpdatingPr(true);
+    try {
+      const updated = await updateServerProjectPrNumber(cleanNum);
+      setNextPrLabel(updated.nextPrLabel);
+      setSelectedPrOverride(updated.nextPrLabel);
+      setNextSuggestedZipFilename(updated.nextSuggestedZipFilename);
+      setCustomPrInput('');
+      setStatusBanner({
+        type: 'success',
+        message: `✓ Updated Whole Project ZIP PR Number to ${updated.nextPrLabel} (${updated.nextSuggestedZipFilename})! Click "☁️ 1-Click Build & Upload ${updated.nextPrLabel} ZIP to Google Drive" below to build and upload directly to Google Drive.`,
+      });
+    } catch (err: any) {
+      setStatusBanner({
+        type: 'error',
+        message: err?.message || 'Could not update PR number on server.',
+      });
+    } finally {
+      setIsUpdatingPr(false);
+    }
+  };
 
   // 1-Click: Build numbered PR# Whole Project & Workflows ZIP (or take an existing server ZIP) and upload directly into
-  // the "TidyUps Cleaning App Backup Zips" folder in Google Drive
+  // the "TidyUps Cleaning App Backup Zips" folder in Google Drive — ZERO local hard-drive downloads!
   const handleOneClickUploadToDriveFolder = async (
     forceRebuild = true,
-    existingServerFilename?: string
+    existingServerFilename?: string,
+    explicitPr?: string
   ) => {
+    const prToUse = explicitPr || selectedPrOverride || nextPrLabel;
     setIsUploadingDrive(true);
     setUploadingFilename(existingServerFilename || null);
     setStatusBanner(null);
     try {
       const result = await uploadWholeProjectZipToDriveFolder({
-        requestedPr: selectedPrOverride || undefined,
+        requestedPr: prToUse || undefined,
         existingServerFilename,
         forceRebuild,
         accessToken: token,
@@ -261,7 +302,7 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
       const savedFilename = result.file?.name || existingServerFilename || nextSuggestedZipFilename;
       setStatusBanner({
         type: 'success',
-        message: `✓ Built & Loaded "${savedFilename}" (${result.prLabel || activePrLabel}) directly into folder "${result.folder.name}" in your Google Drive!`,
+        message: `✓ Built Whole Project ZIP "${savedFilename}" (${result.prLabel || prToUse}) & Uploaded directly into folder "${result.folder.name}" in your Google Drive (no hard drive download needed)!`,
         link: result.file.webViewLink || result.folder.webViewLink,
         folderLink: result.folder.webViewLink,
         downloadUrl: `/api/project/download-saved-zip?filename=${encodeURIComponent(savedFilename)}`,
@@ -272,14 +313,16 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
         fetchDriveBackupFiles(currentToken);
       }
     } catch (err: any) {
-      if (err?.message === 'AUTH_EXPIRED') {
+      if (err?.message === 'AUTH_EXPIRED' || String(err?.message || '').includes('Sign-In')) {
+        clearCachedAccessToken(token);
+        setToken(null);
         setNeedsAuth(true);
       }
       setStatusBanner({
         type: 'error',
         message:
           err?.message ||
-          'Failed to upload Whole Project ZIP to Google Drive folder. Please click Sign in with Google first.',
+          'Please click "Sign in with Google" to authorize uploading the Whole Project ZIP directly to your Google Drive.',
       });
     } finally {
       setIsUploadingDrive(false);
@@ -287,16 +330,18 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
     }
   };
 
-  // 1-Click Build, Save & Download a numbered PR# ZIP copy directly to computer + Server + GitHub
-  const handleDownloadNumberedZip = async () => {
+  // Build & Save numbered PR# ZIP on the Server + GitHub (and upload to Google Drive if signed in)
+  // Does NOT download to the user's hard drive unless downloadToComputer = true is explicitly passed!
+  const handleBuildNumberedZipOnServer = async (downloadToComputer = false) => {
     setIsDownloadingLocal(true);
     setStatusBanner(null);
     try {
+      const prToBuild = selectedPrOverride || nextPrLabel;
       const buildRes = await fetch('/api/project/build-zip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          requestedPr: selectedPrOverride || undefined,
+          requestedPr: prToBuild || undefined,
           forceRebuild: true,
           incrementPr: true,
           autoGithubBackup: true,
@@ -309,19 +354,20 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
 
       const filename: string =
         built.filename ||
-        `app.tidyups.cleaning-${activePrLabel}-${new Date().toISOString().slice(0, 10)}.zip`;
-      const prLabel: string = built.prLabel || activePrLabel;
+        `app.tidyups.cleaning-${prToBuild}-${new Date().toISOString().slice(0, 10)}.zip`;
+      const prLabel: string = built.prLabel || prToBuild;
       const downloadUrl: string =
         built.downloadUrl || `/api/project/download-saved-zip?filename=${encodeURIComponent(filename)}`;
 
-      // Trigger native attachment download
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = filename;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      if (downloadToComputer) {
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = filename;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
 
       // If already signed in to Google Drive, also upload this built ZIP into "TidyUps Cleaning App Backup Zips" automatically!
       let driveUploadedFolderLink: string | undefined;
@@ -344,6 +390,10 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
             driveUploadedFolderLink = driveData?.folder?.webViewLink;
             if (driveData?.folder) setDriveFolder(driveData.folder);
             fetchDriveBackupFiles(activeToken);
+          } else if (driveRes.status === 401) {
+            clearCachedAccessToken(activeToken);
+            setToken(null);
+            setNeedsAuth(true);
           }
         } catch {}
       }
@@ -353,8 +403,8 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
       setStatusBanner({
         type: 'success',
         message: driveUploadedFolderLink
-          ? `✓ Built "${filename}" (${prLabel}), downloaded to your device, AND loaded into "${TIDYUPS_DRIVE_FOLDER_NAME}" in Google Drive!`
-          : `✓ Built numbered archive "${filename}" (${prLabel} • ${Math.round((built.sizeBytes || 0) / 1024)} KB)! Click "Download ZIP File" on the right if your browser blocked the automatic download, or click "Upload to Google Drive".`,
+          ? `✓ Built Whole Project "${filename}" (${prLabel}) AND uploaded directly into "${TIDYUPS_DRIVE_FOLDER_NAME}" in Google Drive!`
+          : `✓ Built Whole Project archive "${filename}" (${prLabel} • ${Math.round((built.sizeBytes || 0) / 1024)} KB) on Server & GitHub (no hard-drive clutter)! Click "Sign in with Google" or "Load to Google Drive" below to send it to your Google Drive.`,
         folderLink: driveUploadedFolderLink || driveFolder?.webViewLink,
         downloadUrl,
         downloadFilename: filename,
@@ -425,12 +475,30 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {needsAuth || !token ? (
+              <button
+                type="button"
+                disabled={isLoggingIn}
+                onClick={handleGoogleLogin}
+                className="py-2 px-3.5 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-xs flex items-center gap-2 shadow-md transition-all cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                <span>{isLoggingIn ? 'Signing in...' : 'Sign in with Google'}</span>
+              </button>
+            ) : (
+              <div className="px-3 py-1.5 rounded-xl bg-emerald-950/90 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                <span className="hidden sm:inline">{user?.email || 'Google Drive Connected'}</span>
+              </div>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Navigation Sub-Tabs */}
@@ -554,12 +622,12 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                   )}
                 </div>
 
-                {/* PR Version Selector (Auto PR#, or pick PR6, PR7, PR8, PR9, PR10, PR11...) */}
-                <div className="p-3.5 rounded-2xl bg-[#11141f] border border-slate-800 space-y-2.5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                {/* PR Version Selector & Server Updater (Update PR# for Whole Project ZIPs) */}
+                <div className="p-4 rounded-2xl bg-[#11141f] border border-emerald-500/30 space-y-3">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                        Next ZIP File Name &amp; PR Number (PR1–PR5 Retired)
+                      <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
+                        Active Whole Project ZIP PR Number &amp; Filename (Click Any PR# Below to Update)
                       </span>
                       <code className="text-xs sm:text-sm font-mono font-black text-emerald-300 break-all">
                         {selectedPrOverride
@@ -567,33 +635,71 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                           : nextSuggestedZipFilename}
                       </code>
                     </div>
+
+                    {/* Step -1 / +1 PR & Custom PR# Updater */}
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <button
                         type="button"
-                        onClick={() => setSelectedPrOverride('')}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-black border cursor-pointer transition-all ${
-                          !selectedPrOverride
-                            ? 'bg-emerald-600 text-white border-emerald-400'
+                        disabled={isUpdatingPr || activePrNumeric <= 6}
+                        onClick={() => handleUpdatePrNumber(Math.max(6, activePrNumeric - 1))}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-black cursor-pointer disabled:opacity-40"
+                        title="Decrease PR number by 1"
+                      >
+                        -1 (PR{Math.max(6, activePrNumeric - 1)})
+                      </button>
+                      <span className="px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-mono font-black text-xs">
+                        Current: {activePrLabel}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isUpdatingPr}
+                        onClick={() => handleUpdatePrNumber(activePrNumeric + 1)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400 text-xs font-black cursor-pointer shadow-xs disabled:opacity-50"
+                        title="Advance to next PR number on server"
+                      >
+                        +1 Next (PR{activePrNumeric + 1})
+                      </button>
+
+                      <div className="flex items-center gap-1 ml-1">
+                        <input
+                          type="text"
+                          value={customPrInput}
+                          onChange={(e) => setCustomPrInput(e.target.value)}
+                          placeholder="e.g. PR12"
+                          className="w-20 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-emerald-400"
+                        />
+                        <button
+                          type="button"
+                          disabled={isUpdatingPr || !customPrInput.trim()}
+                          onClick={() => handleUpdatePrNumber(customPrInput)}
+                          className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-black cursor-pointer disabled:opacity-40"
+                        >
+                          {isUpdatingPr ? 'Saving...' : 'Set PR#'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quick-Click PR# Buttons (Immediately updates server PR# when clicked) */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-800/80">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-1">
+                      Quick Select PR#:
+                    </span>
+                    {['PR6', 'PR7', 'PR8', 'PR9', 'PR10', 'PR11', 'PR12', 'PR13', 'PR14', 'PR15'].map((pr) => (
+                      <button
+                        key={pr}
+                        type="button"
+                        disabled={isUpdatingPr}
+                        onClick={() => handleUpdatePrNumber(pr)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-black border cursor-pointer transition-all ${
+                          activePrLabel === pr
+                            ? 'bg-emerald-600 text-white border-emerald-400 shadow-md scale-105'
                             : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                         }`}
                       >
-                        Auto ({nextPrLabel})
+                        {pr}
                       </button>
-                      {['PR6', 'PR7', 'PR8', 'PR9', 'PR10', 'PR11'].map((pr) => (
-                        <button
-                          key={pr}
-                          type="button"
-                          onClick={() => setSelectedPrOverride(pr)}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-black border cursor-pointer transition-all ${
-                            selectedPrOverride === pr
-                              ? 'bg-emerald-600 text-white border-emerald-400'
-                              : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                          }`}
-                        >
-                          {pr}
-                        </button>
-                      ))}
-                    </div>
+                    ))}
                   </div>
                 </div>
 
@@ -634,7 +740,7 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                   </div>
                 </div>
 
-                {/* 1-Click Action Area */}
+                {/* 1-Click Action Area (Direct to Google Drive — No Forced Hard Drive Downloads) */}
                 <div className="pt-1 space-y-3">
                   <div className="flex flex-col sm:flex-row gap-3">
                     <button
@@ -642,28 +748,28 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                       disabled={isUploadingDrive || isDownloadingLocal || isLoggingIn}
                       onClick={() => handleOneClickUploadToDriveFolder(true)}
                       className="flex-1 py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-xl cursor-pointer disabled:opacity-50 transition-all active:scale-99"
-                      title={`Build fresh ${activePrLabel} ZIP on server and load it directly into your "${TIDYUPS_DRIVE_FOLDER_NAME}" Google Drive folder`}
+                      title={`Build fresh ${activePrLabel} Whole Project ZIP on server and upload it directly into your "${TIDYUPS_DRIVE_FOLDER_NAME}" Google Drive folder (without downloading to your hard drive)`}
                     >
                       <CloudUpload className="w-5 h-5 shrink-0" />
                       <span>
                         {isUploadingDrive && !uploadingFilename
-                          ? `Building & Loading ${activePrLabel} ZIP to Google Drive...`
-                          : `☁️ 1-Click Build & Load ${activePrLabel} ZIP to Google Drive`}
+                          ? `Building & Uploading ${activePrLabel} ZIP to Google Drive...`
+                          : `☁️ 1-Click Build & Upload ${activePrLabel} ZIP to Google Drive`}
                       </span>
                     </button>
 
                     <button
                       type="button"
                       disabled={isUploadingDrive || isDownloadingLocal || isLoggingIn}
-                      onClick={handleDownloadNumberedZip}
-                      className="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/40 font-black text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
-                      title={`Build & download ${activePrLabel} ZIP directly to your computer (and also upload to Drive if connected)`}
+                      onClick={() => handleBuildNumberedZipOnServer(false)}
+                      className="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 font-black text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
+                      title={`Build ${activePrLabel} Whole Project ZIP on server & GitHub without downloading to your computer hard drive`}
                     >
-                      <FileArchive className="w-4 h-4 text-cyan-400" />
+                      <FileArchive className="w-4 h-4 text-emerald-400" />
                       <span>
                         {isDownloadingLocal
-                          ? `Building ${activePrLabel} ZIP...`
-                          : `⬇️ Build & Download ${activePrLabel} ZIP`}
+                          ? `Building ${activePrLabel} on Server...`
+                          : `📦 Build ${activePrLabel} on Server & GitHub Only`}
                       </span>
                     </button>
                   </div>
