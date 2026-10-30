@@ -15394,17 +15394,160 @@ function evaluateSpamCallRule(fromRaw: string, config: any): { isBlocked: boolea
   return { isBlocked: false };
 }
 
+let lastFastSpamShieldSyncMs = 0;
+let lastFastOpenPhonePollMs = 0;
+
+async function pollRecentOpenPhoneCallsFast(projectId: string) {
+  const apiKey = getEffectiveQuoApiKey();
+  if (!apiKey) return;
+  try {
+    const convRes = await fetch("https://api.openphone.com/v1/conversations?maxResults=10", {
+      headers: { Authorization: apiKey },
+    }).catch(() => null);
+    if (!convRes || !convRes.ok) return;
+    const convData = await convRes.json();
+    const convs = Array.isArray(convData?.data) ? convData.data.slice(0, 8) : [];
+    const currentStore = loadStore(projectId);
+    if (!currentStore) return;
+    let changed = false;
+    const callLists = await Promise.all(
+      convs.map(async (conv: any) => {
+        const participant = (conv.participants || [])[0];
+        const pnId = conv.phoneNumberId;
+        if (!participant || !pnId || TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(participant))) return [];
+        const cRes = await fetch(
+          `https://api.openphone.com/v1/calls?phoneNumberId=${encodeURIComponent(pnId)}&participants=${encodeURIComponent(participant)}&maxResults=5`,
+          { headers: { Authorization: apiKey } }
+        ).catch(() => null);
+        if (!cRes || !cRes.ok) return [];
+        const cData = await cRes.json();
+        return [...(cData.data || [])].reverse();
+      })
+    );
+    for (const calls of callLists) {
+      for (const call of calls) {
+        const res = await processQuoCallEvent(
+          { type: "call.transcript.completed", data: { object: call } },
+          { existingStore: currentStore, skipSave: true }
+        );
+        if (res?.callLog) changed = true;
+      }
+    }
+    if (changed) {
+      if (Array.isArray(currentStore.quoCallLogs)) {
+        currentStore.quoCallLogs.sort((a: any, b: any) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
+      }
+      saveStore(currentStore, projectId);
+    }
+  } catch {
+    // ignore background poll errors
+  }
+}
+
 // GET spam shield settings, blocked history, Quo screened calls & recent inbound calls
-app.get("/api/twilio/spam-shield", (req, res) => {
+app.get("/api/twilio/spam-shield", async (req, res) => {
   const projectId = getProjectId(req);
-  const store = loadStore(projectId);
+  const forceSync = req.query.forceSync === "1" || req.query.forceSync === "true";
+  const nowMs = Date.now();
+
+  if (forceSync || nowMs - lastFastOpenPhonePollMs > 10000) {
+    lastFastOpenPhonePollMs = nowMs;
+    if (forceSync) {
+      await pollRecentOpenPhoneCallsFast(projectId);
+    } else {
+      pollRecentOpenPhoneCallsFast(projectId).catch(() => {});
+    }
+  }
+
+  let store = loadStore(projectId);
+
+  if (store && (forceSync || nowMs - lastFastSpamShieldSyncMs > 4000)) {
+    lastFastSpamShieldSyncMs = nowMs;
+    try {
+      const remRes = await fetch(`https://app.tidyupscleaning.com/api/store?project=${projectId}`);
+      if (remRes.ok) {
+        const remData = await remRes.json();
+        let storeUpdated = false;
+        if (Array.isArray(remData.quoCallLogs)) {
+          if (!Array.isArray(store.quoCallLogs)) store.quoCallLogs = [];
+          for (const rq of remData.quoCallLogs.slice(0, 35)) {
+            const rqNormId = String(rq.callId || rq.id || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
+            if (!rqNormId) continue;
+            const existsIdx = store.quoCallLogs.findIndex(
+              (lq: any) => String(lq.callId || lq.id || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1") === rqNormId
+            );
+            if (existsIdx < 0) {
+              store.quoCallLogs.unshift({ ...rq, id: rqNormId, callId: rqNormId });
+              storeUpdated = true;
+            } else if (!store.quoCallLogs[existsIdx].transcriptText && rq.transcriptText) {
+              store.quoCallLogs[existsIdx] = {
+                ...store.quoCallLogs[existsIdx],
+                ...rq,
+                id: rqNormId,
+                callId: rqNormId,
+              };
+              storeUpdated = true;
+            }
+          }
+        }
+        if (Array.isArray(remData.recentInboundCalls)) {
+          if (!Array.isArray(store.recentInboundCalls)) store.recentInboundCalls = [];
+          for (const rc of remData.recentInboundCalls.slice(0, 35)) {
+            const exists = store.recentInboundCalls.some((lc: any) => (lc.callSid || lc.id) === (rc.callSid || rc.id));
+            if (!exists) {
+              store.recentInboundCalls.unshift(rc);
+              storeUpdated = true;
+            }
+          }
+        }
+        if (Array.isArray(remData.blockedCallsHistory)) {
+          if (!Array.isArray(store.blockedCallsHistory)) store.blockedCallsHistory = [];
+          for (const bh of remData.blockedCallsHistory.slice(0, 35)) {
+            const exists = store.blockedCallsHistory.some(
+              (lh: any) => lh.id === bh.id || (lh.callerNumber === bh.callerNumber && lh.timestamp === bh.timestamp)
+            );
+            if (!exists) {
+              store.blockedCallsHistory.unshift(bh);
+              storeUpdated = true;
+            }
+          }
+        }
+        if (storeUpdated) {
+          if (Array.isArray(store.quoCallLogs)) {
+            store.quoCallLogs.sort((a: any, b: any) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
+          }
+          saveStore(store, projectId);
+        }
+      }
+    } catch {
+      // ignore remote sync error
+    }
+  }
+
   if (store && repairAndSyncStoreData(store)) {
     saveStore(store, projectId);
   }
   const config = store?.spamShieldConfig || DEFAULT_SPAM_SHIELD_CONFIG;
   const history = store?.blockedCallsHistory || INITIAL_BLOCKED_CALLS_HISTORY;
-  const recentInboundCalls = store?.recentInboundCalls || [];
-  const quoScreenedCalls = (store?.quoCallLogs || []).filter(
+  const recentInboundCalls = (store?.recentInboundCalls || []).map((c: any) => {
+    const evalRule = evaluateSpamCallRule(c.callerNumber || "", config);
+    const isBlockedNow = evalRule.isBlocked || c.status === "BLOCKED";
+    return {
+      ...c,
+      status: isBlockedNow ? "BLOCKED" : "ALLOWED",
+      reason: evalRule.isBlocked ? evalRule.reason : c.reason,
+    };
+  });
+  const allQuoCalls = (store?.quoCallLogs || []).map((c: any) => {
+    const evalRule = evaluateSpamCallRule(c.callerPhone || "", config);
+    const isBlockedNow = Boolean(evalRule.isBlocked || c.isBlocked || c.status === "SOLICITOR_BLOCKED");
+    return {
+      ...c,
+      isBlocked: isBlockedNow,
+      blockedReason: evalRule.isBlocked ? evalRule.reason : c.blockedReason || (isBlockedNow ? "Blocked by Spam Shield" : ""),
+    };
+  });
+  const quoScreenedCalls = allQuoCalls.filter(
     (c: any) => !c.hasCleaningIntent || c.status === "SOLICITOR_BLOCKED" || c.status === "SCREENED_CALL" || c.isBlocked
   );
   res.json({
@@ -15414,7 +15557,7 @@ app.get("/api/twilio/spam-shield", (req, res) => {
     history,
     recentInboundCalls,
     quoScreenedCalls,
-    allQuoCalls: store?.quoCallLogs || [],
+    allQuoCalls,
   });
 });
 
