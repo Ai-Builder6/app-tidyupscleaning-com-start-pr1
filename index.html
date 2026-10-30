@@ -345,6 +345,46 @@
     height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <!-- End Google Tag Manager (noscript) -->
     <div id="root"></div>
+    <script>
+      // Immediate zero-dependency fallback UI & cross-tab broadcaster when redirected with ?jobber_connected=true
+      (function() {
+        try {
+          var search = window.location.search || "";
+          if (search.indexOf("jobber_connected=true") !== -1) {
+            try {
+              localStorage.setItem("tidyups_jobber_connected_signal", String(Date.now()));
+            } catch (_) {}
+            try {
+              if (typeof BroadcastChannel !== "undefined") {
+                var bc = new BroadcastChannel("tidyups_jobber_oauth");
+                bc.postMessage({ type: "JOBBER_CONNECTED", timestamp: Date.now() });
+              }
+            } catch (_) {}
+            try {
+              if (window.opener) {
+                window.opener.postMessage({ type: "JOBBER_CONNECTED" }, "*");
+                window.opener.postMessage({ type: "OAUTH_AUTH_SUCCESS" }, "*");
+              }
+            } catch (_) {}
+            var rootEl = document.getElementById("root");
+            if (rootEl && !rootEl.innerHTML) {
+              rootEl.innerHTML =
+                '<div style="min-height:100vh;background:#0b0f19;color:#f8fafc;display:flex;align-items:center;justify-content:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;box-sizing:border-box;">' +
+                  '<div style="background:#151c2c;border:2px solid #10b981;border-radius:24px;padding:36px;max-width:540px;width:100%;text-align:center;box-shadow:0 25px 50px -12px rgba(0,0,0,0.6);">' +
+                    '<div style="display:inline-block;background:rgba(16,185,129,0.2);color:#34d399;border:1px solid rgba(16,185,129,0.4);border-radius:9999px;padding:6px 14px;font-size:11px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:16px;">✓ Jobber OAuth 2.0 Verified &amp; Active</div>' +
+                    '<h1 style="color:#ffffff;font-size:24px;font-weight:800;margin:0 0 12px 0;">Jobber Connected Successfully!</h1>' +
+                    '<p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:0 0 24px 0;">Your <strong>Tidyups Cleaning Service Inc</strong> Jobber account is authorized and synced with TidyUps Dispatch.</p>' +
+                    '<div style="display:flex;flex-direction:column;gap:10px;">' +
+                      '<a href="/?jobber_connected=true&amp;app=1" style="display:block;background:linear-gradient(135deg,#10b981,#059669);color:#ffffff;text-decoration:none;padding:14px 20px;border-radius:12px;font-weight:800;font-size:14px;">Open TidyUps Dispatch Console →</a>' +
+                      '<a href="https://app.tidyupscleaning.com" style="display:block;background:#1e293b;border:1px solid #334155;color:#e2e8f0;text-decoration:none;padding:12px 20px;border-radius:12px;font-weight:700;font-size:13px;">Open Live Production Site (app.tidyupscleaning.com) ↗</a>' +
+                    '</div>' +
+                  '</div>' +
+                '</div>';
+            }
+          }
+        } catch (_) {}
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

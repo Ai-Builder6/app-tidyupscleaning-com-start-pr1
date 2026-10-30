@@ -242,17 +242,40 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
 
     fetchConfig();
 
+    const onOAuthCompleted = () => {
+      fetchConfig();
+      setIsAuthorizing(false);
+      setSyncNotice('🎉 Jobber OAuth authorized and connected successfully! Live data synchronized.');
+      setActiveTab('JOBBER');
+      if (onDataUpdated) onDataUpdated();
+    };
+
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'JOBBER_CONNECTED' || event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        fetchConfig();
-        setIsAuthorizing(false);
-        setSyncNotice('🎉 Jobber OAuth authorized and connected successfully! Live data synchronized.');
-        setActiveTab('JOBBER');
-        if (onDataUpdated) onDataUpdated();
+        onOAuthCompleted();
+      }
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'tidyups_jobber_connected_signal') {
+        onOAuthCompleted();
       }
     };
 
     window.addEventListener('message', handleMessage);
+    window.addEventListener('storage', handleStorage);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('tidyups_jobber_oauth');
+        bc.onmessage = (event) => {
+          if (event.data?.type === 'JOBBER_CONNECTED') {
+            onOAuthCompleted();
+          }
+        };
+      }
+    } catch {}
 
     // Auto-poll to catch authorization when completed in another tab or popup
     const pollInterval = setInterval(() => {
@@ -276,6 +299,12 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
 
     return () => {
       window.removeEventListener('message', handleMessage);
+      window.removeEventListener('storage', handleStorage);
+      if (bc) {
+        try {
+          bc.close();
+        } catch {}
+      }
       clearInterval(pollInterval);
     };
   }, [isOpen, config.isConnected, onDataUpdated]);
@@ -916,7 +945,7 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
                   <a
                     href={computedServerStartUrl}
                     target="_blank"
-                    rel="noopener noreferrer"
+                    rel="opener"
                     onClick={() => {
                       handleSaveCredentialsQuietly();
                       setIsAuthorizing(true);

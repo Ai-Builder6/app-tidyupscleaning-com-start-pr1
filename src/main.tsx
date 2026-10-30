@@ -203,13 +203,17 @@ if (typeof window !== 'undefined') {
       }
     }
   });
-  // Silently unregister any lingering dev service workers once without ever reloading or resetting the page
-  if ('serviceWorker' in navigator) {
+  // Only unregister legacy dev-sw.js or workbox service workers, NEVER AI Studio's proxy service worker on .run.app
+  if ('serviceWorker' in navigator && !window.location.hostname.endsWith('.run.app')) {
     navigator.serviceWorker
       .getRegistrations()
       .then((regs) => {
         for (const reg of regs) {
-          reg.unregister().catch(() => {});
+          const scriptUrl =
+            reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || '';
+          if (scriptUrl.includes('dev-sw.js') || scriptUrl.includes('workbox')) {
+            reg.unregister().catch(() => {});
+          }
         }
       })
       .catch(() => {});

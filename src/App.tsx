@@ -332,7 +332,18 @@ export function App() {
   const [urgencyFilter, setUrgencyFilter] = useState<'ALL' | UrgencyLevel>('ALL');
   const [mobileView, setMobileView] = useState<'map' | 'board'>('map');
   const [kanbanActiveTab, setKanbanActiveTab] = useState<'BOARD' | 'UNASSIGNED'>('BOARD');
-  const [isJobberModalOpen, setIsJobberModalOpen] = useState<boolean>(false);
+  const [isJobberModalOpen, setIsJobberModalOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.location.search.toLowerCase().includes('jobber_connected=true');
+    }
+    return false;
+  });
+  const [jobberModalInitialTab, setJobberModalInitialTab] = useState<'CREDENTIALS' | 'APP_INFO_KIT' | 'CSV_IMPORT' | 'JOBBER' | 'GOOGLE_SHEETS'>(() => {
+    if (typeof window !== 'undefined' && window.location.search.toLowerCase().includes('jobber_connected=true')) {
+      return 'JOBBER';
+    }
+    return 'CREDENTIALS';
+  });
   const [isPublicBookingModalOpen, setIsPublicBookingModalOpen] = useState<boolean>(false);
   const [isQuoModalOpen, setIsQuoModalOpen] = useState<boolean>(false);
 
@@ -557,7 +568,69 @@ export function App() {
   });
   const [isSyncingEverything, setIsSyncingEverything] = useState<boolean>(false);
   const [lastSyncedAllAt, setLastSyncedAllAt] = useState<string | null>(() => new Date().toISOString());
-  const [syncAllStatusMessage, setSyncAllStatusMessage] = useState<string | null>(null);
+  const [syncAllStatusMessage, setSyncAllStatusMessage] = useState<string | null>(() => {
+    if (typeof window !== 'undefined' && window.location.search.toLowerCase().includes('jobber_connected=true')) {
+      return '✅ Jobber OAuth Verified & Connected! Live 5-module synchronization is active.';
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.search.toLowerCase().includes('jobber_connected=true')) {
+      setIsJobberModalOpen(true);
+      setJobberModalInitialTab('JOBBER');
+      setSyncAllStatusMessage('✅ Jobber OAuth Verified & Connected! Live 5-module synchronization is active.');
+      fetch('/api/jobber/oauth/refresh-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }).catch(() => {});
+      try {
+        window.history.replaceState({}, '', window.location.pathname || '/');
+      } catch {}
+    }
+
+    const onJobberConnected = () => {
+      setSyncAllStatusMessage('✅ Jobber OAuth Verified & Connected! Live 5-module synchronization is active.');
+      setJobberModalInitialTab('JOBBER');
+    };
+
+    const handleMsg = (e: MessageEvent) => {
+      if (e.data?.type === 'JOBBER_CONNECTED' || e.data?.type === 'OAUTH_AUTH_SUCCESS') {
+        onJobberConnected();
+      }
+    };
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'tidyups_jobber_connected_signal') {
+        onJobberConnected();
+      }
+    };
+    window.addEventListener('message', handleMsg);
+    window.addEventListener('storage', handleStorage);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('tidyups_jobber_oauth');
+        bc.onmessage = (e) => {
+          if (e.data?.type === 'JOBBER_CONNECTED') {
+            onJobberConnected();
+          }
+        };
+      }
+    } catch {}
+
+    return () => {
+      window.removeEventListener('message', handleMsg);
+      window.removeEventListener('storage', handleStorage);
+      if (bc) {
+        try {
+          bc.close();
+        } catch {}
+      }
+    };
+  }, []);
   const [deltaSyncStats, setDeltaSyncStats] = useState<{
     deltaWritesCount: number;
     unchangedSkippedCount: number;
@@ -4419,6 +4492,7 @@ export function App() {
         {/* Jobber Backend Integration & Sync Hub Modal */}
         <JobberSyncModal
           isOpen={isJobberModalOpen}
+          initialTab={jobberModalInitialTab}
           onClose={() => {
             setIsJobberModalOpen(false);
             fetch(`/api/store?project=${activeProjectId}`, { headers: { 'x-project-id': activeProjectId } })
