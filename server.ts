@@ -3375,6 +3375,116 @@ app.post("/api/jobber/sync-all-comprehensive", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Jobber Developer App Webhooks Receiver (https://app.tidyupscleaning.com/api/jobber/webhooks)
+// Responds 200 OK immediately (<50ms) and triggers non-blocking delta syncs when
+// Quotes, Visits, Jobs, Clients, Requests, or Invoices change inside Jobber.
+// ─────────────────────────────────────────────────────────────────────────────
+interface JobberWebhookEventRecord {
+  id: string;
+  topic: string;
+  itemId: string;
+  accountId: string;
+  receivedAt: string;
+}
+
+const recentJobberWebhookEvents: JobberWebhookEventRecord[] = [];
+
+app.get(["/api/jobber/webhooks", "/api/jobber/webhook"], (req, res) => {
+  const baseUrl = getAppBaseUrl(req);
+  res.json({
+    status: "active",
+    webhookUrl: "https://app.tidyupscleaning.com/api/jobber/webhooks",
+    currentDomainWebhookUrl: `${baseUrl}/api/jobber/webhooks`,
+    supportedTopics: [
+      "CLIENT_CREATE",
+      "CLIENT_UPDATE",
+      "REQUEST_CREATE",
+      "REQUEST_UPDATE",
+      "QUOTE_CREATE",
+      "QUOTE_UPDATE",
+      "QUOTE_APPROVED",
+      "JOB_CREATE",
+      "JOB_UPDATE",
+      "VISIT_CREATE",
+      "VISIT_UPDATE",
+      "VISIT_COMPLETE",
+      "INVOICE_CREATE",
+      "INVOICE_UPDATE",
+      "APP_DISCONNECT",
+    ],
+    recentEventsCount: recentJobberWebhookEvents.length,
+    recentEvents: recentJobberWebhookEvents.slice(0, 20),
+  });
+});
+
+app.post(["/api/jobber/webhooks", "/api/jobber/webhook"], (req, res) => {
+  try {
+    const payload = req.body || {};
+    const eventObj = payload?.data?.webHookEvent || payload?.webHookEvent || payload;
+    const topic = String(eventObj?.topic || payload?.topic || "UNKNOWN_TOPIC").toUpperCase();
+    const itemId = String(eventObj?.itemId || payload?.itemId || "");
+    const accountId = String(eventObj?.accountId || payload?.accountId || "");
+
+    recentJobberWebhookEvents.unshift({
+      id: `jwh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      topic,
+      itemId,
+      accountId,
+      receivedAt: new Date().toISOString(),
+    });
+    if (recentJobberWebhookEvents.length > 50) {
+      recentJobberWebhookEvents.length = 50;
+    }
+
+    // Acknowledge immediately with 200 OK as required by Jobber's webhook specification
+    res.status(200).json({ received: true, topic, itemId });
+
+    // Process background sync non-blockingly
+    setTimeout(async () => {
+      try {
+        if (topic === "APP_DISCONNECT") {
+          jobberConfig.isConnected = false;
+          jobberConfig.accessToken = "";
+          persistJobberConfigToDisk();
+          return;
+        }
+        const token = await ensureValidJobberToken();
+        if (!token) return;
+        const store = loadStore("tidyups");
+        if (topic.startsWith("QUOTE_")) {
+          const qData = await syncJobberQuotes(token, getJobberCreds(), store?.quotes || []);
+          if (store && qData.quotes) {
+            store.quotes = qData.quotes.filter((q: any) => !isFakeOrPurgedJobberQuote(q));
+            store.lastSavedAt = new Date().toISOString();
+            saveStore(store, "tidyups");
+          }
+        } else if (topic.startsWith("VISIT_") || topic.startsWith("JOB_")) {
+          const calData = await syncJobberCalendar(token, getJobberCreds(), store?.scheduledVisits || []);
+          if (store && calData.visits && calData.visits.length > 0) {
+            store.scheduledVisits = calData.visits;
+            store.lastSavedAt = new Date().toISOString();
+            saveStore(store, "tidyups");
+          }
+        } else if (topic.startsWith("CLIENT_") || topic.startsWith("REQUEST_")) {
+          await syncJobberClients(token, getJobberCreds());
+        } else if (topic.startsWith("INVOICE_")) {
+          const invData = await syncJobberInvoices(token, getJobberCreds(), store?.invoices || []);
+          if (store && invData.invoices && invData.invoices.length > 0) {
+            store.invoices = invData.invoices;
+            store.lastSavedAt = new Date().toISOString();
+            saveStore(store, "tidyups");
+          }
+        }
+      } catch (err: any) {
+        console.warn("Jobber webhook background sync note:", err?.message || err);
+      }
+    }, 10);
+  } catch {
+    res.status(200).json({ received: true });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Fast Local Database Endpoints (Instant <5ms load, incremental Jobber sync)
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -653,6 +653,70 @@ export const JobberAppInfoKit: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* Section 6: Webhooks (Optional vs. Recommended Real-Time Sync) */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+            <span>6. Webhooks Section (Bottom of Jobber Form — Optional or Real-Time Auto-Sync)</span>
+          </h4>
+          <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200">
+            Optional — Works Either Way
+          </span>
+        </div>
+
+        <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-xl text-xs text-slate-700 space-y-2 leading-relaxed">
+          <p className="font-bold text-slate-900">
+            Do you need to add Webhooks in the Jobber Developer App, or just keep what we created?
+          </p>
+          <ul className="list-disc pl-5 space-y-1 text-[11px] text-slate-700">
+            <li>
+              <strong>Option 1 — Just keep what we created (Leave Webhooks Empty):</strong> Your app already works 100% using the <strong>Callback URL</strong> above and our built-in GraphQL API sync! You can click <strong>Save</strong> in Jobber without adding any webhooks.
+            </li>
+            <li>
+              <strong>Option 2 — Add the Webhook URL below (Recommended for Instant 2-Way Updates):</strong> If you want Jobber to automatically push live updates to your dashboard the exact second a client approves a Quote, a Visit is rescheduled, or a new Request comes in inside Jobber, paste this Webhook URL into Jobber's Webhooks section:
+            </li>
+          </ul>
+        </div>
+
+        <CopyFieldCard
+          label="Jobber Webhook URL (Paste into Webhooks URL box if adding Webhooks)"
+          sublabel="Live endpoint on your server that responds 200 OK and auto-syncs changes from Jobber in real time"
+          value="https://app.tidyupscleaning.com/api/jobber/webhooks"
+          badge="Live Receiver Ready ✓"
+        />
+
+        <div className="p-3 bg-white rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-1.5">
+          <div className="font-bold text-slate-800">
+            If you click &ldquo;Add Webhook&rdquo; in Jobber, check any of these topics with the URL above:
+          </div>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {[
+              'CLIENT_CREATE',
+              'CLIENT_UPDATE',
+              'REQUEST_CREATE',
+              'QUOTE_CREATE',
+              'QUOTE_UPDATE',
+              'QUOTE_APPROVED',
+              'JOB_CREATE',
+              'VISIT_CREATE',
+              'VISIT_UPDATE',
+              'VISIT_COMPLETE',
+              'INVOICE_CREATE',
+              'APP_DISCONNECT',
+            ].map((topic) => (
+              <span
+                key={topic}
+                className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 font-mono text-[10px] font-bold text-slate-800"
+              >
+                {topic}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
+
