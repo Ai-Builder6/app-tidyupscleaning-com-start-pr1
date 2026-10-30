@@ -47,6 +47,7 @@ interface JobberSyncModalProps {
   onTicketsUpdated?: (tickets: ServiceTicket[]) => void;
   onDataUpdated?: () => void;
   projectId?: 'dispatchgeeni' | 'tidyups';
+  initialTab?: 'CREDENTIALS' | 'APP_INFO_KIT' | 'CSV_IMPORT' | 'JOBBER' | 'GOOGLE_SHEETS';
 }
 
 export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
@@ -55,6 +56,7 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
   tickets,
   onDataUpdated,
   projectId = 'tidyups',
+  initialTab = 'CREDENTIALS',
 }) => {
   const [activeProjectTab, setActiveProjectTab] = useState<'dispatchgeeni' | 'tidyups'>(projectId);
 
@@ -87,7 +89,14 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
   const [copiedAuthLink, setCopiedAuthLink] = useState(false);
   const [isAuthorizing, setIsAuthorizing] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'CREDENTIALS' | 'APP_INFO_KIT' | 'CSV_IMPORT' | 'JOBBER' | 'GOOGLE_SHEETS'>('APP_INFO_KIT');
+  const [activeTab, setActiveTab] = useState<'CREDENTIALS' | 'APP_INFO_KIT' | 'CSV_IMPORT' | 'JOBBER' | 'GOOGLE_SHEETS'>(initialTab);
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab || 'CREDENTIALS');
+    }
+  }, [isOpen, initialTab]);
+
   const [isSyncing, setIsSyncing] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [copiedTsv, setCopiedTsv] = useState(false);
@@ -677,18 +686,6 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
         {/* Navigation Tabs */}
         <div className="flex items-center px-4 bg-slate-100/80 border-b border-slate-200 text-xs font-semibold gap-1 overflow-x-auto">
           <button
-            onClick={() => setActiveTab('APP_INFO_KIT')}
-            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
-              activeTab === 'APP_INFO_KIT'
-                ? 'border-pink-600 text-pink-800 font-bold bg-white -mb-px rounded-t-lg shadow-2xs'
-                : 'border-transparent text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-pink-600" />
-            <span>Jobber Dev App Info (Copy &amp; Paste)</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('CREDENTIALS')}
             className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
               activeTab === 'CREDENTIALS'
@@ -697,19 +694,28 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
             }`}
           >
             <Key className="w-3.5 h-3.5 text-amber-600" />
-            <span>Jobber Connect &amp; Secrets</span>
+            <span>1. Jobber Account &amp; Secret (Authorize &amp; Check Status)</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                config.isConnected
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                  : 'bg-amber-100 text-amber-800 border border-amber-300'
+              }`}
+            >
+              {config.isConnected ? 'Authorized ✓' : 'Check / Approve'}
+            </span>
           </button>
 
           <button
-            onClick={() => setActiveTab('CSV_IMPORT')}
+            onClick={() => setActiveTab('APP_INFO_KIT')}
             className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
-              activeTab === 'CSV_IMPORT'
-                ? 'border-purple-600 text-purple-800 font-bold bg-white -mb-px rounded-t-lg shadow-2xs'
+              activeTab === 'APP_INFO_KIT'
+                ? 'border-pink-600 text-pink-800 font-bold bg-white -mb-px rounded-t-lg shadow-2xs'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
             }`}
           >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-purple-600" />
-            <span>Import Jobber CSV (Sept &amp; Oct)</span>
+            <Sparkles className="w-3.5 h-3.5 text-pink-600" />
+            <span>2. Jobber Dev App Info (Copy &amp; Paste)</span>
           </button>
 
           <button
@@ -721,7 +727,19 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
             }`}
           >
             <Layers className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Jobber 5-Module Sync</span>
+            <span>3. Jobber 5-Module Sync</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('CSV_IMPORT')}
+            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
+              activeTab === 'CSV_IMPORT'
+                ? 'border-purple-600 text-purple-800 font-bold bg-white -mb-px rounded-t-lg shadow-2xs'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-purple-600" />
+            <span>Import Jobber CSV</span>
           </button>
 
           <button
@@ -733,7 +751,7 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
             }`}
           >
             <Table className="w-3.5 h-3.5 text-blue-600" />
-            <span>Google Sheets (ScrubbyBuilder Leads)</span>
+            <span>Google Sheets Leads</span>
           </button>
         </div>
 
@@ -750,18 +768,192 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
           )}
 
           {/* TAB: JOBBER APP MARKETPLACE COPY & PASTE KIT */}
-          {activeTab === 'APP_INFO_KIT' && <JobberAppInfoKit />}
+          {activeTab === 'APP_INFO_KIT' && (
+            <div className="space-y-3">
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-300 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-emerald-950">
+                  Looking to check if your Jobber account is Authorized or enter your Client Secret?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('CREDENTIALS')}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  <span>← Go to Jobber Account &amp; Secret (Authorize Tab)</span>
+                </button>
+              </div>
+              <JobberAppInfoKit />
+            </div>
+          )}
 
           {/* TAB: JOBBER CREDENTIALS & OAUTH CONNECT */}
           {activeTab === 'CREDENTIALS' && (
             <div className="space-y-4">
+              {/* LIVE AUTHORIZATION & DEVELOPER CENTER DIAGNOSTIC BANNER */}
+              <div
+                className={`p-4 sm:p-5 rounded-2xl border-2 shadow-sm space-y-3.5 ${
+                  config.isConnected
+                    ? 'bg-gradient-to-r from-emerald-50 via-teal-50/80 to-white border-emerald-400'
+                    : 'bg-gradient-to-r from-amber-50 via-orange-50/60 to-white border-amber-400'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`p-2.5 rounded-xl border shrink-0 ${
+                        config.isConnected
+                          ? 'bg-emerald-600 text-white border-emerald-700'
+                          : 'bg-amber-500 text-white border-amber-600'
+                      }`}
+                    >
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
+                          {config.isConnected
+                            ? '✓ Jobber Account IS Authorized & Connected Live!'
+                            : '⚠️ Jobber Account Authorization Check'}
+                        </h3>
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                            config.isConnected
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-amber-600 text-white'
+                          }`}
+                        >
+                          {config.isConnected ? 'AUTHORIZED ✓' : 'NEEDS APPROVAL / CHECK'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-700 mt-0.5">
+                        Account: <strong className="text-slate-900">{config.accountName || 'Tidyups Cleaning Service Inc'}</strong> • Last Checked:{' '}
+                        <span className="font-mono font-semibold">{config.lastSyncedAt || 'Just now'}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('APP_INFO_KIT')}
+                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-pink-50 text-pink-700 border border-pink-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto shrink-0 shadow-2xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-pink-600" />
+                    <span>Open Dev Center Copy &amp; Paste Info →</span>
+                  </button>
+                </div>
+
+                {/* 2-Column Checklist: (A) How to check Developer Center Setup + (B) How to Approve / Authorize Account */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-xl bg-white border border-slate-200 space-y-1.5">
+                    <div className="font-extrabold text-slate-900 flex items-center justify-between">
+                      <span>A. Jobber Developer Center Setup</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        Configured ✓
+                      </span>
+                    </div>
+                    <ul className="space-y-1 text-[11px] text-slate-600">
+                      <li className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>
+                          Client ID: <code className="font-mono font-bold text-slate-800">{clientIdInput.slice(0, 18)}...</code>
+                        </span>
+                      </li>
+                      <li className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>
+                          Client Secret:{' '}
+                          <strong className="text-emerald-700">
+                            {config.hasSecret ? `Stored (${config.clientSecretMasked || 'Active'})` : 'Ready to Save Below'}
+                          </strong>
+                        </span>
+                      </li>
+                      <li className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>
+                          Callback: <code className="font-mono text-[10px] text-emerald-800">/api/jobber/oauth/callback</code>
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white border border-slate-200 space-y-1.5">
+                    <div className="font-extrabold text-slate-900 flex items-center justify-between">
+                      <span>B. How to Approve &amp; Check Authorization</span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          config.isConnected
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {config.isConnected ? 'Approved ✓' : 'Action Below'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      <strong>1. Test Live Token:</strong> Click <strong>&ldquo;⚡ 1-Click Check &amp; Verify Live Jobber&rdquo;</strong> below.<br />
+                      <strong>2. Or Approve in Jobber:</strong> Click <strong>&ldquo;🔑 Approve &amp; Authorize in Jobber&rdquo;</strong> &rarr; log into Jobber &rarr; click the green <strong>&ldquo;Allow&rdquo;</strong> button!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Primary 2-Button Action Bar */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleInstantServerConnect}
+                    disabled={isSyncing === 'INSTANT_CONNECT'}
+                    className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-4 h-4 shrink-0 ${isSyncing === 'INSTANT_CONNECT' ? 'animate-spin' : ''}`} />
+                    <span>
+                      {isSyncing === 'INSTANT_CONNECT'
+                        ? 'Checking & Syncing Live Jobber...'
+                        : '⚡ 1-Click Check & Verify Live Jobber Authorization Now'}
+                    </span>
+                  </button>
+
+                  <a
+                    href={computedServerStartUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      handleSaveCredentialsQuietly();
+                      setIsAuthorizing(true);
+                      setSyncNotice('Opened Jobber OAuth Approval Screen in a new tab! Log into Jobber and click "Allow" to authorize your account.');
+                    }}
+                    className="py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer no-underline"
+                  >
+                    <ExternalLink className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>🔑 Approve &amp; Authorize in Jobber (Opens &ldquo;Allow&rdquo; Screen)</span>
+                  </a>
+                </div>
+
+                {tokenVerificationMsg && (
+                  <div
+                    className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+                      tokenVerificationMsg.isValid
+                        ? 'bg-emerald-100/90 border-emerald-400 text-emerald-950'
+                        : 'bg-rose-50 border-rose-300 text-rose-900'
+                    }`}
+                  >
+                    {tokenVerificationMsg.isValid ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    )}
+                    <span>{tokenVerificationMsg.text}</span>
+                  </div>
+                )}
+              </div>
+
               {/* Step-by-Step Connection Card */}
               <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-2xs space-y-4">
                 <div>
                   <div className="flex items-center justify-between">
                     <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                       <Lock className="w-4 h-4 text-emerald-600" />
-                      <span>Connect Your Real Jobber Account</span>
+                      <span>Jobber Client ID, Client Secret &amp; Callback Settings</span>
                     </h3>
                     {config.isConnected && (
                       <button

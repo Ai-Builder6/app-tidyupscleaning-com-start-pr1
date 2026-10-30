@@ -444,7 +444,7 @@ export function App() {
     return true;
   });
 
-  // Detect if visitor is on a public legal page (/privacy-policy, /privacy, /data-deletion, /delete-data, /terms, /t&c, /support)
+  // Detect if visitor is on a public legal page (/privacy-policy, /privacy, /data-deletion, /delete-data, /terms, /t&c, /support, /contact, /contact-us, /help)
   const isPublicLegalPath = (() => {
     if (typeof window !== 'undefined') {
       const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
@@ -457,11 +457,15 @@ export function App() {
         p === '/terms' ||
         p === '/t&c' ||
         p === '/support' ||
+        p === '/help' ||
+        p === '/contact' ||
+        p === '/contact-us' ||
         h === '#privacy-policy' ||
         h === '#privacy' ||
         h === '#data-deletion' ||
         h === '#terms' ||
-        h === '#support'
+        h === '#support' ||
+        h === '#contact'
       );
     }
     return false;
@@ -510,11 +514,15 @@ export function App() {
         p === '/terms' ||
         p === '/t&c' ||
         p === '/support' ||
+        p === '/help' ||
+        p === '/contact' ||
+        p === '/contact-us' ||
         h === '#privacy-policy' ||
         h === '#privacy' ||
         h === '#data-deletion' ||
         h === '#terms' ||
-        h === '#support'
+        h === '#support' ||
+        h === '#contact'
       ) {
         return 'LEGAL';
       }
@@ -579,6 +587,9 @@ export function App() {
       }
       if (p === '/terms' || p === '/t&c' || h === '#terms') {
         return 'TERMS';
+      }
+      if (p === '/contact' || p === '/contact-us' || h === '#contact') {
+        return 'CONTACT';
       }
     }
     return 'SUPPORT';
@@ -3977,6 +3988,9 @@ export function App() {
                   onClick={() => {
                     setActiveLegalTab('SUPPORT');
                     setActiveTopView('LEGAL');
+                    try {
+                      window.history.pushState({}, '', '/support');
+                    } catch {}
                   }}
                   className="hover:text-white cursor-pointer"
                 >
@@ -3985,8 +3999,24 @@ export function App() {
                 <span>•</span>
                 <button
                   onClick={() => {
+                    setActiveLegalTab('CONTACT');
+                    setActiveTopView('LEGAL');
+                    try {
+                      window.history.pushState({}, '', '/contact');
+                    } catch {}
+                  }}
+                  className="hover:text-white cursor-pointer"
+                >
+                  /contact
+                </button>
+                <span>•</span>
+                <button
+                  onClick={() => {
                     setActiveLegalTab('TERMS');
                     setActiveTopView('LEGAL');
+                    try {
+                      window.history.pushState({}, '', '/T&C');
+                    } catch {}
                   }}
                   className="hover:text-white cursor-pointer"
                 >
@@ -3997,6 +4027,9 @@ export function App() {
                   onClick={() => {
                     setActiveLegalTab('PRIVACY');
                     setActiveTopView('LEGAL');
+                    try {
+                      window.history.pushState({}, '', '/privacy');
+                    } catch {}
                   }}
                   className="hover:text-white cursor-pointer"
                 >

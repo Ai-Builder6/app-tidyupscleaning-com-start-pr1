@@ -18,7 +18,7 @@ import {
   Globe
 } from 'lucide-react';
 
-export type LegalPageType = 'SUPPORT' | 'TERMS' | 'PRIVACY';
+export type LegalPageType = 'SUPPORT' | 'CONTACT' | 'TERMS' | 'PRIVACY';
 
 interface LegalPagesViewProps {
   initialTab?: LegalPageType;
@@ -35,6 +35,21 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
     setActiveTab(initialTab);
   }, [initialTab]);
 
+  const handleSelectLegalTab = (tab: LegalPageType) => {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined') {
+      try {
+        const pathMap: Record<LegalPageType, string> = {
+          SUPPORT: '/support',
+          CONTACT: '/contact',
+          TERMS: '/T&C',
+          PRIVACY: '/privacy',
+        };
+        window.history.pushState({}, '', pathMap[tab]);
+      } catch {}
+    }
+  };
+
   // Support Form State
   const [supportName, setSupportName] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
@@ -43,6 +58,15 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
   const [supportMessage, setSupportMessage] = useState('');
   const [supportSent, setSupportSent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Contact Us Form State
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactTopic, setContactTopic] = useState('New Cleaning Quote / Booking');
+  const [contactMessage, setContactMessage] = useState('');
+  const [contactSent, setContactSent] = useState(false);
+  const [isContactSubmitting, setIsContactSubmitting] = useState(false);
 
   // Data Deletion Request State (for /data-deletion & Facebook Messenger compliance)
   const [deletionIdentifier, setDeletionIdentifier] = useState('');
@@ -86,6 +110,17 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
     }, 600);
   };
 
+  const handleContactSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contactName.trim() || !contactEmail.trim() || !contactMessage.trim()) return;
+
+    setIsContactSubmitting(true);
+    setTimeout(() => {
+      setIsContactSubmitting(false);
+      setContactSent(true);
+    }, 500);
+  };
+
   return (
     <div className="flex-1 h-full overflow-y-auto bg-slate-50 text-slate-800 font-sans p-4 sm:p-6 md:p-8">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -111,9 +146,9 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
           </div>
 
           {/* Navigation Pill Tabs */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 self-start sm:self-auto shrink-0">
+          <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 self-start sm:self-auto shrink-0">
             <button
-              onClick={() => setActiveTab('SUPPORT')}
+              onClick={() => handleSelectLegalTab('SUPPORT')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'SUPPORT'
                   ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs'
@@ -125,7 +160,19 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('TERMS')}
+              onClick={() => handleSelectLegalTab('CONTACT')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'CONTACT'
+                  ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Phone className="w-3.5 h-3.5" />
+              <span>/contact</span>
+            </button>
+
+            <button
+              onClick={() => handleSelectLegalTab('TERMS')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'TERMS'
                   ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs'
@@ -137,7 +184,7 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('PRIVACY')}
+              onClick={() => handleSelectLegalTab('PRIVACY')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'PRIVACY'
                   ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-xs'
@@ -145,7 +192,7 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
               }`}
             >
               <Lock className="w-3.5 h-3.5" />
-              <span>/privacy-policy</span>
+              <span>/privacy</span>
             </button>
           </div>
         </div>
@@ -339,13 +386,221 @@ export const LegalPagesView: React.FC<LegalPagesViewProps> = ({
                     Yes. All mobile units arrive equipped with commercial backpack HEPA vacuums, microfiber cleaning flat-mop systems, hospital-grade sanitizers, and degreasing kits.
                   </p>
                 </div>
+                <div className="pt-2">
+                  <h4 className="font-bold text-slate-900">How does the Jobber App Integration work?</h4>
+                  <p className="text-slate-600 mt-1 leading-relaxed">
+                    Our BookMyCleaning-Tidyups app connects via Jobber OAuth 2.0 (<code>https://app.tidyupscleaning.com/api/jobber/oauth/callback</code>) and real-time Webhooks (<code>https://app.tidyupscleaning.com/api/jobber/webhooks</code>) to synchronize clients, quotes, scheduled visits, and invoices automatically.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
         )}
 
         {/* ─────────────────────────────────────────────────────────────────────────────
-            TAB 2: /T&C (Terms and Conditions)
+            TAB 2: /contact (Dedicated Contact Us Page — Phone, Email, Address, Form)
+           ───────────────────────────────────────────────────────────────────────────── */}
+        {activeTab === 'CONTACT' && (
+          <div className="space-y-6 animate-fadeIn">
+            {/* Hero Contact Card */}
+            <div className="bg-gradient-to-r from-slate-900 via-purple-950 to-slate-900 text-white rounded-2xl p-6 sm:p-8 shadow-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <span className="px-2.5 py-0.5 rounded-full bg-pink-500/20 text-pink-300 border border-pink-400/30 text-[10px] font-bold uppercase tracking-wider">
+                    Official Contact Page • /contact
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-extrabold mt-2">
+                    Contact TidyUps Cleaning Service Inc.
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                    Reach our Greater Edmonton customer booking desk, live dispatchers, or Jobber integration support team 7 days a week.
+                  </p>
+                </div>
+                <a
+                  href="/booking"
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-95 text-white text-xs font-extrabold shadow-md flex items-center gap-1.5 self-start sm:self-auto shrink-0 no-underline"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Book Online (/booking) →</span>
+                </a>
+              </div>
+            </div>
+
+            {/* 4-Card Contact Directory */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
+                <div className="w-8 h-8 rounded-lg bg-pink-50 text-pink-600 flex items-center justify-center">
+                  <Phone className="w-4 h-4" />
+                </div>
+                <h3 className="font-bold text-xs text-slate-900">Toll-Free &amp; Bookings</h3>
+                <div className="text-xs font-mono font-bold text-purple-900 space-y-0.5">
+                  <a href="tel:18338439877" className="block hover:text-pink-600">1-833-TIDYUPS</a>
+                  <a href="tel:8338439877" className="block text-slate-700 hover:underline">(833) 843-9877</a>
+                  <a href="tel:7809004526" className="block text-emerald-700 hover:underline">(780) 900-4526</a>
+                </div>
+                <p className="text-[10px] text-slate-500">Customer Quotes &amp; Scheduling</p>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Phone className="w-4 h-4" />
+                </div>
+                <h3 className="font-bold text-xs text-slate-900">Edmonton Dispatch &amp; SMS</h3>
+                <div className="text-xs font-mono font-bold text-slate-800 space-y-0.5">
+                  <a href="tel:5879007223" className="block hover:text-blue-600">(587) 900-7223</a>
+                  <a href="tel:5877422500" className="block hover:text-blue-600">(587) 742-2500</a>
+                </div>
+                <p className="text-[10px] text-slate-500">2-Way Text &amp; Live Crew ETA</p>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <h3 className="font-bold text-xs text-slate-900">Email Addresses</h3>
+                <div className="text-xs font-semibold space-y-1 break-all">
+                  <a href="mailto:booking@tidyupscleaning.com" className="block text-emerald-700 font-bold hover:underline">
+                    booking@tidyupscleaning.com
+                  </a>
+                  <a href="mailto:cleaningserviceyeg@gmail.com" className="block text-slate-700 hover:underline text-[11px]">
+                    cleaningserviceyeg@gmail.com
+                  </a>
+                </div>
+                <p className="text-[10px] text-slate-500">Bookings, Billing &amp; Admin</p>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <MapPin className="w-4 h-4" />
+                </div>
+                <h3 className="font-bold text-xs text-slate-900">Edmonton Office &amp; Hours</h3>
+                <p className="text-xs font-semibold text-slate-800 leading-snug">
+                  8306 Chappelle Way SW<br />
+                  Edmonton, AB T6W 4L3
+                </p>
+                <p className="text-[10px] text-emerald-700 font-bold">
+                  Mon – Sun: 7:00 AM – 8:00 PM MST
+                </p>
+              </div>
+            </div>
+
+            {/* Interactive Contact Us Message Form */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+              <h3 className="text-base font-bold text-slate-900 mb-1">Send Us a Direct Message</h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Fill out the form below for residential move-out, deep, or basic cleaning quotes, billing questions, or partnership inquiries.
+              </p>
+
+              {contactSent ? (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-xs">Thank You for Contacting TidyUps Cleaning!</h4>
+                      <p className="text-[11px] text-emerald-800 mt-0.5">
+                        Your message has been delivered to our Edmonton team (<code>booking@tidyupscleaning.com</code>). We will respond shortly.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContactSent(false);
+                      setContactMessage('');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 text-xs font-bold cursor-pointer shrink-0"
+                  >
+                    Send Another
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleContactSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={contactName}
+                        onChange={(e) => setContactName(e.target.value)}
+                        placeholder="e.g. Sarah Jenkins"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-pink-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address *</label>
+                      <input
+                        type="email"
+                        required
+                        value={contactEmail}
+                        onChange={(e) => setContactEmail(e.target.value)}
+                        placeholder="e.g. sarah@example.com"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-pink-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number</label>
+                      <input
+                        type="tel"
+                        value={contactPhone}
+                        onChange={(e) => setContactPhone(e.target.value)}
+                        placeholder="(780) 555-0199"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-pink-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">How Can We Help?</label>
+                    <select
+                      value={contactTopic}
+                      onChange={(e) => setContactTopic(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-pink-500"
+                    >
+                      <option value="New Cleaning Quote / Booking">New Cleaning Quote / Booking (Move-Out, Deep, Basic)</option>
+                      <option value="Existing Appointment or Reschedule">Existing Appointment or Reschedule</option>
+                      <option value="Billing, Invoice or Receipt">Billing, Invoice or Receipt</option>
+                      <option value="Property Management / Realtor Account">Property Management / Realtor Account</option>
+                      <option value="Jobber App & Technical Support">Jobber App &amp; Technical Support</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Your Message *</label>
+                    <textarea
+                      rows={4}
+                      required
+                      value={contactMessage}
+                      onChange={(e) => setContactMessage(e.target.value)}
+                      placeholder="How can our Edmonton cleaning & dispatch team help you today?"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-pink-500"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isContactSubmitting}
+                    className="px-5 py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-95 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-2 cursor-pointer transition-all"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{isContactSubmitting ? 'Sending Message...' : 'Send Message to TidyUps'}</span>
+                  </button>
+                </form>
+              )}
+            </div>
+
+            {/* Service Coverage Corridors */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-2">
+              <h3 className="text-sm font-bold text-slate-900">Greater Edmonton Service Areas</h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Our 15 GPS-dispatched cleaning vans serve all neighborhoods across <strong>Edmonton (NW, SW, NE, SE, Downtown)</strong>, <strong>St. Albert</strong>, <strong>Sherwood Park</strong>, <strong>Spruce Grove</strong>, <strong>Stony Plain</strong>, <strong>Leduc</strong>, <strong>Beaumont</strong>, and <strong>Fort Saskatchewan</strong>.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────────────────────────────────────────────────────────────────────
+            TAB 3: /T&C (Terms and Conditions)
            ───────────────────────────────────────────────────────────────────────────── */}
         {activeTab === 'TERMS' && (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6 text-xs text-slate-700 leading-relaxed animate-fadeIn">

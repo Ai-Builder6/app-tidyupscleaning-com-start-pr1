@@ -606,11 +606,11 @@ export const JobberAppInfoKit: React.FC = () => {
         </div>
       </div>
 
-      {/* Section 5: Security Information (Terms & Privacy URLs) */}
+      {/* Section 5: Security & Support Information (Terms, Privacy, Support & Contact URLs) */}
       <div className="space-y-3">
         <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-          <span>5. Security Information (Terms of Service &amp; Privacy Policy URLs)</span>
+          <span>5. Security &amp; Support URLs (Terms, Privacy, Support &amp; Contact Pages)</span>
         </h4>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -626,12 +626,24 @@ export const JobberAppInfoKit: React.FC = () => {
             value="https://app.tidyupscleaning.com/privacy"
             badge="Live Route ✓"
           />
+          <CopyFieldCard
+            label="Support Center URL (/support)"
+            sublabel="Live customer & Jobber integration support page"
+            value="https://app.tidyupscleaning.com/support"
+            badge="Live Route ✓"
+          />
+          <CopyFieldCard
+            label="Contact Us URL (/contact)"
+            sublabel="Live contact directory, Edmonton office & message form"
+            value="https://app.tidyupscleaning.com/contact"
+            badge="Live Route ✓"
+          />
         </div>
 
         <div className="flex items-center gap-3 text-[11px] text-slate-600 bg-emerald-50/80 border border-emerald-200 rounded-xl p-3">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>
-            Both{' '}
+            All 4 public routes —{' '}
             <a
               href="/T&C"
               target="_blank"
@@ -639,8 +651,8 @@ export const JobberAppInfoKit: React.FC = () => {
               className="font-mono font-bold text-emerald-800 underline inline-flex items-center gap-0.5"
             >
               /T&amp;C <ExternalLink className="w-2.5 h-2.5" />
-            </a>{' '}
-            and{' '}
+            </a>
+            ,{' '}
             <a
               href="/privacy"
               target="_blank"
@@ -648,8 +660,26 @@ export const JobberAppInfoKit: React.FC = () => {
               className="font-mono font-bold text-emerald-800 underline inline-flex items-center gap-0.5"
             >
               /privacy <ExternalLink className="w-2.5 h-2.5" />
+            </a>
+            ,{' '}
+            <a
+              href="/support"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono font-bold text-emerald-800 underline inline-flex items-center gap-0.5"
+            >
+              /support <ExternalLink className="w-2.5 h-2.5" />
+            </a>
+            , and{' '}
+            <a
+              href="/contact"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono font-bold text-emerald-800 underline inline-flex items-center gap-0.5"
+            >
+              /contact <ExternalLink className="w-2.5 h-2.5" />
             </a>{' '}
-            are active and publicly accessible on your app so Jobber's Marketplace verification passes immediately.
+            — are active and publicly accessible on your domain so customers and Jobber reviewers can visit any of them directly.
           </span>
         </div>
       </div>
