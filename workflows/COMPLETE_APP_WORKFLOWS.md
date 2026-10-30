@@ -1,39 +1,65 @@
-# TidyUps Cleaning (`app.tidyups.cleaning` / `app.tidyupscleaning.com`) — Complete System Workflows
+# TidyUps Cleaning (`app.tidyupscleaning.com` / `app.tidyups.cleaning`) — Complete System & Bot Workflows
 
-This directory is packaged inside every numbered **Whole Project & Workflows ZIP** (`app.tidyups.cleaning-PR1-...zip`, `PR2`, `PR3`, etc.) uploaded to the **`TidyUps Cleaning App Backup Zips`** folder in Google Drive or downloaded locally.
+This directory is packaged inside every numbered **Whole Project & Workflows ZIP** (`app.tidyups.cleaning-PR6-...zip`, `PR7`, `PR8`, etc.) uploaded to the **`TidyUps Cleaning App Backup Zips`** folder in Google Drive or downloaded locally.
 
 ---
 
-## Workflow 1: Numbered PR (`PR1`, `PR2`, `PR3`...) Whole Project & Workflows Backup
+## Workflow 1: 1-Click Build & Launch (After Downloading ZIP)
+- **Files**: `CLICK_TO_BUILD_AND_RUN_WINDOWS.bat`, `CLICK_TO_BUILD_AND_RUN_MAC.command`, `package.json` (`npm run oneclick`)
+- **How It Works**:
+  1. Unzip the downloaded archive on Windows, Mac, or Linux.
+  2. Double-click **`CLICK_TO_BUILD_AND_RUN_WINDOWS.bat`** (Windows) or **`CLICK_TO_BUILD_AND_RUN_MAC.command`** (Mac/Linux).
+  3. The script automatically verifies Node.js, creates `.env` from `.env.example` if needed, runs `npm install`, compiles the production frontend and server (`npm run build`), opens `http://localhost:3000`, and starts the server (`npm start`).
+
+---
+
+## Workflow 2: Numbered PR (`PR6`, `PR7`, `PR8`...) Whole Project & Google Drive Backup
+- **Files**: `src/components/ProjectBackupDriveModal.tsx`, `src/services/googleDriveBackupService.ts`, `server.ts` (`/api/project/*`)
 - **Target Google Drive Folder**: `TidyUps Cleaning App Backup Zips`
 - **How It Works**:
-  1. Every backup copy is sequentially numbered (`PR1`, `PR2`, `PR3`, ...) and stamped with the Edmonton date, time of day (`Morning`, `Afternoon`, `Evening`), and exact clock time (e.g., `app.tidyups.cleaning-PR1-2026-10-17-Evening-0825PM.zip`) so morning and afternoon updates are always distinct.
-  2. `/api/project/export-zip` packages the clean `app.tidyups.cleaning` repository including `src/`, `server.ts`, `data/`, `prompt_templates/`, `.github/workflows/`, `workflows/`, `AI_BUILD_WORKFLOW.md`, and `README.md`.
-  3. The app checks Google Drive for **`TidyUps Cleaning App Backup Zips`** (creating it automatically if missing) and uploads each numbered `PR#` archive as a distinct file so afternoon saves never overwrite morning saves.
+  1. Every backup copy is sequentially numbered (`PR6`, `PR7`, `PR8`, ...) and stamped with the Edmonton date, time of day (`Morning`, `Afternoon`, `Evening`), and exact clock time.
+  2. You can update the active PR# anytime using the `-1`, `+1 Next`, quick-select (`PR6`–`PR15`), or custom PR# input (`POST /api/project/set-pr-number`).
+  3. Clicking **☁️ 1-Click Build & Upload PR# ZIP to Google Drive** builds the full project ZIP on the server and uploads it directly into your Google Drive folder (`TidyUps Cleaning App Backup Zips`) via the `/oauth-bridge` popup without cluttering your local hard drive.
+  4. Clicking **⬇️ Download Ready-to-Build Project ZIP** downloads the `.zip` file directly to your computer with all bots, READMEs, and 1-click build launchers included.
 
 ---
 
-## Workflow 2: Voice Dictation Intake → Quick Quote → Jobber & Dispatch Sync
-- **View**: `src/components/QuickQuoteView.tsx`
+## Workflow 3: Jobber CRM OAuth 2.0, Developer Center Kit & Webhook Sync Bot
+- **Files**: `src/components/JobberSyncModal.tsx`, `src/components/JobberAppInfoKit.tsx`, `src/services/jobberSyncModules.ts`
 - **Steps**:
-  1. Speak caller details via Web Speech API or paste call transcript.
-  2. `POST /api/dispatch/parse-voice-ticket` extracts Customer Name, Phone, Email, Address, Bedrooms, Bathrooms, Recommended Hours, Crew Size, and Notes.
-  3. Interactive Edmonton Quick Map calculates driving distance & ETA from each cleaner's Van Hub.
-  4. 1-Click sync creates the Jobber Quote (`POST /api/database/quotes`) and scheduled booking (`POST /api/public/book`).
+  1. Open **Jobber Account & Secret** (`JobberSyncModal.tsx`) — Tab 1 (**Authorize & Check Status**) opens by default.
+  2. Click **Check Live Jobber Auth Now** to run a real-time GraphQL query against `https://api.getjobber.com/api/graphql`, or click **Approve & Authorize in Jobber** to complete OAuth 2.0 authorization (`https://app.tidyupscleaning.com/api/jobber/oauth/callback`).
+  3. Switch to Tab 2 (**Jobber Developer Center Info Kit**) for 1-click copy-paste fields, 512x512 square PNG logo, 4 gallery images, and webhook configuration (`https://app.tidyupscleaning.com/api/webhooks/jobber`).
+  4. Fake or unwanted draft quotes (such as test/fake quotes) are permanently purged and blocked from re-syncing via `POST /api/jobber/purge-fake-quotes`.
 
 ---
 
-## Workflow 3: Full-Year 2026 Jobber Calendar & Live Dispatch Sync
-- **View**: `src/components/ScheduledJobsView.tsx` & `src/services/jobberSyncModules.ts`
+## Workflow 4: Fresh-Start Customer Online Booking Portal (`/booking`) & Public Support/Contact Pages
+- **Files**: `src/components/CustomerBookingPortal.tsx`, `src/components/LegalPagesView.tsx`
 - **Steps**:
-  1. Connects to live Jobber GraphQL API (`https://api.getjobber.com/api/graphql`) using OAuth 2.0 tokens stored in `data/tidyups_cleaning_store.json`.
-  2. Syncs all 2026 scheduled visits starting **January 1, 2026** through December 31, 2026 (including all 62 scheduled visits in October 2026).
-  3. Converts all UTC timestamps to `America/Edmonton` local time so calendar days and dispatch boards match Jobber 1:1.
+  1. Customers visiting `https://app.tidyupscleaning.com/booking` always receive a **100% blank, fresh sheet** on every visit (no pre-filled fields).
+  2. Customers can click **Start Over / Clear Sheet** at the top of the page at any time to reset all fields and voice transcripts back to zero.
+  3. Public visitors and Jobber/Meta reviewers can access:
+     - `https://app.tidyupscleaning.com/support` (Customer & App Support Center)
+     - `https://app.tidyupscleaning.com/contact` (Contact Us & Direct Message Form)
+     - `https://app.tidyupscleaning.com/T&C` (Terms & Conditions)
+     - `https://app.tidyupscleaning.com/privacy` (Privacy Policy)
+     - `https://app.tidyupscleaning.com/data-deletion` (Facebook/Meta Data Deletion Instructions)
 
 ---
 
-## Workflow 4: Quo (OpenPhone) 5-Line Call Log & Twilio Spam Shield
-- **View**: `src/components/QuoModal.tsx` & `src/components/SpamShieldView.tsx`
+## Workflow 5: Facebook Messenger 24/7 AI Bot & 9-Tab Visual Clean Google Sheet
+- **Files**: `src/components/FacebookMessengerAiView.tsx`, `src/components/LeadsCenterView.tsx`, `src/services/styledLeadsWorkbookBuilder.ts`
 - **Steps**:
-  1. Monitors 5 regional business lines (Edmonton, St. Albert, Sherwood Park, Spruce Grove, Leduc).
-  2. Blocks telemarketers and area-code spam at the Twilio webhook level (`/api/twilio/voice/incoming`).
+  1. Facebook Messenger AI Bot (`FacebookMessengerAiView.tsx`) monitors all 3 connected Facebook Pages 24/7, quotes customers using the 3-option rules (`Basic`, `Deep`, `Move-Out`), and extracts lead fields.
+  2. Leads sync into the **9-Tab Visual Clean Google Sheet** (`All New Leads (14-Day)`, `Facebook Leads 1`, `Facebook Leads 2`, `Google Leads 1`, `Google Leads 2`, `Other Ads`, `Facebook AI`, `Quo`, `Archived Old Sheets`) uploaded via strict RFC 2387 `multipart/related` so Google Sheets always renders all 9 styled tabs (never a `"blob"` tab).
+  3. Copy the real `https://docs.google.com/spreadsheets/d/<ID>/edit` URL from the green banner in **Leads Center** to paste directly into Facebook Meta Ads Manager.
+
+---
+
+## Workflow 6: Quo (OpenPhone) 6-Line Transcript Bot & Twilio Bam/Spam Shield Live Call List
+- **Files**: `src/components/SpamShieldView.tsx`, `src/components/LiveCallScreenerHUD.tsx`, `src/components/QuoModal.tsx`
+- **Steps**:
+  1. Inbound calls pass through Twilio Bam Shield (`/api/twilio/voice`), which blocks blacklisted callers and spam area codes (`1408*`, `1800*`, etc.) in 1 second (`<Pause length="1"/><Hangup/>`).
+  2. Open **Bam Shield / Spam Shield** (`SpamShieldView.tsx`) to view the **Live Incoming & Screened Call Feed (`All Calls` / `Allowed` / `Blocked`)** in real time without leaving the app to open Quo.
+  3. Block or unblock any caller in 1 click, or click **Quote Caller** to jump straight into Voice Dictation & Quick Quote with the caller's phone number and CRM history pre-loaded.

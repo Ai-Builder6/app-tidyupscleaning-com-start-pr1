@@ -740,21 +740,36 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                   </div>
                 </div>
 
-                {/* 1-Click Action Area (Direct to Google Drive — No Forced Hard Drive Downloads) */}
+                {/* 1-Click Action Area (Google Drive Upload OR Direct Ready-to-Build ZIP Download) */}
                 <div className="pt-1 space-y-3">
-                  <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <button
                       type="button"
                       disabled={isUploadingDrive || isDownloadingLocal || isLoggingIn}
                       onClick={() => handleOneClickUploadToDriveFolder(true)}
-                      className="flex-1 py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-xl cursor-pointer disabled:opacity-50 transition-all active:scale-99"
-                      title={`Build fresh ${activePrLabel} Whole Project ZIP on server and upload it directly into your "${TIDYUPS_DRIVE_FOLDER_NAME}" Google Drive folder (without downloading to your hard drive)`}
+                      className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl cursor-pointer disabled:opacity-50 transition-all active:scale-99"
+                      title={`Build fresh ${activePrLabel} Whole Project ZIP on server and upload it directly into your "${TIDYUPS_DRIVE_FOLDER_NAME}" Google Drive folder`}
                     >
                       <CloudUpload className="w-5 h-5 shrink-0" />
                       <span>
                         {isUploadingDrive && !uploadingFilename
-                          ? `Building & Uploading ${activePrLabel} ZIP to Google Drive...`
-                          : `☁️ 1-Click Build & Upload ${activePrLabel} ZIP to Google Drive`}
+                          ? `Building & Uploading ${activePrLabel}...`
+                          : `☁️ 1-Click Build & Upload ${activePrLabel} to Google Drive`}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isUploadingDrive || isDownloadingLocal || isLoggingIn}
+                      onClick={() => handleBuildNumberedZipOnServer(true)}
+                      className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl cursor-pointer disabled:opacity-50 transition-all active:scale-99"
+                      title={`Build ${activePrLabel} Whole Project ZIP with all 6 Bots, READMEs & 1-Click Build Scripts and download it right now`}
+                    >
+                      <FileArchive className="w-5 h-5 shrink-0" />
+                      <span>
+                        {isDownloadingLocal
+                          ? `Building ${activePrLabel} ZIP...`
+                          : `⬇️ Download Ready-to-Build ${activePrLabel} ZIP`}
                       </span>
                     </button>
 
@@ -762,16 +777,44 @@ export const ProjectBackupDriveModal: React.FC<ProjectBackupDriveModalProps> = (
                       type="button"
                       disabled={isUploadingDrive || isDownloadingLocal || isLoggingIn}
                       onClick={() => handleBuildNumberedZipOnServer(false)}
-                      className="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 font-black text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
+                      className="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 font-black text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                       title={`Build ${activePrLabel} Whole Project ZIP on server & GitHub without downloading to your computer hard drive`}
                     >
-                      <FileArchive className="w-4 h-4 text-emerald-400" />
+                      <FileArchive className="w-4 h-4 text-emerald-400 shrink-0" />
                       <span>
                         {isDownloadingLocal
                           ? `Building ${activePrLabel} on Server...`
                           : `📦 Build ${activePrLabel} on Server & GitHub Only`}
                       </span>
                     </button>
+                  </div>
+
+                  {/* Verified Checklist of Everything Packaged Inside the ZIP */}
+                  <div className="p-4 rounded-2xl bg-[#0e1320] border border-emerald-500/30 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>100% Up-to-Date — Everything Included Inside Every {activePrLabel} ZIP Archive:</span>
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-mono font-bold text-emerald-300">
+                        Includes 1-Click Build Buttons (Windows &amp; Mac)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-300">
+                      <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+                        <div className="font-black text-cyan-300">⚡ 1-Click Build &amp; Run Launchers (Root Folder):</div>
+                        <div>• <code className="text-emerald-300">CLICK_TO_BUILD_AND_RUN_WINDOWS.bat</code> (Double-click on Windows to install, build &amp; launch)</div>
+                        <div>• <code className="text-emerald-300">CLICK_TO_BUILD_AND_RUN_MAC.command</code> (Double-click on Mac/Linux to install, build &amp; launch)</div>
+                        <div>• <code className="text-emerald-300">START_HERE_1_CLICK_BUILD.txt</code>, <code className="text-emerald-300">README.md</code>, <code className="text-emerald-300">AI_BUILD_WORKFLOW.md</code> &amp; <code className="text-emerald-300">.env.example</code></div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+                        <div className="font-black text-purple-300">🤖 All 6 Built-In Bots &amp; New Pages Included:</div>
+                        <div>• <strong>Jobber OAuth 2.0 + GraphQL + Webhook Bot</strong> (Tab 1 Live Auth Check + Dev Kit + Fake Quote Purge)</div>
+                        <div>• <strong>Facebook Messenger 24/7 AI Bot</strong> (3 Pages) &amp; <strong>Voice Dictation Gemini Quote Bot</strong></div>
+                        <div>• <strong>Quo 6-Line Sonia AI Bot</strong> &amp; <strong>Twilio Bam/Spam Shield</strong> (with Live Incoming Call List)</div>
+                        <div>• <strong>9-Tab Visual Google Sheet Builder</strong> + Public <code className="text-emerald-300">/booking</code> (Fresh Start + Start Over), <code className="text-emerald-300">/support</code>, <code className="text-emerald-300">/contact</code>, <code className="text-emerald-300">/T&amp;C</code>, <code className="text-emerald-300">/privacy</code></div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Google Account Connection Status */}

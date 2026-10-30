@@ -7,6 +7,7 @@
     "clean": "rm -rf dist server.js",
     "dev": "tsx server.ts",
     "lint": "tsc --noEmit",
+    "oneclick": "npm install && npm run build && npm start",
     "preview": "vite preview",
     "start": "node dist/server.cjs"
   },

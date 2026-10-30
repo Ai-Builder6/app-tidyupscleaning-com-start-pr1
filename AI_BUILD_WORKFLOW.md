@@ -1,6 +1,8 @@
 # AI Complete Project Build & Reconstruction Workflow (`AI_BUILD_WORKFLOW.md`)
 
-> **How to use this file**: When opening this project ZIP or GitHub repository in any AI coding assistant (Google AI Studio, Cursor, Claude Code, Windsurf, or GitHub Copilot), provide this file as context or paste the prompt below. The AI can immediately understand, build, run, and extend the entire **TidyUps Cleaning (`app.tidyupscleaning.com`)** platform.
+> **How to use this file**:
+> - **To build & run in 1 click on your computer**: Double-click `CLICK_TO_BUILD_AND_RUN_WINDOWS.bat` (Windows) or `CLICK_TO_BUILD_AND_RUN_MAC.command` (Mac/Linux), or run `npm run oneclick` in any terminal.
+> - **To use with any AI coding assistant** (Google AI Studio, Cursor, Claude Code, Windsurf, or GitHub Copilot): Provide this file as context or paste the Master Prompt below.
 
 ---
 
@@ -9,52 +11,62 @@
 Copy and paste the following prompt into any AI coding agent when opening this project:
 
 ```text
-You are maintaining and building the TidyUps Cleaning (app.tidyupscleaning.com) Voice Dictation, Quick Quote, Quick Map & Jobber Dispatch platform.
+You are maintaining and building the TidyUps Cleaning Service Inc. (https://app.tidyupscleaning.com) full-stack operations, AI bots, voice dictation, and Jobber CRM dispatch platform.
 
 Core Architecture:
-1. Full-Stack Runtime: Express backend (`server.ts`) serving Vite React 19 + TypeScript SPA on port 3000 (`npm run dev`). Production build uses `npm run build` and `npm start`.
-2. Primary Header Navigation Order (`src/App.tsx`):
-   - Tab 1 (Default): "Voice Dictation & Intake" (`QUICK_QUOTE` -> `src/components/QuickQuoteView.tsx`)
-   - Tab 2: "Dispatch Map" (`MAP` -> `src/components/TerritoryMap.tsx` + `src/components/DispatchKanban.tsx`)
-   - Tab 3: "Schedule" (`SCHEDULED_JOBS` -> `src/components/ScheduledJobsView.tsx`)
-   - Tab 4: "Management" (`MANAGEMENT` -> `src/components/ManagementHubView.tsx`)
-   - Tab 5: "Intakes" (`INTAKES` -> `src/components/IntakesView.tsx`)
-   - Supporting Tabs: "Address Radar" (`ADDRESS_SEARCH`), "Clients" (`CLIENTS`), "Leads" (`LEADS`), "Customer Page" (`CUSTOMER_PORTAL`).
-3. Voice Dictation & Quick Quote Workflow (`src/components/QuickQuoteView.tsx`):
-   - Captures live microphone speech via Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`) or pasted call notes.
-   - Sends transcript to `POST /api/dispatch/parse-voice-ticket` (Gemini 2.5 Flash + deterministic Edmonton heuristic fallback).
-   - Auto-fills Customer Name, Phone, Email, Street Address (with Google Places Autocomplete), City, Cleaning Service Package, How Many Bedrooms (1 to 5+ Bedrooms), How Many Bathrooms (1 to 4+ Bathrooms), Recommended Hours, Crew Size (1 cleaner @ $52.50/hr, 2 cleaners @ $105.00/hr, or Custom $/hr), Fuel Surcharge ($12.50), 12.5% Tax, Add-on Tags, and Specific Information.
-   - Syncs 1-click to Jobber Quotes (`POST /api/database/quotes`) and the Booking System (`POST /api/public/book` + `POST /api/quo/calls/convert-to-job`).
-   - Renders an embedded interactive Edmonton Quick Map ranking the closest cleaners by driving distance and travel time.
-4. Maps & Geolocation Architecture:
-   - Server-side proxy endpoints in `server.ts`: `/api/geocode/forward`, `/api/geocode/reverse`, `/api/places/autocomplete`, `/api/routes/compute`, and `/api/routes/matrix`.
-   - Interactive high-resolution Edmonton Web Mercator street & satellite tile maps in `TerritoryMap.tsx`, `AddressSearchRadarView.tsx`, and `QuickQuoteView.tsx` so maps work on `app.tidyupscleaning.com` and backup domains without browser HTTP referrer errors.
-5. Integrations:
-   - Jobber GraphQL OAuth2 & Delta Sync (`src/services/jobberSyncModules.ts` & `server.ts`)
-   - Quo (OpenPhone) 5-Line Phone System & Twilio TwiML Spam Shield (`src/components/QuoModal.tsx`, `src/components/TwilioSpamShieldModal.tsx`)
-   - Firebase Firestore (`ai-studio-cleaningserviced-8a2493ab-cb9d-4c28-a60b-c28e7d08d30e` via `src/lib/firebase.ts` & `src/services/firestoreSyncService.ts`)
-   - Google Drive OAuth 2.0 Backup Upload (`src/components/ProjectBackupDriveModal.tsx` + `/api/project/export-zip`)
+1. Full-Stack Runtime:
+   - Express backend (`server.ts`) serving Vite React 19 + TypeScript SPA on port 3000 (`npm run dev`).
+   - Production build uses `npm run build` and `npm start` (or 1-click via `npm run oneclick`, `CLICK_TO_BUILD_AND_RUN_WINDOWS.bat`, or `CLICK_TO_BUILD_AND_RUN_MAC.command`).
+
+2. Primary Navigation & Public Routes (`src/App.tsx`):
+   - Public Customer Routes (no staff login required):
+     * `/booking` (`src/components/CustomerBookingPortal.tsx`): Always starts 100% blank/fresh on every page load (`localStorage` draft prefill removed) and includes a "Start Over / Clear Sheet" button in the top header and form header.
+     * `/support` & `/help` (`src/components/LegalPagesView.tsx`): Public Customer & Jobber Marketplace Support Center.
+     * `/contact` & `/contact-us` (`src/components/LegalPagesView.tsx`): Public Contact Us page with direct dispatch message form (`POST /api/public/book`).
+     * `/T&C` & `/terms` (`src/components/LegalPagesView.tsx`): Terms & Conditions.
+     * `/privacy` (`src/components/LegalPagesView.tsx`): Privacy Policy.
+     * `/data-deletion` (`src/components/LegalPagesView.tsx`): Meta / Facebook Data Deletion instructions & callback endpoint (`/api/facebook/data-deletion`).
+   - Staff & Operations Workspace Tabs:
+     * Tab 1: "Voice Dictation & Intake" (`QUICK_QUOTE` -> `src/components/QuickQuoteView.tsx`)
+     * Tab 2: "Dispatch Map" (`MAP` -> `src/components/TerritoryMap.tsx` + `src/components/DispatchKanban.tsx` for 15 Edmonton vans)
+     * Tab 3: "Schedule" (`SCHEDULED_JOBS` -> `src/components/ScheduledJobsView.tsx`)
+     * Tab 4: "Management" (`MANAGEMENT` -> `src/components/ManagementHubView.tsx`)
+     * Tab 5: "Intakes" (`INTAKES` -> `src/components/IntakesView.tsx`)
+     * Supporting Views: "Leads & 9-Tab Clean Sheet" (`src/components/LeadsCenterView.tsx`), "Facebook Messenger AI Bot" (`src/components/FacebookMessengerAiView.tsx`), "Bam / Spam Shield" (`src/components/SpamShieldView.tsx`), "Clients" (`src/components/ClientsView.tsx`).
+
+3. All 6 Built-In Bots & Automation Engines:
+   - Bot 1 — Jobber CRM OAuth 2.0, GraphQL 2-Way Sync & Webhook Bot (`src/services/jobberSyncModules.ts`, `src/components/JobberSyncModal.tsx`, `src/components/JobberAppInfoKit.tsx`):
+     * Client ID: `27966135-e33e-4c2e-8dc3-ad7ba06dabb8` (`BookMyCleaning-Tidyups`)
+     * Callback URL: `https://app.tidyupscleaning.com/api/jobber/oauth/callback`
+     * Webhook URL: `https://app.tidyupscleaning.com/api/webhooks/jobber`
+     * Tab 1 in `JobberSyncModal.tsx` opens by default to verify live GraphQL authorization status and trigger 1-click OAuth approval.
+     * Permanently purges fake/test draft quotes via `POST /api/jobber/purge-fake-quotes`.
+   - Bot 2 — Facebook Messenger 24/7 AI Quote & Lead Intake Bot (`src/components/FacebookMessengerAiView.tsx`, `/api/facebook/*`):
+     * Auto-replies 24/7 across 3 Facebook Pages using Gemini AI + deterministic pricing rules (Basic: 1 cleaner @ $52.50/hr; Deep: min 2 cleaners 2 hrs @ $105/hr; Move-Out: min 3 hrs 2 cleaners @ $105/hr or 6 hrs 1 cleaner @ $52.50/hr).
+     * Auto-syncs leads to the 9-Tab Clean Google Sheet (`Facebook AI` tab) and creates Jobber Draft Quotes.
+   - Bot 3 — Voice Dictation & Gemini AI Phone Quote Bot (`src/components/QuickQuoteView.tsx`, `POST /api/dispatch/parse-voice-ticket`):
+     * Extracts caller details from continuous microphone speech and computes closest Edmonton cleaner vans.
+   - Bot 4 — Quo (OpenPhone) 6-Line Call Transcript & Sonia AI Lead Bot (`src/components/QuoModal.tsx`, `/api/quo/*`):
+     * Syncs call recordings, Sonia AI transcripts, and SMS quotes across all 6 TidyUps phone lines.
+   - Bot 5 — Twilio Bam Shield / Spam Shield & Live Call Screener HUD Bot (`src/components/SpamShieldView.tsx`, `src/components/LiveCallScreenerHUD.tsx`, `/api/twilio/voice`, `/api/twilio/live-calls`):
+     * Blocks telemarketers & international spam in 1s (`<Pause length="1"/><Hangup/>`) and displays a live incoming call feed (`ALLOWED` vs `BLOCKED`) directly inside the Spam Shield & HUD.
+   - Bot 6 — 9-Tab Visual Clean Google Sheets & Ads Webhook Bot (`src/services/styledLeadsWorkbookBuilder.ts`, `src/services/googleDriveBackupService.ts`, `/api/leads/webhook`):
+     * Creates & updates a 9-tab visual Google Sheet in Google Drive using strict RFC 2387 `multipart/related` (never creating a single "blob" tab).
 ```
 
 ---
 
-## 2. Step-by-Step Build & Verification Checklist for AI Agents
+## 2. Step-by-Step Build & Verification Checklist
 
-1. **Install & Verify Dependencies**
-   - Ensure `package.json` includes `express`, `react`, `react-dom`, `lucide-react`, `@google/genai`, `firebase`, `jszip`, `@vis.gl/react-google-maps`, and `tailwindcss`.
-   - Run `npm install`.
+1. **1-Click Local Build & Start**
+   - Windows: Double-click `CLICK_TO_BUILD_AND_RUN_WINDOWS.bat`
+   - macOS / Linux: Double-click `CLICK_TO_BUILD_AND_RUN_MAC.command`
+   - CLI: `npm run oneclick` (runs `npm install && npm run build && npm start` on port `3000`)
 
 2. **Environment Variables (`.env` / Cloud Run Secrets)**
-   - `GEMINI_API_KEY`: Server-side Gemini API key for voice dictation parsing and AI dispatch recommendations.
-   - `VITE_GOOGLE_MAPS_API_KEY`: Google Maps Platform key (proxied through `server.ts` with authorized referrer headers).
-   - `JOBBER_CLIENT_ID`, `JOBBER_CLIENT_SECRET`, `JOBBER_REFRESH_TOKEN`: Jobber GraphQL CRM credentials.
-   - `QUO_API_KEY`: Quo (OpenPhone) API key for 5 regional phone lines.
-   - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`: Twilio credentials for live call blocking and SMS.
+   - Copy `.env.example` to `.env` and fill in any API keys you wish to override (`GEMINI_API_KEY`, `VITE_GOOGLE_MAPS_API_KEY`, `JOBBER_CLIENT_ID`, `JOBBER_CLIENT_SECRET`, `QUO_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`).
 
-3. **Compile & Run**
-   - Run `npm run lint` (`tsc --noEmit`) to verify zero TypeScript errors.
-   - Run `npm run build` to compile the Vite frontend bundle (`dist/`) and esbuild server bundle (`dist/server.cjs`).
-   - Run `npm run dev` to launch the development server on `http://localhost:3000`.
-
-4. **Publishing to `app.tidyupscleaning.com`**
-   - Whenever code changes are completed in Google AI Studio, click **Publish** in the top-right corner of AI Studio to deploy the updated container to Cloud Run for **`app.tidyupscleaning.com`**.
+3. **Type-Check & Production Bundle**
+   - `npm run lint` (`tsc --noEmit`)
+   - `npm run build` (builds Vite SPA into `dist/` and bundles `server.ts` into `dist/server.cjs`)
+   - `npm start` (starts production server on `http://localhost:3000`)
