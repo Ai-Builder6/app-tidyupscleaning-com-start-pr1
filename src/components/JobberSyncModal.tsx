@@ -38,6 +38,7 @@ import {
   createNewCleanLeadsSheetInDrive,
   syncLeadsToLiveGoogleSheetInDrive,
 } from '../services/googleDriveBackupService';
+import { JobberAppInfoKit } from './JobberAppInfoKit';
 
 interface JobberSyncModalProps {
   isOpen: boolean;
@@ -86,7 +87,7 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
   const [copiedAuthLink, setCopiedAuthLink] = useState(false);
   const [isAuthorizing, setIsAuthorizing] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'CREDENTIALS' | 'CSV_IMPORT' | 'JOBBER' | 'GOOGLE_SHEETS'>('CREDENTIALS');
+  const [activeTab, setActiveTab] = useState<'CREDENTIALS' | 'APP_INFO_KIT' | 'CSV_IMPORT' | 'JOBBER' | 'GOOGLE_SHEETS'>('APP_INFO_KIT');
   const [isSyncing, setIsSyncing] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [copiedTsv, setCopiedTsv] = useState(false);
@@ -674,10 +675,22 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center px-4 bg-slate-100/80 border-b border-slate-200 text-xs font-semibold gap-1">
+        <div className="flex items-center px-4 bg-slate-100/80 border-b border-slate-200 text-xs font-semibold gap-1 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('APP_INFO_KIT')}
+            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
+              activeTab === 'APP_INFO_KIT'
+                ? 'border-pink-600 text-pink-800 font-bold bg-white -mb-px rounded-t-lg shadow-2xs'
+                : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-pink-600" />
+            <span>Jobber Dev App Info (Copy &amp; Paste)</span>
+          </button>
+
           <button
             onClick={() => setActiveTab('CREDENTIALS')}
-            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all ${
+            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
               activeTab === 'CREDENTIALS'
                 ? 'border-emerald-600 text-emerald-800 font-bold bg-white -mb-px rounded-t-lg shadow-2xs'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -689,7 +702,7 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
 
           <button
             onClick={() => setActiveTab('CSV_IMPORT')}
-            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all ${
+            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
               activeTab === 'CSV_IMPORT'
                 ? 'border-purple-600 text-purple-800 font-bold bg-white -mb-px rounded-t-lg shadow-2xs'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -701,7 +714,7 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
 
           <button
             onClick={() => setActiveTab('JOBBER')}
-            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all ${
+            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
               activeTab === 'JOBBER'
                 ? 'border-emerald-600 text-emerald-800 font-bold bg-white -mb-px rounded-t-lg shadow-2xs'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -713,7 +726,7 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
 
           <button
             onClick={() => setActiveTab('GOOGLE_SHEETS')}
-            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all ${
+            className={`px-3.5 py-2.5 border-b-2 flex items-center gap-2 transition-all shrink-0 cursor-pointer ${
               activeTab === 'GOOGLE_SHEETS'
                 ? 'border-emerald-600 text-emerald-800 font-bold bg-white -mb-px rounded-t-lg shadow-2xs'
                 : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -735,6 +748,9 @@ export const JobberSyncModal: React.FC<JobberSyncModalProps> = ({
               <button onClick={() => setSyncNotice(null)} className="text-emerald-700 hover:text-emerald-950 font-bold">×</button>
             </div>
           )}
+
+          {/* TAB: JOBBER APP MARKETPLACE COPY & PASTE KIT */}
+          {activeTab === 'APP_INFO_KIT' && <JobberAppInfoKit />}
 
           {/* TAB: JOBBER CREDENTIALS & OAUTH CONNECT */}
           {activeTab === 'CREDENTIALS' && (
