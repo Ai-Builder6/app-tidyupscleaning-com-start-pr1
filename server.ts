@@ -13259,8 +13259,9 @@ const handleFacebookDataDeletion = (req: any, res: any) => {
     let fbUserId = String(req.body?.user_id || req.query?.user_id || "").trim();
     const signedRequest = String(req.body?.signed_request || req.query?.signed_request || "").trim();
     const contactIdentifier = String(req.body?.identifier || req.query?.identifier || "").trim().toLowerCase();
+    const scope = String(req.body?.scope || req.query?.scope || "ALL").trim().toUpperCase();
 
-    // If opened directly in a web browser as "Data deletion instructions URL" with no callback params, redirect to the instructions page
+    // If opened directly in a web browser as "Data deletion instructions URL" with no callback params, redirect to /support#data-deletion
     if (
       req.method === "GET" &&
       !fbUserId &&
@@ -13268,7 +13269,7 @@ const handleFacebookDataDeletion = (req: any, res: any) => {
       !contactIdentifier &&
       String(req.headers?.accept || "").includes("text/html")
     ) {
-      return res.redirect(302, "/data-deletion");
+      return res.redirect(302, "/support#data-deletion");
     }
 
     if (signedRequest && signedRequest.includes(".")) {
@@ -13283,39 +13284,173 @@ const handleFacebookDataDeletion = (req: any, res: any) => {
       } catch {}
     }
 
+    let removedCount = 0;
+
     if (fbUserId && Array.isArray(store.fbMessengerThreads)) {
+      const before = store.fbMessengerThreads.length;
       store.fbMessengerThreads = store.fbMessengerThreads.filter(
         (t: any) => String(t.psid || "") !== fbUserId
       );
+      removedCount += Math.max(0, before - store.fbMessengerThreads.length);
       saveStore(store, "tidyups");
-    } else if (contactIdentifier && Array.isArray(store.fbMessengerThreads)) {
-      store.fbMessengerThreads = store.fbMessengerThreads.filter((t: any) => {
-        const name = String(t.customerName || "").toLowerCase();
-        const phone = String(t.extracted?.phone || "").toLowerCase();
-        const email = String(t.extracted?.email || "").toLowerCase();
-        return !name.includes(contactIdentifier) && !phone.includes(contactIdentifier) && !email.includes(contactIdentifier);
-      });
+    } else if (contactIdentifier) {
+      const normDigits = contactIdentifier.replace(/\D/g, "");
+      if (Array.isArray(store.fbMessengerThreads)) {
+        const before = store.fbMessengerThreads.length;
+        store.fbMessengerThreads = store.fbMessengerThreads.filter((t: any) => {
+          const name = String(t.customerName || "").toLowerCase();
+          const phone = String(t.extracted?.phone || "").toLowerCase();
+          const phoneDigits = phone.replace(/\D/g, "");
+          const email = String(t.extracted?.email || "").toLowerCase();
+          const psid = String(t.psid || "").toLowerCase();
+          const matchPhone = normDigits.length >= 7 && phoneDigits.includes(normDigits);
+          return (
+            !name.includes(contactIdentifier) &&
+            !phone.includes(contactIdentifier) &&
+            !matchPhone &&
+            !email.includes(contactIdentifier) &&
+            !psid.includes(contactIdentifier)
+          );
+        });
+        removedCount += Math.max(0, before - store.fbMessengerThreads.length);
+      }
+      if ((scope === "ALL" || scope === "LEADS") && Array.isArray(store.adLeads)) {
+        const beforeLeads = store.adLeads.length;
+        store.adLeads = store.adLeads.filter((l: any) => {
+          const name = String(l.clientName || l.name || "").toLowerCase();
+          const phone = String(l.phone || "").toLowerCase();
+          const phoneDigits = phone.replace(/\D/g, "");
+          const email = String(l.email || "").toLowerCase();
+          const matchPhone = normDigits.length >= 7 && phoneDigits.includes(normDigits);
+          return !name.includes(contactIdentifier) && !phone.includes(contactIdentifier) && !matchPhone && !email.includes(contactIdentifier);
+        });
+        removedCount += Math.max(0, beforeLeads - store.adLeads.length);
+      }
       saveStore(store, "tidyups");
     }
 
     const confirmationCode = `DEL-TIDYUPS-${Date.now().toString(36).toUpperCase()}`;
-    const statusUrl = `https://app.tidyupscleaning.com/data-deletion?code=${confirmationCode}`;
+    const statusUrl = `https://app.tidyupscleaning.com/support?code=${confirmationCode}#data-deletion`;
 
     return res.status(200).json({
       url: statusUrl,
       confirmation_code: confirmationCode,
+      removed_records: removedCount,
+      scope,
+      processed_at: new Date().toISOString(),
     });
   } catch (err: any) {
     const fallbackCode = `DEL-TIDYUPS-${Date.now().toString(36).toUpperCase()}`;
     return res.status(200).json({
-      url: `https://app.tidyupscleaning.com/data-deletion?code=${fallbackCode}`,
+      url: `https://app.tidyupscleaning.com/support?code=${fallbackCode}#data-deletion`,
       confirmation_code: fallbackCode,
+      processed_at: new Date().toISOString(),
     });
   }
 };
 
 app.post("/api/facebook/data-deletion", handleFacebookDataDeletion);
 app.get("/api/facebook/data-deletion", handleFacebookDataDeletion);
+
+// POST /api/facebook/data-release (Allows users on /support to request/export/release their stored Meta & booking info)
+app.post("/api/facebook/data-release", (req: any, res: any) => {
+  try {
+    const store = loadStore("tidyups");
+    ensureFbStoreInitialized(store);
+
+    const identifier = String(req.body?.identifier || "").trim().toLowerCase();
+    const releaseType = String(req.body?.releaseType || "SELF_EXPORT").trim();
+    const authorizeThirdParty = String(req.body?.authorizeThirdParty || "").trim();
+
+    if (!identifier) {
+      return res.status(400).json({ error: "Please provide a name, email, phone number, or Facebook ID." });
+    }
+
+    const normDigits = identifier.replace(/\D/g, "");
+    const matchText = (val: any) => String(val || "").toLowerCase().includes(identifier);
+    const matchPhone = (val: any) => {
+      const d = String(val || "").replace(/\D/g, "");
+      return normDigits.length >= 7 && d.includes(normDigits);
+    };
+
+    const matchedMessengerThreads = (store.fbMessengerThreads || [])
+      .filter((t: any) => matchText(t.customerName) || matchText(t.psid) || matchText(t.extracted?.email) || matchText(t.extracted?.phone) || matchPhone(t.extracted?.phone))
+      .map((t: any) => ({
+        psid: t.psid,
+        customerName: t.customerName,
+        platform: "Meta / Facebook Messenger",
+        updatedAt: t.updatedAt,
+        extractedContact: t.extracted || {},
+        messageCount: Array.isArray(t.messages) ? t.messages.length : 0,
+      }));
+
+    const matchedLeads = (store.adLeads || [])
+      .filter((l: any) => matchText(l.clientName || l.name) || matchText(l.email) || matchText(l.phone) || matchPhone(l.phone))
+      .map((l: any) => ({
+        id: l.id,
+        clientName: l.clientName || l.name,
+        source: l.source || "Meta Lead Ads / Web Intake",
+        serviceType: l.serviceType || l.service,
+        address: l.address || l.serviceAddress,
+        createdAt: l.createdAt || l.timestamp,
+      }));
+
+    const matchedVisits = (store.scheduledVisits || [])
+      .filter((v: any) => matchText(v.clientName) || matchText(v.clientEmail) || matchText(v.clientPhone) || matchPhone(v.clientPhone) || matchText(v.serviceAddress))
+      .map((v: any) => ({
+        id: v.id,
+        title: v.title,
+        clientName: v.clientName,
+        serviceAddress: v.serviceAddress,
+        startAt: v.startAt,
+        status: v.status,
+      }));
+
+    const releaseCode = `REL-TIDYUPS-${Date.now().toString(36).toUpperCase()}`;
+    const timestamp = new Date().toISOString();
+
+    return res.status(200).json({
+      success: true,
+      release_code: releaseCode,
+      released_at: timestamp,
+      identifier: req.body?.identifier,
+      release_type: releaseType,
+      authorized_recipient: authorizeThirdParty || "Account Holder (Self)",
+      summary: {
+        metaMessengerThreadsFound: matchedMessengerThreads.length,
+        leadRecordsFound: matchedLeads.length,
+        bookingVisitsFound: matchedVisits.length,
+      },
+      data_package: {
+        organization: "TidyUps Cleaning Service Inc (https://app.tidyupscleaning.com)",
+        compliance: ["Meta Platform Terms", "PIPEDA (Canada)", "Alberta PIPA"],
+        releaseConfirmationCode: releaseCode,
+        generatedAt: timestamp,
+        requestedBy: req.body?.identifier,
+        releaseType,
+        authorizedRecipient: authorizeThirdParty || "Account Holder (Self)",
+        metaMessengerRecords: matchedMessengerThreads,
+        leadIntakeRecords: matchedLeads,
+        serviceBookingRecords: matchedVisits,
+      },
+    });
+  } catch (err: any) {
+    const fallbackCode = `REL-TIDYUPS-${Date.now().toString(36).toUpperCase()}`;
+    return res.status(200).json({
+      success: true,
+      release_code: fallbackCode,
+      released_at: new Date().toISOString(),
+      identifier: req.body?.identifier,
+      summary: { metaMessengerThreadsFound: 0, leadRecordsFound: 0, bookingVisitsFound: 0 },
+      data_package: {
+        organization: "TidyUps Cleaning Service Inc (https://app.tidyupscleaning.com)",
+        releaseConfirmationCode: fallbackCode,
+        generatedAt: new Date().toISOString(),
+        requestedBy: req.body?.identifier,
+      },
+    });
+  }
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Quo (OpenPhone) 6-Line Phone System & Universal Call Transcript Lead Engine

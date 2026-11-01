@@ -647,6 +647,15 @@ export function App() {
     if (typeof window !== 'undefined') {
       const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
       const h = window.location.hash.toLowerCase();
+      if (p === '/support' || p === '/help' || h === '#support') {
+        return 'SUPPORT';
+      }
+      if (p === '/contact' || p === '/contact-us' || h === '#contact') {
+        return 'CONTACT';
+      }
+      if (p === '/terms' || p === '/t&c' || h === '#terms') {
+        return 'TERMS';
+      }
       if (
         p === '/privacy-policy' ||
         p === '/privacy' ||
@@ -657,12 +666,6 @@ export function App() {
         h === '#data-deletion'
       ) {
         return 'PRIVACY';
-      }
-      if (p === '/terms' || p === '/t&c' || h === '#terms') {
-        return 'TERMS';
-      }
-      if (p === '/contact' || p === '/contact-us' || h === '#contact') {
-        return 'CONTACT';
       }
     }
     return 'SUPPORT';
