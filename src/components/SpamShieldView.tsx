@@ -867,6 +867,28 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
         </div>
       )}
 
+      {/* 🛡️ FORWARDING LINE & CALLER ID PROTECTION VERIFICATION BANNER */}
+      <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-lg">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0 mt-0.5">
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs sm:text-sm font-black text-emerald-200">
+                Real Caller ID Pass-Through Active — You Always Block the Real External Caller (Never Your Forwarding Line)
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-bold">
+                callerIdMode: &quot;caller&quot;
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              When a call comes in on your public number, forwards through your Twilio Shield line, and rings back on your Quo receiving line, Twilio preserves the <strong className="text-white">real external caller&apos;s phone number</strong>. Clicking <strong className="text-rose-300">Block Number</strong> only blocks that external caller — all <strong className="text-emerald-300">6 Quo lines</strong>, <strong className="text-emerald-300">11 Twilio forwarding lines</strong>, and <strong className="text-emerald-300">(587) 386-0826 (TidyUps)</strong> are permanently protected and whitelisted.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* 🔍 INSTANT NUMBER SEARCH (BLOCKED VS NOT BLOCKED) & 1-CLICK BLOCKER BAR */}
       <div className="p-5 rounded-3xl bg-gradient-to-r from-rose-950/80 via-[#191424] to-slate-900 border-2 border-rose-500/60 shadow-2xl space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">

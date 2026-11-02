@@ -75,6 +75,31 @@ export const ClientsDatabaseView: React.FC<ClientsDatabaseViewProps> = ({
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [isSyncingJobber, setIsSyncingJobber] = useState(false);
   const [isImportingQuo, setIsImportingQuo] = useState(false);
+  const [isDeduplicating, setIsDeduplicating] = useState(false);
+
+  const handleDeduplicateClients = async () => {
+    setIsDeduplicating(true);
+    setSyncNotice(null);
+    try {
+      const res = await fetch(`/api/clients/deduplicate?project=${projectId}`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setSyncNotice(`🎉 ${data.message}`);
+        if (data.clients && Array.isArray(data.clients)) {
+          data.clients.forEach((c: ClientRecord) => onUpdateClient(c));
+        }
+        if (data.quotes && Array.isArray(data.quotes) && onQuotesUpdated) {
+          onQuotesUpdated(data.quotes);
+        }
+      } else {
+        setSyncNotice(data.error || 'Failed to merge duplicate clients.');
+      }
+    } catch {
+      setSyncNotice('Network error merging duplicate clients.');
+    } finally {
+      setIsDeduplicating(false);
+    }
+  };
 
   const handleSyncWithJobber = async () => {
     setIsSyncingJobber(true);
@@ -118,27 +143,60 @@ export const ClientsDatabaseView: React.FC<ClientsDatabaseViewProps> = ({
     }
   };
 
-  // Deduplicate clients by normalized name + phone so synced records never show 3 identical cards
+  // Deduplicate clients by normalized name + phone (merging Brenda Mcclain/McLean, Riley/Riley Frenchbeck, Tino, etc.)
   const uniqueClients = useMemo(() => {
-    const seen = new Map<string, ClientRecord>();
+    const merged: ClientRecord[] = [];
+    const normIdentity = (raw?: string) =>
+      String(raw || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\bmcclain\b/g, 'mclean')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
     for (const c of clients) {
       if (!c) continue;
-      const normName = String(c.name || '').trim().toLowerCase();
-      const normPhone = String(c.phone || '').replace(/\D/g, '').slice(-10);
-      const key = `${normName}|${normPhone || c.id}`;
-      if (!seen.has(key)) {
-        seen.set(key, c);
+      const cNameLower = String(c.name || '').trim().toLowerCase();
+      if (cNameLower.includes('tidyups cleaning') || cNameLower.startsWith('new call [')) continue;
+      const cPhone = String(c.phone || '').replace(/\D/g, '').slice(-10);
+      if (cPhone === '5873860826') continue;
+      const isRealPhone = cPhone.length === 10 && cPhone !== '7805550199' && cPhone !== '7805550100';
+      const cNorm = normIdentity(c.name);
+      const cFirst = cNorm.split(' ')[0] || '';
+
+      const idx = merged.findIndex((ex) => {
+        const exPhone = String(ex.phone || '').replace(/\D/g, '').slice(-10);
+        const isRealExPhone = exPhone.length === 10 && exPhone !== '7805550199' && exPhone !== '7805550100';
+        const exNorm = normIdentity(ex.name);
+        const exFirst = exNorm.split(' ')[0] || '';
+
+        if (isRealPhone && isRealExPhone && cPhone !== exPhone) return false;
+        if (isRealPhone && isRealExPhone && cPhone === exPhone && (cNorm === exNorm || cFirst === exFirst)) {
+          return true;
+        }
+        if (cNorm && exNorm && cNorm === exNorm) return true;
+        return false;
+      });
+
+      if (idx === -1) {
+        merged.push(c);
       } else {
-        const existing = seen.get(key)!;
-        seen.set(key, {
-          ...existing,
+        const ex = merged[idx];
+        const preferNewName =
+          String(c.name || '').split(/\s+/).length > String(ex.name || '').split(/\s+/).length ||
+          ex.name === 'Brenda Mcclain';
+        merged[idx] = {
+          ...ex,
           ...c,
-          isJobberLinked: existing.isJobberLinked || c.isJobberLinked,
-          tags: Array.from(new Set([...(existing.tags || []), ...(c.tags || [])])),
-        });
+          name: preferNewName ? c.name : ex.name,
+          phone: isRealPhone ? c.phone : ex.phone || c.phone,
+          isJobberLinked: Boolean(ex.isJobberLinked || c.isJobberLinked),
+          tags: Array.from(new Set([...(ex.tags || []), ...(c.tags || [])])),
+        };
       }
     }
-    return Array.from(seen.values());
+    return merged;
   }, [clients]);
 
   // Filter clients
@@ -246,15 +304,25 @@ export const ClientsDatabaseView: React.FC<ClientsDatabaseViewProps> = ({
           <div className="flex items-center gap-3">
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Clients</h1>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-pink-500/20 text-pink-400 border border-pink-500/30">
-              {clients.length} Total
+              {uniqueClients.length} Total
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            {clients.length} clients on file, gathered from bookings, Jobber and leads.
+            {uniqueClients.length} deduplicated clients on file, gathered from bookings, Jobber and leads.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={handleDeduplicateClients}
+            disabled={isDeduplicating}
+            className="px-3.5 py-2 bg-violet-950/80 hover:bg-violet-900 text-violet-200 border border-violet-600/70 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-98 disabled:opacity-50"
+            title="Merge & remove duplicate clients sharing First+Last name and/or phone number (Brenda, Riley, Tino) in local database & Jobber"
+          >
+            <Sparkles className={`w-3.5 h-3.5 text-violet-300 ${isDeduplicating ? 'animate-spin' : ''}`} />
+            <span>{isDeduplicating ? 'Merging Duplicates...' : 'Merge & Remove Duplicates'}</span>
+          </button>
+
           <button
             onClick={handleImportFromQuo}
             disabled={isImportingQuo}

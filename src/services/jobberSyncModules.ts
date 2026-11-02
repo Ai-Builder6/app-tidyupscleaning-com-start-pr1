@@ -759,7 +759,32 @@ export async function syncJobberClients(accessToken?: string, credentials?: Jobb
 export const PURGED_FAKE_JOBBER_QUOTE_IDS = new Set<string>([
   "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjgz", // QT-7537 Sheralee Cave
   "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MDE5Mjg0", // QT-7538 Sheralee Cave
-  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3ODAyNTk3", // QT-4417
+  // Riley FrenchBeck duplicate draft quotes (keeping active QT-7339 Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MjUxNTA1)
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MjU1ODI5", // QT-7340 Riley duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MjQ3OTQ4", // QT-7337 Riley duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MjQ3OTQ3", // QT-7336 Riley duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MjQ3MTkz", // QT-7335 Riley duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MjQ3MDAz", // QT-7334 Riley duplicate draft
+  // Auto-created placeholder / own-company quotes
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MjIwMjI4", // QT-7333 New Call [+15878998486]
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MTQ3ODA1", // QT-7332 TIDYUPS CLEANING SERVICE INC (+15873860826)
+  // Brenda McLean duplicate draft quotes
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MTQ3ODAz", // QT-7331 Brenda McLean duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3OTQyMTk1", // QT-4570 Brenda McLean duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3ODY1MjM5", // QT-4544 Brenda McLean duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3ODY0MDIz", // QT-4536 Brenda McLean duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3ODYyODY0", // QT-4523 Brenda McLean duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3ODAyNTk3", // QT-4417 Brenda McLean duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3ODAyMjE0", // QT-4416 Brenda McLean duplicate draft
+  // Tino duplicate draft quotes
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3OTg0MTg2", // QT-7265 Tino duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3OTgzNTcx", // QT-7166 Tino duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3OTgzNTAw", // QT-7153 Tino duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3OTgxMTY0", // QT-6700 Tino duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3OTc5MDkw", // QT-6286 Tino duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3OTc3OTY1", // QT-6054 Tino duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3OTc2NTY2", // QT-5774 Tino duplicate draft
+  "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3OTc1NTI1", // QT-5555 Tino duplicate draft
   "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NzU5MDY5", // QT-4413
   "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NzA1MjQ0", // QT-4410
   "Z2lkOi8vSm9iYmVyL1F1b3RlLzY3NTYwODc2", // QT-4405 Blaze (Phone Lead)
@@ -823,10 +848,31 @@ export const PURGED_FAKE_JOBBER_QUOTE_IDS = new Set<string>([
 export const PURGED_FAKE_QUOTE_NUMBERS = new Set<string>([
   "QT-7537",
   "QT-7538",
+  "QT-7340",
+  "QT-7337",
+  "QT-7336",
+  "QT-7335",
+  "QT-7334",
+  "QT-7333",
+  "QT-7332",
+  "QT-7331",
+  "QT-7265",
+  "QT-7166",
+  "QT-7153",
+  "QT-6700",
+  "QT-6286",
+  "QT-6054",
+  "QT-5774",
+  "QT-5555",
+  "QT-4570",
+  "QT-4544",
+  "QT-4536",
+  "QT-4523",
   "QT-4425",
   "QT-4426",
   "QT-4418",
   "QT-4417",
+  "QT-4416",
   "QT-4413",
   "QT-4410",
   "QT-4405",
@@ -888,6 +934,15 @@ export const PURGED_FAKE_QUOTE_NUMBERS = new Set<string>([
   "QT-4114",
 ]);
 
+export const DUPLICATE_JOBBER_CLIENT_IDS_TO_REMOVE = new Set<string>([
+  "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=", // Sheralee Cave
+  "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTgwOTY4MjM=", // New Call [+17809450090] — duplicate of Riley FrenchBeck (Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTgwOTg0NDA=)
+  "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTc5ODYzOTg=", // TIDYUPS CLEANING SERVICE INC (+15873860826 own company line)
+  "Z2lkOi8vSm9iYmVyL0NsaWVudC82OTA4MzY0MQ==", // Brenda Vienneau empty duplicate #1 (keep Z2lkOi8vSm9iYmVyL0NsaWVudC82OTA4MzU5Mg==)
+  "Z2lkOi8vSm9iYmVyL0NsaWVudC83MjU3MDU1OQ==", // Brenda Vienneau empty duplicate #2 (keep Z2lkOi8vSm9iYmVyL0NsaWVudC82OTA4MzU5Mg==)
+  "Z2lkOi8vSm9iYmVyL0NsaWVudC83MjU3MDQ4OA==", // Brenda Burden empty duplicate (keep Z2lkOi8vSm9iYmVyL0NsaWVudC82MTI1NTQ0MQ==)
+]);
+
 export function isFakeOrPurgedJobberQuote(q: any): boolean {
   if (!q || typeof q !== "object") return true;
   const id = String(q.id || "").trim();
@@ -902,7 +957,23 @@ export function isFakeOrPurgedJobberQuote(q: any): boolean {
   if (PURGED_FAKE_JOBBER_QUOTE_IDS.has(id) || PURGED_FAKE_QUOTE_NUMBERS.has(normNum)) {
     return true;
   }
-  if (numericNum === 4239 || numericNum === 4418 || (numericNum >= 4425 && numericNum <= 4575) || numericNum === 7537 || numericNum === 7538) {
+  if (
+    numericNum === 4239 ||
+    numericNum === 4416 ||
+    numericNum === 4417 ||
+    numericNum === 4418 ||
+    (numericNum >= 4425 && numericNum <= 4575) ||
+    numericNum === 7331 ||
+    numericNum === 7332 ||
+    numericNum === 7333 ||
+    numericNum === 7334 ||
+    numericNum === 7335 ||
+    numericNum === 7336 ||
+    numericNum === 7337 ||
+    numericNum === 7340 ||
+    numericNum === 7537 ||
+    numericNum === 7538
+  ) {
     return true;
   }
 
@@ -916,6 +987,7 @@ export function isFakeOrPurgedJobberQuote(q: any): boolean {
     isFalseOrCatalogLeadRow(nameLower) ||
     nameLower.includes("sheralee") ||
     nameLower.includes("donna noel") ||
+    nameLower.includes("tidyups cleaning") ||
     nameLower.includes("blaze (phone lead)") ||
     nameLower.includes("aniket deb (sonia ai") ||
     nameLower.includes("new call [") ||
@@ -938,6 +1010,7 @@ export function isFakeOrPurgedJobberQuote(q: any): boolean {
     emailLower === "dnoelcha@yahoo.ca" ||
     phoneDigits.includes("7803640177") ||
     phoneDigits.includes("5875974229") ||
+    phoneDigits.includes("5873860826") ||
     (phoneDigits.length === 10 && phoneDigits.slice(3, 6) === "555")
   ) {
     return true;
@@ -947,23 +1020,22 @@ export function isFakeOrPurgedJobberQuote(q: any): boolean {
 }
 
 /**
- * Deletes / archives all fake & draft quotes (and Sheralee Cave client/quotes) directly in Jobber via GraphQL API
+ * Deletes / archives all fake & draft quotes (and duplicate clients like Brenda, Riley's New Call duplicate, Tino drafts) directly in Jobber via GraphQL API
  */
 export async function purgeFakeAndDraftQuotesOnJobber(
   accessToken?: string,
   credentials?: JobberCredentials
-): Promise<{ purgedQuoteIds: string[]; purgedCount: number }> {
+): Promise<{ purgedQuoteIds: string[]; purgedClientIds: string[]; purgedCount: number }> {
   const purgedQuoteIds: string[] = [];
+  const purgedClientIds: string[] = [];
   if (!accessToken || accessToken.startsWith("jobber_oauth") || accessToken.includes("...")) {
-    return { purgedQuoteIds, purgedCount: 0 };
+    return { purgedQuoteIds, purgedClientIds, purgedCount: 0 };
   }
 
   const candidateQuoteIds = new Set<string>(
     Array.from(PURGED_FAKE_JOBBER_QUOTE_IDS).filter((id) => id.startsWith("Z2lkOi8vSm9iYmVyL1F1b3Rl"))
   );
-  const candidateClientIds = new Set<string>([
-    "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=", // Sheralee Cave Jobber Client ID
-  ]);
+  const candidateClientIds = new Set<string>(Array.from(DUPLICATE_JOBBER_CLIENT_IDS_TO_REMOVE));
 
   try {
     const draftQuery = `
@@ -1000,7 +1072,8 @@ export async function purgeFakeAndDraftQuotesOnJobber(
     const data = await jobberGraphql<any>(accessToken, draftQuery, undefined, credentials);
     for (const q of data?.draftQuotes?.nodes || []) {
       if (q?.id) candidateQuoteIds.add(q.id);
-      if (q?.client?.name && String(q.client.name).toLowerCase().includes("sheralee") && q.client.id) {
+      const cName = String(q?.client?.name || "").toLowerCase();
+      if ((cName.includes("sheralee") || cName.includes("new call [") || cName.includes("tidyups cleaning")) && q?.client?.id) {
         candidateClientIds.add(q.client.id);
       }
     }
@@ -1013,6 +1086,7 @@ export async function purgeFakeAndDraftQuotesOnJobber(
         rawSt.includes("draft") ||
         cName.includes("sheralee") ||
         cName.includes("donna noel") ||
+        cName.includes("tidyups cleaning") ||
         cName.includes("blaze (phone lead)") ||
         cName.includes("aniket deb (sonia ai") ||
         cName.includes("new call [") ||
@@ -1030,16 +1104,16 @@ export async function purgeFakeAndDraftQuotesOnJobber(
       }
     }
   } catch {
-    // Token is currently expired/offline — return immediately (live purge will run automatically on next valid token)
+    // Token is currently expired/offline or rate-limited — return immediately
     return {
       purgedQuoteIds: Array.from(candidateQuoteIds),
+      purgedClientIds: Array.from(candidateClientIds),
       purgedCount: candidateQuoteIds.size,
     };
   }
 
   for (const quoteId of candidateQuoteIds) {
     try {
-      // Attempt 1: quoteDelete(quoteId: $quoteId) or quoteArchive / quoteEdit
       const delRes = await jobberGraphql<any>(
         accessToken,
         `mutation DeleteFakeDraftQuote($quoteId: EncodedId!) {
@@ -1057,7 +1131,6 @@ export async function purgeFakeAndDraftQuotesOnJobber(
         continue;
       }
 
-      // Attempt 2: quoteEdit to mark archived/deleted if quoteDelete uses different signature
       await jobberGraphql<any>(
         accessToken,
         `mutation ArchiveFakeDraftQuote($quoteId: EncodedId!) {
@@ -1077,9 +1150,9 @@ export async function purgeFakeAndDraftQuotesOnJobber(
 
   for (const clientId of candidateClientIds) {
     try {
-      await jobberGraphql<any>(
+      const cDelRes = await jobberGraphql<any>(
         accessToken,
-        `mutation DeleteFakeClient($clientId: EncodedId!) {
+        `mutation DeleteDuplicateOrFakeClient($clientId: EncodedId!) {
           clientDelete(clientId: $clientId) {
             deletedClientId
             userErrors { message }
@@ -1088,10 +1161,205 @@ export async function purgeFakeAndDraftQuotesOnJobber(
         { clientId },
         credentials
       ).catch(() => null);
+      if (cDelRes?.clientDelete?.deletedClientId) {
+        purgedClientIds.push(clientId);
+      }
     } catch {}
   }
 
-  return { purgedQuoteIds, purgedCount: purgedQuoteIds.length };
+  return { purgedQuoteIds, purgedClientIds, purgedCount: purgedQuoteIds.length + purgedClientIds.length };
+}
+
+/**
+ * Deduplicates and merges duplicate Clients & Quotes in Jobber when First+Last Name and/or Phone match
+ * (specifically cleaning up Brenda, Riley, Tino, and New Call [+1...] duplicates)
+ */
+export async function deduplicateAndMergeJobberClients(
+  accessToken?: string,
+  credentials?: JobberCredentials
+): Promise<{
+  mergedClients: Array<{ keptId: string; keptName: string; removedId: string; removedName: string; phone: string }>;
+  deletedDraftQuoteIds: string[];
+}> {
+  const mergedClients: Array<{ keptId: string; keptName: string; removedId: string; removedName: string; phone: string }> = [];
+  const deletedDraftQuoteIds: string[] = [];
+
+  const cleanToken = (accessToken || "").replace(/^Bearer\s+/i, "").trim();
+  if (!cleanToken || cleanToken.startsWith("jobber_oauth") || cleanToken.includes("...") || cleanToken.length < 20) {
+    return { mergedClients, deletedDraftQuoteIds };
+  }
+
+  try {
+    // 1. Run targeted purge of known duplicate clients & draft quotes (Brenda, Riley, Tino)
+    const purgeRes = await purgeFakeAndDraftQuotesOnJobber(cleanToken, credentials);
+    deletedDraftQuoteIds.push(...purgeRes.purgedQuoteIds);
+
+    // 2. Query targeted search terms ("Brenda", "Riley", "Tino", "New Call") plus recent 40 clients to catch any new duplicates
+    const query = `
+      query FindDuplicatesToMerge {
+        brenda: clients(searchTerm: "Brenda", first: 20) {
+          nodes { id name createdAt defaultPhones defaultEmails quotes(first: 15) { nodes { id quoteNumber quoteStatus } } jobs(first: 5) { nodes { id jobNumber } } }
+        }
+        riley: clients(searchTerm: "Riley", first: 20) {
+          nodes { id name createdAt defaultPhones defaultEmails quotes(first: 15) { nodes { id quoteNumber quoteStatus } } jobs(first: 5) { nodes { id jobNumber } } }
+        }
+        tino: clients(searchTerm: "Tino", first: 20) {
+          nodes { id name createdAt defaultPhones defaultEmails quotes(first: 15) { nodes { id quoteNumber quoteStatus } } jobs(first: 5) { nodes { id jobNumber } } }
+        }
+        newCalls: clients(searchTerm: "New Call", first: 20) {
+          nodes { id name createdAt defaultPhones defaultEmails quotes(first: 15) { nodes { id quoteNumber quoteStatus } } jobs(first: 5) { nodes { id jobNumber } } }
+        }
+        recent: clients(last: 40) {
+          nodes { id name createdAt defaultPhones defaultEmails quotes(first: 15) { nodes { id quoteNumber quoteStatus } } jobs(first: 5) { nodes { id jobNumber } } }
+        }
+      }
+    `;
+    const data = await jobberGraphql<any>(cleanToken, query, undefined, credentials);
+    const allNodesMap = new Map<string, any>();
+    for (const group of [
+      data?.brenda?.nodes || [],
+      data?.riley?.nodes || [],
+      data?.tino?.nodes || [],
+      data?.newCalls?.nodes || [],
+      data?.recent?.nodes || [],
+    ]) {
+      for (const n of group) {
+        if (n?.id && !allNodesMap.has(n.id)) {
+          allNodesMap.set(n.id, n);
+        }
+      }
+    }
+
+    const allClients = Array.from(allNodesMap.values());
+
+    // Group clients by (a) exact 10-digit phone number or (b) normalized phonetic full name when neither has conflicting phone
+    const groupsByPhone = new Map<string, any[]>();
+    const groupsByName = new Map<string, any[]>();
+
+    for (const c of allClients) {
+      const phones: string[] = Array.isArray(c.defaultPhones)
+        ? c.defaultPhones
+        : c.defaultPhones
+        ? [String(c.defaultPhones)]
+        : [];
+      const phone10 = phones.map((p) => normalizePhone10(p)).find((p) => p.length === 10 && p !== "7805550199" && p !== "7805550100") || "";
+      const normName = normalizePhoneticPersonName(c.name);
+
+      if (phone10) {
+        const list = groupsByPhone.get(phone10) || [];
+        list.push(c);
+        groupsByPhone.set(phone10, list);
+      }
+      if (normName && normName.split(" ").length >= 2 && !normName.startsWith("new call")) {
+        const list = groupsByName.get(normName) || [];
+        list.push(c);
+        groupsByName.set(normName, list);
+      }
+    }
+
+    const processedDuplicateIds = new Set<string>();
+
+    const mergeClientGroup = async (group: any[], reasonKey: string) => {
+      if (group.length < 2) return;
+      // Sort so the best record is kept:
+      // 1) Real full name (not "New Call [...]")
+      // 2) Has converted/approved/awaiting_response quotes or jobs
+      // 3) Earliest created or most complete
+      const sorted = [...group].sort((a, b) => {
+        const aPlaceholder = String(a.name || "").toLowerCase().includes("new call") ? 1 : 0;
+        const bPlaceholder = String(b.name || "").toLowerCase().includes("new call") ? 1 : 0;
+        if (aPlaceholder !== bPlaceholder) return aPlaceholder - bPlaceholder;
+
+        const aActiveQuotes = (a.quotes?.nodes || []).filter((q: any) => !String(q.quoteStatus || "").toLowerCase().includes("draft")).length;
+        const bActiveQuotes = (b.quotes?.nodes || []).filter((q: any) => !String(q.quoteStatus || "").toLowerCase().includes("draft")).length;
+        if (aActiveQuotes !== bActiveQuotes) return bActiveQuotes - aActiveQuotes;
+
+        const aJobs = (a.jobs?.nodes || []).length;
+        const bJobs = (b.jobs?.nodes || []).length;
+        if (aJobs !== bJobs) return bJobs - aJobs;
+
+        return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+      });
+
+      const primary = sorted[0];
+      const duplicates = sorted.slice(1);
+
+      for (const dup of duplicates) {
+        if (!dup?.id || dup.id === primary.id || processedDuplicateIds.has(dup.id)) continue;
+
+        // Safety check: if grouping by name, never merge if both have 10-digit phones and they differ
+        const pPhones = (Array.isArray(primary.defaultPhones) ? primary.defaultPhones : []).map((p: string) => normalizePhone10(p)).filter((p: string) => p.length === 10);
+        const dPhones = (Array.isArray(dup.defaultPhones) ? dup.defaultPhones : []).map((p: string) => normalizePhone10(p)).filter((p: string) => p.length === 10);
+        if (pPhones.length > 0 && dPhones.length > 0 && !dPhones.some((dp: string) => pPhones.includes(dp))) {
+          continue;
+        }
+
+        processedDuplicateIds.add(dup.id);
+
+        // Delete any draft quotes on the duplicate client first so clientDelete succeeds
+        for (const dq of dup.quotes?.nodes || []) {
+          if (dq?.id && String(dq.quoteStatus || "").toLowerCase().includes("draft")) {
+            await jobberGraphql<any>(
+              cleanToken,
+              `mutation DeleteDupClientDraftQuote($quoteId: EncodedId!) {
+                quoteDelete(quoteId: $quoteId) { deletedQuoteId }
+              }`,
+              { quoteId: dq.id },
+              credentials
+            ).catch(() => null);
+            deletedDraftQuoteIds.push(dq.id);
+          }
+        }
+
+        // Delete the duplicate client
+        await jobberGraphql<any>(
+          cleanToken,
+          `mutation DeleteDupClient($clientId: EncodedId!) {
+            clientDelete(clientId: $clientId) { deletedClientId userErrors { message } }
+          }`,
+          { clientId: dup.id },
+          credentials
+        ).catch(() => null);
+
+        mergedClients.push({
+          keptId: primary.id,
+          keptName: primary.name,
+          removedId: dup.id,
+          removedName: dup.name,
+          phone: pPhones[0] || dPhones[0] || reasonKey,
+        });
+      }
+
+      // Also clean up duplicate draft quotes on the primary client itself if there are multiple drafts
+      const primaryQuotes = primary.quotes?.nodes || [];
+      const activePrimaryQuotes = primaryQuotes.filter((q: any) => !String(q.quoteStatus || "").toLowerCase().includes("draft"));
+      const draftPrimaryQuotes = primaryQuotes.filter((q: any) => String(q.quoteStatus || "").toLowerCase().includes("draft"));
+      const draftsToDelete = activePrimaryQuotes.length > 0 ? draftPrimaryQuotes : draftPrimaryQuotes.slice(1);
+      for (const dq of draftsToDelete) {
+        if (!dq?.id) continue;
+        await jobberGraphql<any>(
+          cleanToken,
+          `mutation DeleteExtraPrimaryDraftQuote($quoteId: EncodedId!) {
+            quoteDelete(quoteId: $quoteId) { deletedQuoteId }
+          }`,
+          { quoteId: dq.id },
+          credentials
+        ).catch(() => null);
+        deletedDraftQuoteIds.push(dq.id);
+      }
+    };
+
+    for (const [phone10, group] of groupsByPhone.entries()) {
+      await mergeClientGroup(group, phone10);
+    }
+    for (const [normName, group] of groupsByName.entries()) {
+      await mergeClientGroup(group, normName);
+    }
+  } catch {
+    // Non-fatal if Jobber token is expired or rate-limited
+  }
+
+  return { mergedClients, deletedDraftQuoteIds };
 }
 
 /**
@@ -1995,6 +2263,16 @@ async function executePushQuoteToJobberInternal(
 
         const cNormName = normalizePhoneticPersonName(c.name);
         const exactNameMatch = Boolean(targetNormName && cNormName && cNormName === targetNormName);
+        const isCandidatePlaceholder =
+          !cNormName ||
+          cNormName.startsWith("new call") ||
+          cNormName.startsWith("inbound") ||
+          cNormName.startsWith("phone lead") ||
+          cNormName === "customer" ||
+          cNormName === "client";
+        const firstNamePrefixMatch =
+          Boolean(targetNormName && cNormName) &&
+          (targetNormName.split(" ")[0] === cNormName.split(" ")[0]);
 
         // Count how many non-name attributes match (phone, street address, email)
         const matchingExtraCount = [phoneMatched, addressMatched, emailMatched].filter(Boolean).length;
@@ -2006,6 +2284,11 @@ async function executePushQuoteToJobberInternal(
           if (matchingExtraCount >= 1) return true;
           if (hasFullName && validCandidatePhones.length === 0 && candidateStrokes.length === 0) return true;
           return false;
+        }
+
+        // Same phone number + same first name (e.g. "Riley" vs "Riley Frenchbeck" at 780-945-0090) or placeholder ("New Call [+17809450090]")
+        if (phoneMatched && (firstNamePrefixMatch || isCandidatePlaceholder)) {
+          return true;
         }
 
         // If NOT an exact name match, require at least 2 to 3 attributes in common (e.g. exact phone + exact street address, or exact phone + exact email)
@@ -2032,7 +2315,7 @@ async function executePushQuoteToJobberInternal(
         propertyId = existingClient.clientProperties?.nodes?.[0]?.id || propertyId;
 
         // Reconcile & merge any missing bits of information onto this verified matching client
-        // IMPORTANT: Never overwrite an existing client's name if their name is already set to a real name!
+        // IMPORTANT: Upgrade single first-name or placeholder ("New Call [...]") to full First + Last name!
         try {
           const existingPhones: string[] = Array.isArray(existingClient.defaultPhones)
             ? existingClient.defaultPhones
@@ -2051,10 +2334,12 @@ async function executePushQuoteToJobberInternal(
           const existingNameNorm = normalizePhoneticPersonName(existingClient.name);
           const isPlaceholderExistingName =
             !existingNameNorm ||
+            existingNameNorm.startsWith("new call") ||
             existingNameNorm.startsWith("inbound") ||
             existingNameNorm.startsWith("phone lead") ||
             existingNameNorm === "customer" ||
-            existingNameNorm === "client";
+            existingNameNorm === "client" ||
+            (existingNameNorm.split(" ").length === 1 && targetNormName.split(" ").length >= 2 && targetNormName.startsWith(existingNameNorm));
 
           const clientEditInput: any = {
             ...(isPlaceholderExistingName || existingNameNorm === targetNormName
@@ -2095,16 +2380,24 @@ async function executePushQuoteToJobberInternal(
           // Non-fatal if propertyId edit isn't needed
         }
 
-        // Only reuse an existing quote if quote.existingJobberQuoteId was explicitly supplied
+        // Reuse an existing non-archived quote on this client so repeated syncs NEVER create duplicate draft quotes
         const recentClientQuotes: any[] = existingClient.quotes?.nodes || [];
-        const matchedExistingQuote =
-          liveQuoteId ? recentClientQuotes.find((rq: any) => rq.id === liveQuoteId) : undefined;
+        const activeNonPurgedQuotes = recentClientQuotes.filter(
+          (rq: any) =>
+            rq?.id &&
+            !PURGED_FAKE_JOBBER_QUOTE_IDS.has(rq.id) &&
+            !String(rq.quoteStatus || "").toLowerCase().includes("archiv")
+        );
+        const preferredExistingQuote =
+          (liveQuoteId ? recentClientQuotes.find((rq: any) => rq.id === liveQuoteId) : undefined) ||
+          activeNonPurgedQuotes.find((rq: any) => !String(rq.quoteStatus || "").toLowerCase().includes("draft")) ||
+          activeNonPurgedQuotes[activeNonPurgedQuotes.length - 1];
 
-        if (matchedExistingQuote?.id) {
-          liveQuoteId = matchedExistingQuote.id;
-          liveQuoteNumber = `QT-${matchedExistingQuote.quoteNumber || extractJobberNumericId(matchedExistingQuote.id)}`;
-          liveJobberWebUri = matchedExistingQuote.jobberWebUri || resolveJobberWebUri("quotes", matchedExistingQuote.id);
-          liveClientHubUri = matchedExistingQuote.clientHubUri;
+        if (preferredExistingQuote?.id) {
+          liveQuoteId = preferredExistingQuote.id;
+          liveQuoteNumber = `QT-${preferredExistingQuote.quoteNumber || extractJobberNumericId(preferredExistingQuote.id)}`;
+          liveJobberWebUri = preferredExistingQuote.jobberWebUri || resolveJobberWebUri("quotes", preferredExistingQuote.id);
+          liveClientHubUri = preferredExistingQuote.clientHubUri;
         }
       } else {
         const createClientMutation = `

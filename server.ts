@@ -50,8 +50,10 @@ import {
   resolveJobberWebUri,
   isFakeOrPurgedJobberQuote,
   purgeFakeAndDraftQuotesOnJobber,
+  deduplicateAndMergeJobberClients,
   PURGED_FAKE_JOBBER_QUOTE_IDS,
   PURGED_FAKE_QUOTE_NUMBERS,
+  DUPLICATE_JOBBER_CLIENT_IDS_TO_REMOVE,
 } from "./src/services/jobberSyncModules";
 import {
   parseJobberVisitsCsv,
@@ -4313,6 +4315,24 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     mutated = true;
   }
 
+  // Safeguard: NEVER allow TidyUps' own Quo lines, Twilio Shield forwarding lines, or (587) 386-0826 (TIDYUPS CLEANING SERVICE INC)
+  // to stay in blockedNumbers or blockedCallsHistory!
+  const beforeBlockedCount = (store.spamShieldConfig.blockedNumbers || []).length;
+  store.spamShieldConfig.blockedNumbers = (store.spamShieldConfig.blockedNumbers || []).filter(
+    (n: string) => !TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(n))
+  );
+  if (store.spamShieldConfig.blockedNumbers.length !== beforeBlockedCount) {
+    mutated = true;
+  }
+
+  const beforeHistCount = store.blockedCallsHistory.length;
+  store.blockedCallsHistory = store.blockedCallsHistory.filter(
+    (h: any) => !TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(h?.callerNumber))
+  );
+  if (store.blockedCallsHistory.length !== beforeHistCount) {
+    mutated = true;
+  }
+
   const unblockedDigitsSet = new Set<string>(
     (store.spamShieldConfig.unblockedNumbers || []).map((n: string) => normalizePhoneDigits(n)).filter(Boolean)
   );
@@ -4321,6 +4341,18 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
   );
 
   if (Array.isArray(store.quoCallLogs)) {
+    // Filter out any self-test or internal forwarding legs where callerPhone is one of TidyUps' own numbers (e.g. 587-386-0826)
+    const beforeQuoLogsLen = store.quoCallLogs.length;
+    store.quoCallLogs = store.quoCallLogs.filter((call: any) => {
+      if (!call) return false;
+      const cDigits = normalizePhoneDigits(call.callerPhone);
+      if (cDigits && TIDYUPS_OWN_PHONE_DIGITS.has(cDigits)) return false;
+      return true;
+    });
+    if (store.quoCallLogs.length !== beforeQuoLogsLen) {
+      mutated = true;
+    }
+
     for (const call of store.quoCallLogs) {
       if (!call || !call.callerPhone) continue;
       const cDigits = normalizePhoneDigits(call.callerPhone);
@@ -4414,9 +4446,12 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       if (!l) return false;
       if (isOutOfEdmontonOrFakeOrOutdatedLead(l)) return false;
       const qNum = parseInt(String(l.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
-      if (qNum === 4239 || qNum === 4418 || (qNum >= 4426 && qNum <= 4575)) return false;
+      if (qNum === 4239 || qNum === 4416 || qNum === 4417 || qNum === 4418 || (qNum >= 4425 && qNum <= 4575) || qNum === 7331 || qNum === 7332 || qNum === 7333) {
+        return false;
+      }
 
       const lDigits = normalizePhoneDigits(l.phone);
+      if (lDigits && TIDYUPS_OWN_PHONE_DIGITS.has(lDigits)) return false;
       if (lDigits && !unblockedDigitsSet.has(lDigits)) {
         const ruleCheck = evaluateSpamCallRule(l.phone, store.spamShieldConfig);
         if (ruleCheck.isBlocked || blockedDigitsSet.has(lDigits)) {
@@ -4424,12 +4459,28 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
         }
       }
 
+      // Normalize known phonetic spellings so Brenda Mcclain / Brenda McLean and Riley / Riley Frenchbeck merge cleanly
+      if (lDigits === "7809100335" || /^brenda\s+mc(?:lean|clain)$/i.test(String(l.customerName || "").trim())) {
+        l.customerName = "Brenda McLean";
+      }
+      if (lDigits === "7809450090") {
+        l.customerName = "Riley Frenchbeck";
+        if (!l.address || l.address === "Edmonton, AB") {
+          l.address = "917 Bird Place, Leduc, AB";
+          l.city = "Leduc";
+        }
+        l.quoteNumber = "QT-7339";
+        l.quoteId = "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4MjUxNTA1";
+        l.isJobberSynced = true;
+      }
+
       // Deduplicate by 10-digit phone number (or normalized customerName when phone is empty) so repeated sheet imports never stack duplicates
       const normName = String(l.customerName || l.name || "")
         .trim()
         .toLowerCase()
+        .replace(/mcclain/g, "mclean")
         .replace(/[^a-z0-9]/g, "");
-      if (normName === "blazephonelead") return false;
+      if (normName === "blazephonelead" || normName.includes("tidyupscleaning")) return false;
       const dedupeKey = lDigits && lDigits.length === 10 ? `ph:${lDigits}` : `nm:${normName}`;
       if (dedupeKey !== "nm:" && seenPersonPhoneKey.has(dedupeKey)) {
         return false;
@@ -4446,7 +4497,7 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
 
   if (Array.isArray(store.clients)) {
     const beforeClientsCount = store.clients.length;
-    store.clients = store.clients.filter((c: any) => {
+    const filteredClients = store.clients.filter((c: any) => {
       if (!c) return false;
       const cid = String(c.id || "");
       const jid = String(c.jobberId || "");
@@ -4456,9 +4507,12 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
         cid.startsWith("cli-sheet-mvmwt") ||
         cid.startsWith("cli-sheet-mvo") ||
         cid === "cli-fb-28926607507026653" ||
-        jid === "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=" ||
+        DUPLICATE_JOBBER_CLIENT_IDS_TO_REMOVE.has(cid) ||
+        DUPLICATE_JOBBER_CLIENT_IDS_TO_REMOVE.has(jid) ||
         cNameLower.includes("sheralee") ||
         cNameLower.includes("donna noel") ||
+        cNameLower.includes("tidyups cleaning") ||
+        cNameLower.startsWith("new call [") ||
         cEmailLower === "sheraleew@live.com" ||
         cEmailLower === "dnoelcha@yahoo.ca"
       ) {
@@ -4469,29 +4523,163 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
         return false;
       }
       const pDigits = normalizePhoneDigits(c.phone);
+      if (pDigits && TIDYUPS_OWN_PHONE_DIGITS.has(pDigits)) return false;
       if (pDigits === "7803640177" || pDigits === "5875974229") return false;
       if (pDigits.length === 10 && pDigits.slice(3, 6) === "555") return false;
       return true;
     });
-    if (store.clients.length !== beforeClientsCount) {
+
+    // Deduplicate & merge clients when First+Last name and/or 10-digit Phone match (Brenda McLean / Brenda Mcclain, Riley / Riley Frenchbeck, Tino, etc.)
+    const normalizeClientIdentityName = (raw?: string) =>
+      String(raw || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\bmcclain\b/g, "mclean")
+        .replace(/\bfrenchbeck\b/g, "frenchbeck")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const mergedClientsList: any[] = [];
+    for (const c of filteredClients) {
+      const cDigits = normalizePhoneDigits(c.phone);
+      const isRealPhone = cDigits.length === 10 && cDigits !== "7805550199" && cDigits !== "7805550100";
+
+      // Canonicalize Riley Frenchbeck and Brenda McLean
+      if (cDigits === "7809450090" || /^riley(\s+frenchbeck)?$/i.test(String(c.name || "").trim())) {
+        c.name = "Riley Frenchbeck";
+        c.phone = "(780) 945-0090";
+        c.address = c.address && !String(c.address).toLowerCase().startsWith("edmonton") ? c.address : "917 Bird Place, Leduc, AB";
+        c.city = "Leduc";
+        c.isJobberLinked = true;
+        c.jobberId = "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTgwOTg0NDA=";
+      } else if (cDigits === "7809100335" || /^brenda\s+mc(?:lean|clain)$/i.test(String(c.name || "").trim())) {
+        c.name = "Brenda McLean";
+        c.phone = "(780) 910-0335";
+        c.isJobberLinked = true;
+        c.jobberId = "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTcxNzAxMDY=";
+      } else if (/^tino\b/i.test(String(c.name || "").trim())) {
+        c.isJobberLinked = true;
+        if (!c.jobberId || !String(c.jobberId).startsWith("Z2lkOi8v")) {
+          c.jobberId = "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTc2MDE1OTQ=";
+        }
+      }
+
+      const cNormName = normalizeClientIdentityName(c.name);
+      const cFirst = cNormName.split(" ")[0] || "";
+
+      const existingIdx = mergedClientsList.findIndex((ex: any) => {
+        const exDigits = normalizePhoneDigits(ex.phone);
+        const isRealExPhone = exDigits.length === 10 && exDigits !== "7805550199" && exDigits !== "7805550100";
+        const exNormName = normalizeClientIdentityName(ex.name);
+        const exFirst = exNormName.split(" ")[0] || "";
+
+        // Never merge two clients who have different real 10-digit phone numbers
+        if (isRealPhone && isRealExPhone && cDigits !== exDigits) return false;
+
+        // Match if exact same 10-digit phone AND (same full name OR same first name OR one is a placeholder)
+        if (isRealPhone && isRealExPhone && cDigits === exDigits) {
+          if (!cNormName || !exNormName || cNormName === exNormName || cFirst === exFirst) {
+            return true;
+          }
+        }
+
+        // Match if exact same normalized full name (with no conflicting phone)
+        if (cNormName && exNormName && cNormName === exNormName) {
+          return true;
+        }
+
+        return false;
+      });
+
+      if (existingIdx === -1) {
+        mergedClientsList.push(c);
+      } else {
+        const ex = mergedClientsList[existingIdx];
+        const preferNewName =
+          String(c.name || "").split(/\s+/).length > String(ex.name || "").split(/\s+/).length ||
+          ex.name === "Brenda Mcclain";
+        mergedClientsList[existingIdx] = {
+          ...ex,
+          ...c,
+          id: String(ex.id || "").startsWith("Z2lkOi8v") ? ex.id : String(c.id || "").startsWith("Z2lkOi8v") ? c.id : ex.id,
+          name: preferNewName ? c.name : ex.name,
+          phone: isRealPhone ? c.phone : ex.phone || c.phone,
+          email: ex.email || c.email || "",
+          address:
+            ex.address && !/^edmonton(,\s*(ab|alberta))?$/i.test(String(ex.address).trim())
+              ? ex.address
+              : c.address || ex.address,
+          city: ex.city && ex.city !== "Edmonton" ? ex.city : c.city || ex.city,
+          postalCode: ex.postalCode && ex.postalCode !== "T5J 0A1" ? ex.postalCode : c.postalCode || ex.postalCode,
+          isJobberLinked: Boolean(ex.isJobberLinked || c.isJobberLinked),
+          jobberId:
+            (String(ex.jobberId || "").startsWith("Z2lkOi8v") ? ex.jobberId : undefined) ||
+            (String(c.jobberId || "").startsWith("Z2lkOi8v") ? c.jobberId : undefined) ||
+            ex.jobberId ||
+            c.jobberId,
+          tags: Array.from(new Set([...(ex.tags || []), ...(c.tags || [])])),
+          callHistory: [
+            ...(Array.isArray(ex.callHistory) ? ex.callHistory : []),
+            ...(Array.isArray(c.callHistory) ? c.callHistory : []),
+          ].filter((ch, idx, arr) => idx === arr.findIndex((item) => (item?.id || item?.callId) === (ch?.id || ch?.callId))),
+        };
+      }
+    }
+
+    if (mergedClientsList.length !== beforeClientsCount) {
       mutated = true;
     }
+    store.clients = mergedClientsList;
   }
 
   if (Array.isArray(store.quotes)) {
     const beforeQuotesCount = store.quotes.length;
+    const seenQuoteKeys = new Set<string>();
     store.quotes = store.quotes.filter((q: any) => {
       if (!q) return false;
       if (isFakeOrPurgedJobberQuote(q)) return false;
       const qNum = parseInt(String(q.quoteNumber || "").replace(/\D/g, ""), 10) || 0;
-      if (qNum === 4239 || qNum === 4418 || (qNum >= 4425 && qNum <= 4575) || qNum === 7537 || qNum === 7538) return false;
+      if (
+        qNum === 4239 ||
+        qNum === 4416 ||
+        qNum === 4417 ||
+        qNum === 4418 ||
+        (qNum >= 4425 && qNum <= 4575) ||
+        qNum === 7331 ||
+        qNum === 7332 ||
+        qNum === 7333 ||
+        qNum === 7334 ||
+        qNum === 7335 ||
+        qNum === 7336 ||
+        qNum === 7337 ||
+        qNum === 7340 ||
+        qNum === 7537 ||
+        qNum === 7538
+      ) {
+        return false;
+      }
       if (isFalseOrCatalogLeadRow(q.clientName)) return false;
       if (!isAddressInGreaterEdmonton(`${q.serviceAddress || ""} ${q.notes || ""}`, q.city, q.postalCode)) {
         return false;
       }
       const pDigits = normalizePhoneDigits(q.clientPhone);
+      if (pDigits && TIDYUPS_OWN_PHONE_DIGITS.has(pDigits)) return false;
       if (pDigits === "7803640177" || pDigits === "5875974229") return false;
       if (pDigits.length === 10 && pDigits.slice(3, 6) === "555") return false;
+
+      if (pDigits === "7809100335" || /^brenda\s+mc(?:lean|clain)$/i.test(String(q.clientName || "").trim())) {
+        q.clientName = "Brenda McLean";
+        q.jobberClientId = "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTcxNzAxMDY=";
+      }
+      if (pDigits === "7809450090" || /^riley(\s+frenchbeck)?$/i.test(String(q.clientName || "").trim())) {
+        q.clientName = "Riley Frenchbeck";
+        q.jobberClientId = "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTgwOTg0NDA=";
+        if (!q.serviceAddress || q.serviceAddress === "Edmonton, AB") {
+          q.serviceAddress = "917 Bird Place, Leduc, AB";
+        }
+      }
+
       // Remove unbooked/draft quotes created before October 2026
       const isBookedOrApproved =
         q.quoteStatus === "CONVERTED" ||
@@ -4501,6 +4689,12 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       if (!isBookedOrApproved && createdDate && createdDate < "2026-10-01") {
         return false;
       }
+
+      // Deduplicate quotes by quoteNumber and by (clientPhone/clientName + status) when unbooked
+      const qKey = String(q.quoteNumber || q.id || "").toUpperCase();
+      if (qKey && seenQuoteKeys.has(qKey)) return false;
+      if (qKey) seenQuoteKeys.add(qKey);
+
       return true;
     });
     if (store.quotes.length !== beforeQuotesCount) {
@@ -15841,6 +16035,14 @@ app.post("/api/quo/calls/toggle-block", (req, res) => {
   const formattedE164 = digits.length === 10 ? `+1${digits}` : digits ? `+${digits}` : rawPhone;
 
   if (block && !markAsGoodLead) {
+    // Safeguard: NEVER allow blocking TidyUps' own Quo lines, Twilio Shield forwarding lines, or (587) 386-0826
+    if (digits && TIDYUPS_OWN_PHONE_DIGITS.has(digits)) {
+      return res.status(400).json({
+        success: false,
+        error: `Protected TidyUps Forwarding/Business Line (${rawPhone}): Spam Shield automatically protects your own Quo & Twilio forwarding lines so only the external caller's real phone number is ever blocked.`,
+      });
+    }
+
     // Remove from unblockedNumbers if present
     (store.spamShieldConfig as any).unblockedNumbers = ((store.spamShieldConfig as any).unblockedNumbers || []).filter(
       (n: string) => normalizePhoneDigits(n) !== digits
@@ -15963,6 +16165,59 @@ app.post("/api/quo/calls/toggle-block", (req, res) => {
     spamShieldConfig: store.spamShieldConfig,
     blockedCallsHistory: store.blockedCallsHistory,
   });
+});
+
+// POST /api/clients/deduplicate: Merge & remove duplicate clients & draft quotes (Brenda, Riley, Tino, New Call [...]) in local store & Jobber
+app.post("/api/clients/deduplicate", async (req, res) => {
+  try {
+    const projectId = getProjectId(req);
+    const store = loadStore(projectId);
+    if (!store) return res.status(500).json({ error: "Store not loaded" });
+
+    const beforeClients = (store.clients || []).length;
+    const beforeQuotes = (store.quotes || []).length;
+    const beforeLeads = (store.adLeads || []).length;
+
+    // 1. Run local store deduplication & repair (merges Brenda Mcclain/McLean, Riley/Riley Frenchbeck, Tino, and strips own forwarding lines)
+    repairAndSyncStoreData(store);
+
+    // 2. Run live Jobber GraphQL deduplication if token is active
+    let jobberDedupeResult: { mergedClients: any[]; deletedDraftQuoteIds: string[] } = {
+      mergedClients: [],
+      deletedDraftQuoteIds: [],
+    };
+    if (jobberConfig.accessToken && !jobberConfig.accessToken.startsWith("jobber_oauth")) {
+      jobberDedupeResult = await deduplicateAndMergeJobberClients(jobberConfig.accessToken, getJobberCreds());
+    }
+
+    store.lastSavedAt = new Date().toISOString();
+    saveStore(store, projectId);
+    if (projectId !== "tidyups") {
+      saveStore(store, "tidyups");
+    }
+
+    const removedLocalClients = Math.max(0, beforeClients - (store.clients || []).length);
+    const removedLocalQuotes = Math.max(0, beforeQuotes - (store.quotes || []).length);
+    const removedLocalLeads = Math.max(0, beforeLeads - (store.adLeads || []).length);
+
+    res.json({
+      success: true,
+      clients: store.clients || [],
+      quotes: store.quotes || [],
+      leads: store.adLeads || [],
+      removedLocalClients,
+      removedLocalQuotes,
+      removedLocalLeads,
+      jobberMergedClients: jobberDedupeResult.mergedClients,
+      jobberDeletedDraftQuotesCount: jobberDedupeResult.deletedDraftQuoteIds.length,
+      message: `✓ Merged & deduplicated clients (Brenda McLean, Riley Frenchbeck, Tino, New Call duplicates)! Active Clients: ${(store.clients || []).length} • Active Quotes: ${(store.quotes || []).length} • Jobber Drafts Purged: ${jobberDedupeResult.deletedDraftQuoteIds.length}`,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err?.message || "Failed to deduplicate clients",
+    });
+  }
 });
 
 // POST manually link or re-assign a call transcript to a specific job
@@ -16941,6 +17196,14 @@ app.post("/api/twilio/block-number", (req, res) => {
 
   let appliedRuleLabel = String(number).trim();
 
+  const checkOwnDigits = normalizePhoneDigits(appliedRuleLabel);
+  if (type === "number" && checkOwnDigits && TIDYUPS_OWN_PHONE_DIGITS.has(checkOwnDigits)) {
+    return res.status(400).json({
+      success: false,
+      error: `Protected TidyUps Line: ${appliedRuleLabel} is one of your own Quo / Twilio forwarding lines and is automatically protected from being blocked.`,
+    });
+  }
+
   if (type === "areacode" || type === "prefix") {
     const rawDigits = String(number).replace(/\D/g, "");
     const normDigits = rawDigits.length >= 4 && rawDigits.startsWith("1") ? rawDigits.slice(1) : rawDigits;
@@ -16965,10 +17228,20 @@ app.post("/api/twilio/block-number", (req, res) => {
       store.spamShieldConfig.blockedCountryCodes.unshift(code);
     }
   } else {
-    if (!store.spamShieldConfig.blockedNumbers.includes(appliedRuleLabel)) {
-      store.spamShieldConfig.blockedNumbers.unshift(appliedRuleLabel);
+    const formattedE164 = checkOwnDigits.length === 10 ? `+1${checkOwnDigits}` : appliedRuleLabel;
+    if (
+      !store.spamShieldConfig.blockedNumbers.some(
+        (b: string) => (checkOwnDigits && normalizePhoneDigits(b) === checkOwnDigits) || b === appliedRuleLabel
+      )
+    ) {
+      store.spamShieldConfig.blockedNumbers.unshift(formattedE164);
     }
   }
+
+  // Always purge any accidental own TidyUps numbers from blockedNumbers
+  store.spamShieldConfig.blockedNumbers = (store.spamShieldConfig.blockedNumbers || []).filter(
+    (b: string) => !TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(b))
+  );
 
   // Update status in recentInboundCalls if matching
   if (Array.isArray(store.recentInboundCalls)) {
@@ -16979,9 +17252,9 @@ app.post("/api/twilio/block-number", (req, res) => {
       const normCall = cDigits.length === 11 && cDigits.startsWith("1") ? cDigits.slice(1) : cDigits;
       if (
         (type === "areacode" && call.areaCode && normTarget.startsWith(call.areaCode)) ||
-        (normCall && normTarget && (normCall === normTarget || normCall.startsWith(normTarget.slice(0, 3)) && type !== "number"))
+        (normCall && normTarget && (normCall === normTarget || (normCall.startsWith(normTarget.slice(0, 3)) && type !== "number")))
       ) {
-        return { ...call, status: "BLOCKED", reason: reason || `Blocked via Main Website (${appliedRuleLabel})` };
+        return { ...call, status: "BLOCKED", reason: reason || `Blocked external caller (${appliedRuleLabel})` };
       }
       return call;
     });
@@ -17000,15 +17273,19 @@ app.post("/api/twilio/block-number", (req, res) => {
   if (Array.isArray(store.quoCallLogs)) {
     store.quoCallLogs = store.quoCallLogs.map((c: any) => {
       const cDigits = normalizePhoneDigits(c.callerPhone);
+      if (cDigits && TIDYUPS_OWN_PHONE_DIGITS.has(cDigits)) return c;
+      const isDirectTarget = Boolean(targetDigits && cDigits === targetDigits);
       const ruleMatch = evaluateSpamCallRule(c.callerPhone, store.spamShieldConfig);
-      if ((targetDigits && cDigits === targetDigits) || ruleMatch.isBlocked) {
+      if (isDirectTarget || ruleMatch.isBlocked) {
         if (cDigits && !TIDYUPS_OWN_PHONE_DIGITS.has(cDigits)) {
           const e164 = cDigits.length === 10 ? `+1${cDigits}` : `+${cDigits}`;
           if (!store.spamShieldConfig.blockedNumbers.some((b: string) => normalizePhoneDigits(b) === cDigits)) {
             store.spamShieldConfig.blockedNumbers.unshift(e164);
           }
         }
-        const appliedReason = reason || ruleMatch.reason || `Manually blocked (${appliedRuleLabel})`;
+        const appliedReason = isDirectTarget
+          ? reason || ruleMatch.reason || `Manually blocked (${appliedRuleLabel})`
+          : c.blockedReason || ruleMatch.reason || `Blocked by Spam Shield (${c.callerPhone})`;
         return {
           ...c,
           status: "SOLICITOR_BLOCKED",
