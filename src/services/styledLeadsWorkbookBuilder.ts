@@ -195,7 +195,11 @@ export const TAB_THEME_PALETTES: Record<CleanSheetTabName, TabThemePalette> = {
  * - Facebook AI
  * - Quo
  */
-export function resolveCleanSheetTab(rawSourceOrTab?: string, leadObj?: any): CleanSheetTabName {
+export function resolveCleanSheetTab(rawSourceOrTab?: string | any, leadObj?: any): CleanSheetTabName {
+  if (rawSourceOrTab && typeof rawSourceOrTab === 'object') {
+    leadObj = rawSourceOrTab;
+    rawSourceOrTab = leadObj?.sourceTab || leadObj?.source || '';
+  }
   const exact = String(rawSourceOrTab || leadObj?.sourceTab || '').trim();
   if ((CLEAN_SHEET_TABS as string[]).includes(exact)) {
     return exact as CleanSheetTabName;
@@ -609,6 +613,13 @@ export function filterValidRecentLeads(rawLeads: any[]): AdLeadItem[] {
       sourceTab: normalizedTab,
     });
   }
+
+  result.sort((a: any, b: any) => {
+    const aDate = String(a?.dateReceived || a?.dateAdded || a?.createdAt || '');
+    const bDate = String(b?.dateReceived || b?.dateAdded || b?.createdAt || '');
+    if (aDate !== bDate) return bDate.localeCompare(aDate);
+    return 0;
+  });
 
   return result;
 }

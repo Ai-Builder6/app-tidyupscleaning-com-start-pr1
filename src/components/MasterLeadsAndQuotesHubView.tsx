@@ -709,7 +709,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
     };
 
     for (const l of uniqueLeads) {
-      const tab = resolveCleanSheetTab(l);
+      const tab = resolveCleanSheetTab(l.sourceTab, l);
       byTab[tab].push({ ...l, sourceTab: tab });
     }
 

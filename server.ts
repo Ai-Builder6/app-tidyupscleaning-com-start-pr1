@@ -4127,6 +4127,9 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
         seenLeadIds.add(l.id);
       }
       store.adLeads.sort((a: any, b: any) => {
+        const aDate = String(a?.dateReceived || a?.dateAdded || a?.createdAt || "");
+        const bDate = String(b?.dateReceived || b?.dateAdded || b?.createdAt || "");
+        if (aDate !== bDate) return bDate.localeCompare(aDate);
         const aLocalQuote = String(a?.quoteId || "").startsWith("quote_local_") ? 1 : 0;
         const bLocalQuote = String(b?.quoteId || "").startsWith("quote_local_") ? 1 : 0;
         if (aLocalQuote !== bLocalQuote) return bLocalQuote - aLocalQuote;
@@ -4452,7 +4455,6 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       if (
         cid.startsWith("cli-sheet-mvmwt") ||
         cid.startsWith("cli-sheet-mvo") ||
-        cid.startsWith("cli-quo-") ||
         cid === "cli-fb-28926607507026653" ||
         jid === "Z2lkOi8vSm9iYmVyL0NsaWVudC8xNTczNzQ4MjI=" ||
         cNameLower.includes("sheralee") ||
@@ -4636,6 +4638,122 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
         },
       };
       mutated = true;
+    }
+  }
+
+  // 9. Retroactively enrich any stored Quo call logs, Clean Sheet leads, and Unscheduled Job tickets
+  // so transcripts/Sona AI Q&A details (e.g. Riley Frenchbeck at 917 Bird Place, Leduc, AB; Amandeep Kaur at 1827 18 Street NW, Edmonton, AB T6T 2M9)
+  // are always extracted and synced across quoCallLogs, adLeads, unscheduledJobs, and recentInboundCalls.
+  if (Array.isArray(store.quoCallLogs) && store.quoCallLogs.length > 0) {
+    // Iterate oldest to newest so the most recent call from a repeat caller (e.g. Amandeep Kaur's 2nd call with Deep Cleaning) wins
+    for (const qLog of [...store.quoCallLogs].reverse()) {
+      if (!qLog || (!qLog.transcriptText && !qLog.summary)) continue;
+      const callerDigits = normalizePhoneDigits(qLog.callerPhone);
+      if (!callerDigits || TIDYUPS_OWN_PHONE_DIGITS.has(callerDigits)) continue;
+
+      const analysis = analyzeCallTranscriptForLead({
+        summaryText: qLog.summary || "",
+        transcriptText: qLog.transcriptText || "",
+        callerPhone: qLog.callerPhone || "",
+        callerNameFromPayload: qLog.callerName || "",
+        lineName: qLog.lineName || "Primary Dispatch",
+        answeredBy: qLog.answeredBy,
+        duration: qLog.duration,
+      });
+
+      if (
+        analysis.extractedName &&
+        (!qLog.callerName ||
+          qLog.callerName.startsWith("(") ||
+          qLog.callerName.startsWith("+") ||
+          qLog.callerName === "First name" ||
+          String(qLog.callerName).toLowerCase().includes("undefined") ||
+          String(qLog.callerName).toLowerCase().includes("deepcor") ||
+          analysis.extractedName.split(/\s+/).length >= String(qLog.callerName).split(/\s+/).length)
+      ) {
+        if (qLog.callerName !== analysis.extractedName) {
+          qLog.callerName = analysis.extractedName;
+          mutated = true;
+        }
+      }
+      if (analysis.address && analysis.address !== "Edmonton, AB" && qLog.extractedAddress !== analysis.address) {
+        qLog.extractedAddress = analysis.address;
+        qLog.extractedCity = analysis.city;
+        qLog.extractedPostalCode = analysis.postalCode;
+        mutated = true;
+      }
+      if (analysis.bedrooms && qLog.extractedBedrooms !== analysis.bedrooms) {
+        qLog.extractedBedrooms = analysis.bedrooms;
+        mutated = true;
+      }
+      if (analysis.bathrooms && qLog.extractedBathrooms !== analysis.bathrooms) {
+        qLog.extractedBathrooms = analysis.bathrooms;
+        mutated = true;
+      }
+      if (analysis.serviceRequested && qLog.extractedService !== analysis.serviceRequested) {
+        qLog.extractedService = analysis.serviceRequested;
+        qLog.estimatedQuote = analysis.quotedAmount;
+        mutated = true;
+      }
+      if (analysis.enrichedSummary && qLog.summary !== analysis.enrichedSummary) {
+        qLog.summary = analysis.enrichedSummary;
+        mutated = true;
+      }
+      if (!qLog.isBlocked && analysis.isPotentialOrGoodLead) {
+        upsertCallLeadIntoCleanSheet(store, qLog, analysis);
+      }
+      if (Array.isArray(store.unscheduledJobs) && analysis.hasCleaningIntent) {
+        const unsched = store.unscheduledJobs.find((u: any) => normalizePhoneDigits(u.clientPhone) === callerDigits);
+        if (unsched) {
+          if (
+            qLog.callerName &&
+            !qLog.callerName.startsWith("(") &&
+            !qLog.callerName.startsWith("+") &&
+            (unsched.clientName?.startsWith("(") ||
+              unsched.clientName?.startsWith("+") ||
+              String(unsched.clientName || "").toLowerCase().includes("undefined") ||
+              String(unsched.clientName || "").toLowerCase().includes("deepcor") ||
+              qLog.callerName.split(/\s+/).length > String(unsched.clientName || "").split(/\s+/).length)
+          ) {
+            unsched.clientName = qLog.callerName;
+            unsched.title = `Inbound Call: ${qLog.callerName}`;
+            mutated = true;
+          }
+          if (
+            analysis.address &&
+            analysis.address !== "Edmonton, AB" &&
+            (!unsched.serviceAddress ||
+              unsched.serviceAddress === "Edmonton, AB" ||
+              unsched.serviceAddress === "Edmonton, Alberta" ||
+              analysis.address.length > String(unsched.serviceAddress).length)
+          ) {
+            unsched.serviceAddress = analysis.address;
+            mutated = true;
+          }
+          if (qLog.transcriptText && !String(unsched.notes || "").includes(qLog.transcriptText.slice(0, 30))) {
+            unsched.notes = `[Inbound Phone Lead on ${qLog.lineName}]: ${qLog.summary}\nFull Transcript: ${qLog.transcriptText}`;
+            mutated = true;
+          }
+        }
+      }
+    }
+    if (Array.isArray(store.adLeads)) {
+      const outboundOnlyIds = new Set(
+        store.quoCallLogs
+          .filter((c: any) => c?.direction === "outbound")
+          .map((c: any) => String(c.callId || c.id || ""))
+      );
+      store.adLeads = store.adLeads.filter((l: any) => {
+        if (!l) return false;
+        if (String(l.id || "").startsWith("lead-quo-") && outboundOnlyIds.has(String(l.callId || ""))) {
+          return false;
+        }
+        if (String(l.customerName || "").startsWith("Unknown (")) {
+          l.customerName = `Potential Job Caller ${l.phone}`;
+        }
+        return true;
+      });
+      store.adLeads.sort((a: any, b: any) => String(b.dateReceived || "").localeCompare(String(a.dateReceived || "")));
     }
   }
 
@@ -13658,7 +13776,8 @@ function analyzeCallTranscriptForLead(params: {
   hasVoicemail?: boolean;
   duration?: number;
 }) {
-  const fullCombined = `${params.summaryText || ""} ${params.transcriptText || ""}`.trim();
+  const rawTranscript = String(params.transcriptText || "").trim();
+  const fullCombined = `${params.summaryText || ""} ${rawTranscript}`.trim();
   const fullLower = fullCombined.toLowerCase();
 
   const answeredByAi =
@@ -13669,8 +13788,9 @@ function analyzeCallTranscriptForLead(params: {
     fullLower.includes("tidy up cleaning assistant") ||
     fullLower.includes("administrative assistant");
 
-  // Strip Sonia AI's own greeting lines and Tidyups' own lines so we evaluate what the CALLER said
-  const callerOnlyTranscript = (params.transcriptText || "")
+  // Strip Sonia AI's own greeting lines and Tidyups' own lines so we evaluate what the CALLER said,
+  // while still keeping full rawTranscript for Sona AI Q&A turn-pair & confirmation extraction.
+  const callerOnlyTranscript = rawTranscript
     .split("\n")
     .filter((line) => {
       const l = line.toLowerCase();
@@ -13692,13 +13812,23 @@ function analyzeCallTranscriptForLead(params: {
     })
     .join("\n");
 
-  const cleanSummary =
+  const cleanSummaryRaw =
     params.summaryText === "Inbound voice call completed" ||
     params.summaryText.includes("This call had no actionable details")
       ? ""
-      : params.summaryText;
+      : params.summaryText
+          .replace(/^(?:📍|👤|🛏️|🧹|📅|✨)[^\n]*\n\n/, "")
+          .replace(/^(?:📍|👤|🛏️|🧹|📅|✨)[^—]*—\s*/, "")
+          .replace(/^(?:📍|👤|🛏️|🧹|📅|✨).*$/, "")
+          .trim();
 
-  const combined = `${cleanSummary} ${callerOnlyTranscript}`.trim();
+  // Exclude Sona AI's own prompt lines from callerOnlyTranscript so Sona's question ("Basic, deep, move in, or move out?") doesn't trigger false move-out matches
+  const callerSpeechOnly = callerOnlyTranscript
+    .split("\n")
+    .filter((line) => !/basic,\s*deep,?\s*move in,\s*or move out/i.test(line))
+    .join("\n");
+
+  const combined = `${cleanSummaryRaw} ${callerSpeechOnly}`.trim();
   const lower = combined.toLowerCase();
 
   const IGNORED_NAMES = new Set([
@@ -13711,6 +13841,7 @@ function analyzeCallTranscriptForLead(params: {
     "tidy",
     "tadeus",
     "caller",
+    "unknown",
     "the",
     "just",
     "looking",
@@ -13727,63 +13858,192 @@ function analyzeCallTranscriptForLead(params: {
     "administrative",
     "someone",
     "somebody",
+    "first",
+    "first name",
+    "last",
+    "last name",
+    "name",
+    "my",
+    "my mom",
+    "my dad",
+    "my wife",
+    "my husband",
+    "my sister",
+    "my brother",
+    "who",
+    "what",
+    "where",
+    "when",
+    "yes",
+    "yeah",
+    "no",
+    "okay",
+    "hello",
+    "hi",
+    "hey",
+    "inbound",
+    "cleaning",
+    "potential",
+    "local",
+    "edmonton",
+    "alberta",
+    "leduc",
+    "laduke",
+    "undefined",
+    "null",
+    "as",
+    "is",
   ]);
 
-  // Extract caller name from AI summary, Sona AI Q&A confirmation, or caller dialogue
-  let extractedName = (params.callerNameFromPayload || "").trim();
-  if (!extractedName || extractedName.startsWith("+") || extractedName.startsWith("(") || IGNORED_NAMES.has(extractedName.toLowerCase())) {
-    extractedName = "";
-    // 1. Sona AI Q&A: "May I have your first and last name?\n+1...: Aniket Deb." or "I have your name as Anaket Dev."
-    const sonaPromptMatch = (params.transcriptText || "").match(
-      /first and last name\?\s*\n[^\n:]*:\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/i
-    );
-    const sonaConfirmMatch = (params.transcriptText || "").match(
-      /I have your name as\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/i
-    );
-    const explicitCallerCommaMatch = cleanSummary.match(/The caller,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),/);
-    if (explicitCallerCommaMatch && !IGNORED_NAMES.has(explicitCallerCommaMatch[1].toLowerCase())) {
-      extractedName = explicitCallerCommaMatch[1].trim();
-    } else if (sonaPromptMatch && !IGNORED_NAMES.has(sonaPromptMatch[1].toLowerCase())) {
-      extractedName = sonaPromptMatch[1].trim();
-    } else if (sonaConfirmMatch && !IGNORED_NAMES.has(sonaConfirmMatch[1].toLowerCase())) {
-      extractedName = sonaConfirmMatch[1].trim();
-    }
+  const isValidExtractedPersonName = (candidateRaw?: string): string => {
+    if (!candidateRaw) return "";
+    const cleaned = candidateRaw
+      .replace(/\s*\((?:Sonia AI\s*\/?\s*Voicemail|Phone Lead|Voicemail)\)\s*$/i, "")
+      .replace(/^(?:First\s+name\s*[,:]?\s*|Last\s+name\s*[,:]?\s*|My\s+name\s+is\s+|This\s+is\s+|It's\s+|I\s+am\s+|I'm\s+)/i, "")
+      .replace(/\bAmon\s+Deepcor\b/gi, "Amandeep Kaur")
+      .replace(/[^a-zA-Z\s'-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned || cleaned.length < 2 || cleaned.length > 36) return "";
+    const lowerCand = cleaned.toLowerCase();
+    if (IGNORED_NAMES.has(lowerCand)) return "";
+    const words = cleaned.split(/\s+/);
+    if (words.length > 3) return "";
+    if (words.some((w) => IGNORED_NAMES.has(w.toLowerCase()) || w.length < 2)) return "";
+    return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  };
 
-    // 2. Summary "Caller <Name>" or "<Name> from ..." or "<Name> called/inquired/requested..."
-    if (!extractedName) {
-      const summaryCallerMatch =
-        cleanSummary.match(/Caller\s+([A-Z][a-zA-Z0-9_-]{2,22})\b/) ||
-        cleanSummary.match(/^([A-Z][a-z]+\s+[A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed)/i) ||
-        cleanSummary.match(/^([A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed)/i) ||
-        cleanSummary.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:is looking|called|inquired|requested|wants|needs|asked)\b/) ||
-        cleanSummary.match(/contacted\s+([A-Z][a-z]+)\s+regarding\s+a\s+cleaning/i);
-      if (summaryCallerMatch) {
-        const candidate = summaryCallerMatch[1].trim();
-        const firstWord = candidate.split(/\s+/)[0].toLowerCase();
-        if (!IGNORED_NAMES.has(candidate.toLowerCase()) && !IGNORED_NAMES.has(firstWord)) {
-          const org = summaryCallerMatch[2]?.trim();
-          extractedName =
-            org && !org.startsWith("+") && !org.toLowerCase().includes("tidyups")
-              ? `${candidate} (${org})`
-              : candidate;
+  // Parse dialogue turns from rawTranscript for structured Sona AI Q&A extraction
+  const transcriptLines = rawTranscript
+    .split("\n")
+    .map((line) => {
+      const m = line.match(/^([^:]+):\s*(.*)$/);
+      if (!m) return null;
+      const speaker = m[1].trim();
+      const text = m[2].trim();
+      const speakerDigits = speaker.replace(/\D/g, "");
+      const isOwnOrAi =
+        Array.from(TIDYUPS_OWN_PHONE_DIGITS).some((d) => speakerDigits.includes(d)) ||
+        /sonia|sona|assistant|tidy/i.test(speaker);
+      return { speaker, text, isOwnOrAi };
+    })
+    .filter(Boolean) as Array<{ speaker: string; text: string; isOwnOrAi: boolean }>;
+
+  // Collect all valid name candidates and always prefer the fullest name (e.g. "Riley Frenchbeck" over "Riley", "Jia Islam" over "Jia")
+  const nameCandidates: string[] = [];
+  const pushNameCandidate = (cand?: string) => {
+    const valid = isValidExtractedPersonName(cand);
+    if (valid) nameCandidates.push(valid);
+  };
+
+  // 1. Spelled-out or explicit First + Last name: "First name, Jia, j I a.\n+1780...: Last name, Islam, I s l a m."
+  const firstOnlyExplicit = rawTranscript.match(/First\s+name\s*,\s*([A-Za-z]{2,18})\b/i);
+  const lastOnlyExplicit =
+    rawTranscript.match(/Last\s+name\s*,\s*([A-Za-z]{2,18})\b/i) ||
+    rawTranscript.match(/last\s+name\s+as\s+([A-Za-z]{2,18})\b/i);
+  if (firstOnlyExplicit && lastOnlyExplicit) {
+    pushNameCandidate(`${firstOnlyExplicit[1]} ${lastOnlyExplicit[1]}`);
+  } else if (firstOnlyExplicit) {
+    pushNameCandidate(firstOnlyExplicit[1]);
+  }
+
+  // 2. Sona AI Q&A turn-pair: "What is your first and last name?" / "May I have your first and last name?" + optional "What's your last name?"
+  let firstFromQa = "";
+  let lastFromQa = "";
+  for (let i = 0; i < transcriptLines.length; i++) {
+    const t = transcriptLines[i];
+    if (t.isOwnOrAi && /(?:first and last name|your full name|may i have your name|what is your name)/i.test(t.text)) {
+      const callerReplies = transcriptLines.slice(i + 1, i + 4).filter((nl) => !nl.isOwnOrAi);
+      const nextCaller = callerReplies[0];
+      if (nextCaller) {
+        const flMatch = nextCaller.text.match(
+          /First\s+name[,:\s]+([A-Za-z]{2,18})(?:[^.\n]*?\.\s*Last\s+name[,:\s]+([A-Za-z]{2,18}))?/i
+        );
+        if (flMatch) {
+          firstFromQa = isValidExtractedPersonName(flMatch[1]);
+          if (flMatch[2]) lastFromQa = isValidExtractedPersonName(flMatch[2]);
+        } else {
+          const cleanedAns = nextCaller.text
+            .replace(/^(?:It's|It is|My name is|I am|I'm|Yes,?|Yeah,?)\s+/i, "")
+            .split(/[.,!?]/)[0]
+            .trim();
+          const valid = isValidExtractedPersonName(cleanedAns);
+          if (valid) firstFromQa = valid;
+          // If caller said First name on line 1 ("Riley.") and Last name on immediately following line 2 ("Frenchbeck." or "Last name, Islam")
+          if (valid && valid.split(/\s+/).length === 1 && callerReplies[1]) {
+            const secondLineRaw = callerReplies[1].text.replace(/^Last\s+name[,:\s]+/i, "").split(/[.,!?]/)[0].trim();
+            const secondLineCand = isValidExtractedPersonName(secondLineRaw);
+            if (secondLineCand && secondLineCand.split(/\s+/).length === 1 && secondLineCand.toLowerCase() !== valid.toLowerCase()) {
+              lastFromQa = secondLineCand;
+            }
+          }
         }
       }
     }
-
-    // 3. Direct caller speech "This is <Name>" or "My name is <Name>"
-    if (!extractedName) {
-      const trMatch = callerOnlyTranscript.match(/(?:my name is|this is)\s+([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,18})?)\b/i);
-      if (trMatch) {
-        const cand = trMatch[1].trim();
-        const fw = cand.split(/\s+/)[0].toLowerCase();
-        if (!IGNORED_NAMES.has(cand.toLowerCase()) && !IGNORED_NAMES.has(fw)) {
-          extractedName = cand;
-        }
+    if (t.isOwnOrAi && /(?:what(?:'s| is) your last name|and your last name)/i.test(t.text)) {
+      const nextCaller = transcriptLines.slice(i + 1, i + 4).find((nl) => !nl.isOwnOrAi);
+      if (nextCaller) {
+        const cleanedLast = nextCaller.text
+          .replace(/^(?:Last name is|It's|It is)\s+/i, "")
+          .split(/[.,!?]/)[0]
+          .trim();
+        const validLast = isValidExtractedPersonName(cleanedLast);
+        if (validLast) lastFromQa = validLast;
       }
     }
   }
+  if (firstFromQa && lastFromQa && !firstFromQa.toLowerCase().includes(lastFromQa.toLowerCase())) {
+    pushNameCandidate(`${firstFromQa} ${lastFromQa}`);
+  } else if (firstFromQa) {
+    pushNameCandidate(firstFromQa);
+  }
 
-  // Detect explicit B2B sales / telemarketers / Google Ads account reps / wrong numbers
+  // 3. Sona AI explicit confirmation: "Thank you, Riley Frenchbeck." / "I have your name as Anaket Dev." / "Thanks, Amandeep."
+  const sonaConfirmPatterns = [
+    /(?:Thank you|Thanks|Got it|Okay),\s+([A-Z][a-zA-Z]{2,18}(?:\s+[A-Z][a-zA-Z]{2,18})?)\./gi,
+    /I have your name as\s+([A-Z][a-zA-Z]{2,18}(?:\s+[A-Z][a-zA-Z]{2,18})?)/gi,
+  ];
+  for (const pat of sonaConfirmPatterns) {
+    for (const m of rawTranscript.matchAll(pat)) {
+      pushNameCandidate(m[1]);
+    }
+  }
+
+  // 4. Summary patterns: "The caller, <Name>," or "Caller <Name>" or "<Name> called/inquired/requested..."
+  const explicitCallerCommaMatch = cleanSummaryRaw.match(/The caller,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),/);
+  if (explicitCallerCommaMatch) {
+    pushNameCandidate(explicitCallerCommaMatch[1]);
+  }
+  const summaryCallerMatch =
+    cleanSummaryRaw.match(/Caller\s+([A-Z][a-zA-Z0-9_-]{2,22})\b/) ||
+    cleanSummaryRaw.match(/^([A-Z][a-z]+\s+[A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed)/i) ||
+    cleanSummaryRaw.match(/^([A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed)/i) ||
+    cleanSummaryRaw.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:is looking|called|inquired|requested|wants|needs|asked)\b/) ||
+    cleanSummaryRaw.match(/contacted\s+([A-Z][a-z]+)\s+regarding\s+a\s+cleaning/i);
+  if (summaryCallerMatch) {
+    pushNameCandidate(summaryCallerMatch[1]);
+  }
+
+  // 5. Direct caller speech "This is <Name>" or "My name is <Name>"
+  const trMatch = callerSpeechOnly.match(/(?:my name is|this is)\s+([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,18})?)\b/i);
+  if (trMatch) {
+    pushNameCandidate(trMatch[1]);
+  }
+
+  // 6. Payload caller name as fallback
+  pushNameCandidate(params.callerNameFromPayload);
+
+  // Pick the fullest candidate (preferring 2-word First+Last name over 1-word First name)
+  let extractedName = "";
+  for (const cand of nameCandidates) {
+    if (!extractedName) {
+      extractedName = cand;
+    } else if (cand.split(/\s+/).length > extractedName.split(/\s+/).length) {
+      extractedName = cand;
+    }
+  }
+
+  // Detect explicit B2B sales / telemarketers / Google Ads account reps / automated reminders / wrong numbers
   const isSalesOrNonCleaning =
     lower.includes("yelp's gonna give you") ||
     lower.includes("over at yelp") ||
@@ -13822,7 +14082,16 @@ function analyzeCallTranscriptForLead(params: {
     lower.includes("is this ray") ||
     lower.includes("wrong number") ||
     lower.includes("book conversation") ||
-    lower.includes("doing overtime and was waiting");
+    lower.includes("doing overtime and was waiting") ||
+    lower.includes("jbbr.io") ||
+    lower.includes("birdeye.com") ||
+    lower.includes("birdeye.cx") ||
+    lower.includes("confirmation code") ||
+    lower.includes("verification code") ||
+    lower.includes("upcoming appointment") ||
+    lower.includes("in florida") ||
+    lower.includes("another cleaning company") ||
+    lower.includes("have a proposal");
 
   // Detect positive cleaning / quote / booking / property service intent
   const hasCleaningIntent =
@@ -13841,6 +14110,7 @@ function analyzeCallTranscriptForLead(params: {
       lower.includes("cleaning at") ||
       lower.includes("cleaning situation") ||
       lower.includes("cleaning quote") ||
+      lower.includes("cleaning a house") ||
       lower.includes("home cleaning") ||
       lower.includes("housekeeping") ||
       lower.includes("house cleaned") ||
@@ -13872,6 +14142,7 @@ function analyzeCallTranscriptForLead(params: {
       lower.includes("sent me a quote") ||
       lower.includes("send a quote") ||
       lower.includes("provide a quote") ||
+      lower.includes("prepare a quote") ||
       lower.includes("approving a quote") ||
       lower.includes("receiving a quote") ||
       lower.includes("promo code") ||
@@ -13881,6 +14152,7 @@ function analyzeCallTranscriptForLead(params: {
       lower.includes("clean my") ||
       lower.includes("want a cleaning") ||
       lower.includes("need a cleaning") ||
+      lower.includes("service address") ||
       lower.includes("1907 49th street"));
 
   // Check if caller is from a local Alberta area code (780, 587, 825, 403, 368)
@@ -13888,90 +14160,305 @@ function analyzeCallTranscriptForLead(params: {
   const callerAreaCode = callerDigits.slice(0, 3);
   const isAlbertaCaller = ["780", "587", "825", "403", "368"].includes(callerAreaCode);
 
-  // Extract bedrooms & bathrooms
+  // Extract bedrooms & bathrooms (including Sona AI separate Q&A turns and multi-mention corrections)
   let bedrooms = "3 Bedrooms";
   let bathrooms = "2 Bathrooms";
+  let foundExplicitBed = false;
+  let foundExplicitBath = false;
 
-  const sonaBedBathMatch = (params.transcriptText || "").match(
+  const parseSpokenCount = (rawText: string): string | null => {
+    const t = rawText.toLowerCase();
+    if (/\b(?:two and a half|2\.5|two point five)\b/.test(t)) return "2.5";
+    if (/\b(?:one and a half|1\.5|one point five)\b/.test(t)) return "1.5";
+    if (/\b(?:three and a half|3\.5|three point five)\b/.test(t)) return "3.5";
+    if (/\b(?:five|5)\b/.test(t)) return "5";
+    if (/\b(?:four|4)\b/.test(t)) return "4";
+    if (/\b(?:three|3)\b/.test(t)) return "3";
+    if (/\b(?:two|2)\b/.test(t)) return "2";
+    if (/\b(?:one|1)\b/.test(t)) return "1";
+    return null;
+  };
+
+  for (let i = 0; i < transcriptLines.length; i++) {
+    const t = transcriptLines[i];
+    if (t.isOwnOrAi && /how many bedrooms/i.test(t.text)) {
+      const nextCaller = transcriptLines.slice(i + 1, i + 4).find((nl) => !nl.isOwnOrAi);
+      if (nextCaller) {
+        const c = parseSpokenCount(nextCaller.text);
+        if (c) {
+          const intVal = Math.round(parseFloat(c));
+          bedrooms = intVal === 1 ? "1 Bedroom" : intVal >= 5 ? "5 Bedrooms" : `${intVal} Bedrooms`;
+          foundExplicitBed = true;
+        }
+      }
+    }
+    if (t.isOwnOrAi && /how many (?:bathrooms|washrooms)/i.test(t.text)) {
+      const nextCaller = transcriptLines.slice(i + 1, i + 4).find((nl) => !nl.isOwnOrAi);
+      if (nextCaller) {
+        const combinedAns = transcriptLines
+          .slice(i + 1, i + 3)
+          .filter((nl) => !nl.isOwnOrAi)
+          .map((nl) => nl.text)
+          .join(" ");
+        const c = parseSpokenCount(combinedAns) || parseSpokenCount(nextCaller.text);
+        if (c) {
+          bathrooms = c === "1" ? "1 Bathroom" : `${c} Bathrooms`;
+          foundExplicitBath = true;
+        }
+      }
+    }
+  }
+
+  const sonaBedBathMatch = rawTranscript.match(
     /How many bathrooms are there\?\s*\n[^\n:]*:\s*(One|Two|Three|Four|Five|1|2|3|4|5)\.\s*\n[^\n:]*:\s*(One|Two|Three|Four|1|2|3|4)/i
   );
   const wordToNum: Record<string, string> = { one: "1", two: "2", three: "3", four: "4", five: "5" };
-
-  if (sonaBedBathMatch) {
+  if (sonaBedBathMatch && (!foundExplicitBed || !foundExplicitBath)) {
     const b1 = wordToNum[sonaBedBathMatch[1].toLowerCase()] || sonaBedBathMatch[1];
     const b2 = wordToNum[sonaBedBathMatch[2].toLowerCase()] || sonaBedBathMatch[2];
-    bedrooms = b1 === "1" ? "1 Bedroom" : `${b1} Bedrooms`;
-    bathrooms = b2 === "1" ? "1 Bathroom" : `${b2} Bathrooms`;
-  } else {
-    if (/\b(one|1)[\s-]*bed/i.test(combined)) bedrooms = "1 Bedroom";
-    else if (/\b(two|2)[\s-]*bed/i.test(combined)) bedrooms = "2 Bedrooms";
-    else if (/\b(three|3)[\s-]*bed/i.test(combined)) bedrooms = "3 Bedrooms";
-    else if (/\b(four|4)[\s-]*bed/i.test(combined)) bedrooms = "4 Bedrooms";
-    else if (/\b(five|5)[\s-]*bed/i.test(combined)) bedrooms = "5+ Bedrooms";
-
-    if (/\b(one|1)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "1 Bathroom";
-    else if (/\b(1\.5|one and a half)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "1.5 Bathrooms";
-    else if (/\b(two|2)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "2 Bathrooms";
-    else if (/\b(2\.5|two[\s-]*and[\s-]*a[\s-]*half)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "2.5 Bathrooms";
-    else if (/\b(three|3)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "3+ Bathrooms";
-    else if (bedrooms === "1 Bedroom") bathrooms = "1 Bathroom";
+    if (!foundExplicitBed) {
+      bedrooms = b1 === "1" ? "1 Bedroom" : `${b1} Bedrooms`;
+      foundExplicitBed = true;
+    }
+    if (!foundExplicitBath) {
+      bathrooms = b2 === "1" ? "1 Bathroom" : `${b2} Bathrooms`;
+      foundExplicitBath = true;
+    }
   }
 
-  // Extract street address if mentioned
-  let address = "Edmonton, AB";
-  const unitBuildingMatch = (params.transcriptText || "").match(
+  if (!foundExplicitBed) {
+    const allBedMentions = Array.from(combined.matchAll(/\b(one|two|three|four|five|1|2|3|4|5)[\s-]*bed/gi));
+    if (allBedMentions.length > 0) {
+      const lastToken = allBedMentions[allBedMentions.length - 1][1].toLowerCase();
+      const num = wordToNum[lastToken] || lastToken;
+      bedrooms = num === "1" ? "1 Bedroom" : `${num} Bedrooms`;
+    }
+  }
+
+  if (!foundExplicitBath) {
+    if (/\b(2\.5|two[\s-]*and[\s-]*a[\s-]*half)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "2.5 Bathrooms";
+    else if (/\b(1\.5|one[\s-]*and[\s-]*a[\s-]*half)[\s-]*(bath|washroom)/i.test(combined)) bathrooms = "1.5 Bathrooms";
+    else {
+      const allBathMentions = Array.from(combined.matchAll(/\b(one|two|three|four|five|1|2|3|4|5)[\s-]*(?:bath|washroom)/gi));
+      if (allBathMentions.length > 0) {
+        const lastToken = allBathMentions[allBathMentions.length - 1][1].toLowerCase();
+        const num = wordToNum[lastToken] || lastToken;
+        bathrooms = num === "1" ? "1 Bathroom" : `${num} Bathrooms`;
+      } else if (bedrooms === "1 Bedroom") {
+        bathrooms = "1 Bathroom";
+      }
+    }
+  }
+
+  // Detect Greater Edmonton municipality / city & Canadian postal code
+  let city = "Edmonton";
+  if (/\b(?:leduc|laduke)\b/i.test(fullCombined)) city = "Leduc";
+  else if (/\bst\.?\s*albert\b/i.test(fullCombined)) city = "St. Albert";
+  else if (/\bsherwood\s+park\b/i.test(fullCombined)) city = "Sherwood Park";
+  else if (/\bspruce\s+grove\b/i.test(fullCombined)) city = "Spruce Grove";
+  else if (/\bstony\s+plain\b/i.test(fullCombined)) city = "Stony Plain";
+  else if (/\bbeaumont\b/i.test(fullCombined)) city = "Beaumont";
+  else if (/\bfort\s+saskatchewan\b/i.test(fullCombined)) city = "Fort Saskatchewan";
+  else if (/\bdevon\b/i.test(fullCombined)) city = "Devon";
+
+  let postalCode = "";
+  const postalMatch = fullCombined.match(/\b([Tt]\d[A-Za-z])\s*[- ]?\s*(\d[A-Za-z]\d)\b/);
+  if (postalMatch) {
+    postalCode = `${postalMatch[1].toUpperCase()} ${postalMatch[2].toUpperCase()}`;
+  }
+
+  const normalizeSpokenEdmontonStreet = (rawAddr: string): string => {
+    let s = rawAddr
+      .replace(/^(?:It's|It is|The address is|I have the address as|I have|Address is|My address is|At)\s+/i, "")
+      .replace(/\bLaduke\b/gi, "Leduc")
+      .replace(/\bState\s+(Northwest|Southwest|Northeast|Southeast|NW|SW|NE|SE)\b/gi, "Street $1")
+      .replace(/\bEdinsted\b/gi, "18 Street")
+      .replace(/\bNorthwest\b/gi, "NW")
+      .replace(/\bSouthwest\b/gi, "SW")
+      .replace(/\bNortheast\b/gi, "NE")
+      .replace(/\bSoutheast\b/gi, "SE")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    s = s.replace(/\b(\d{4})(\d{2})\s+(Street|St|Avenue|Ave)\b/gi, "$1 $2 $3");
+    s = s.replace(/\b(\d{2})\s+(\d{2})\s+(\d{2,3}(?:st|nd|rd|th)?)\s+(Street|St|Avenue|Ave)\b/gi, "$1$2 $3 $4");
+    s = s.replace(/\b89\s*2100(?:th)?\s+(Street|St)\b/gi, "8921 100 $1");
+    return s.replace(/[.,;]+$/, "").trim();
+  };
+
+  // Extract street address from Sona AI Q&A, Sona confirmation, AI summary, or transcript
+  let streetPart = "";
+
+  // 1. Sona AI explicit address confirmation: "I have the address as 917 Bird Place." / "I have 29 51 41st Street Southwest, Alberta."
+  const sonaAddrConfirmMatch =
+    rawTranscript.match(/I have the address as\s+([^.\n]+)/i) ||
+    rawTranscript.match(/I have\s+(\d[\d\s]{1,10}[A-Za-z0-9.\s]{2,35}(?:Place|Pl|Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Way|Boulevard|Blvd|Crescent|Cres|Court|Ct|Close|Lane|Trail)[^.\n]*)/i);
+  if (sonaAddrConfirmMatch && sonaAddrConfirmMatch[1]) {
+    streetPart = normalizeSpokenEdmontonStreet(sonaAddrConfirmMatch[1]);
+  }
+
+  // 2. Sona AI Q&A turn-pair: "What is the full service address?" / "What's the service address for the cleaning?" / "What is the cleaning location address?"
+  if (!streetPart) {
+    for (let i = 0; i < transcriptLines.length; i++) {
+      const t = transcriptLines[i];
+      if (
+        t.isOwnOrAi &&
+        /(?:service address|cleaning location address|what is the address|what's the address|address of the property|address for the cleaning)/i.test(t.text)
+      ) {
+        const nextCaller = transcriptLines.slice(i + 1, i + 4).find((nl) => !nl.isOwnOrAi);
+        if (nextCaller && /\d/.test(nextCaller.text)) {
+          const normalizedCand = normalizeSpokenEdmontonStreet(nextCaller.text);
+          if (normalizedCand.length >= 5) {
+            streetPart = normalizedCand;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Specific apartment/unit patterns (e.g. "892100 Street, Apartment 1606" or "112, Unit Number 10524 is the building number, 78th Ave")
+  const unitBuildingMatch = rawTranscript.match(
     /(\d{1,4}),\s*Unit Number\s*(\d{3,5})\s*is the building number,\s*([0-9A-Za-z\s]+?(?:Ave|Avenue|St|Street|Rd|Road|Way|Dr|Drive))\b/i
   );
-  const addrMatch =
-    cleanSummary.match(/located at\s+([^.,\n]+)/i) ||
-    cleanSummary.match(/address provided[^is]*is\s+([^.,\n]+)/i) ||
-    cleanSummary.match(/cleaning at\s+(\d{3,5}\s+[A-Za-z0-9.\s]{2,25}(?:Ave|Avenue|St|Street|Rd|Road|Way|Dr|Drive|Blvd|Crescent|Place|Court)(?:\s*(?:NW|NE|SW|SE|Northwest|Southwest|Northeast|Southeast))?)/i) ||
-    combined.match(/\b(\d{3,5}\s+[A-Za-z0-9.\s]{2,25}(?:Ave|Avenue|St|Street|Rd|Road|Way|Dr|Drive|Blvd|Crescent|Place|Court)(?:\s*(?:NW|NE|SW|SE|Northwest|Southwest|Northeast|Southeast))?)\b/i);
-
+  const aptAfterStreetMatch = rawTranscript.match(
+    /(\d{4,6}\s*(?:Street|St|Avenue|Ave))[,.\s]+(?:Apartment|Apt|Unit|Suite)\s*(\d{1,5})\b/i
+  );
   if (unitBuildingMatch) {
-    address = `Unit ${unitBuildingMatch[1]}, ${unitBuildingMatch[2]} ${unitBuildingMatch[3].trim()} NW, Edmonton`;
-  } else if (addrMatch && addrMatch[1]) {
-    address = addrMatch[1].trim();
-  } else if (lower.includes("el mora")) {
-    address = "El Mora Apartments — Edmonton, AB";
-  } else if (lower.includes("basement suite")) {
-    address = "Basement Suite — Edmonton, AB";
-  } else if (lower.includes("townhome")) {
-    address = "Townhome — Edmonton, AB";
+    streetPart = `Unit ${unitBuildingMatch[1]}, ${unitBuildingMatch[2]} ${unitBuildingMatch[3].trim()} NW`;
+  } else if (aptAfterStreetMatch) {
+    const normSt = normalizeSpokenEdmontonStreet(aptAfterStreetMatch[1]);
+    streetPart = `Apt ${aptAfterStreetMatch[2]}, ${normSt} NW`;
   }
 
-  // Check if Sona AI asked "Basic, deep, move in, or move out?" -> "Deep."
-  const sonaCleanTypeMatch = (params.transcriptText || "").match(
-    /Basic,\s*deep,\s*move in,\s*or move out\?\s*\n[^\n:]*:\s*(Basic|Deep|Move in|Move out)/i
-  );
-  const requestedDeepViaSona = sonaCleanTypeMatch && sonaCleanTypeMatch[1].toLowerCase().includes("deep");
+  // 4. General regex across summary & transcript
+  if (!streetPart) {
+    const normalizedFull = normalizeSpokenEdmontonStreet(`${cleanSummaryRaw} ${rawTranscript}`);
+    const addrMatch =
+      cleanSummaryRaw.match(/located at\s+([^.,\n]+)/i) ||
+      cleanSummaryRaw.match(/address provided[^is]*is\s+([^.,\n]+)/i) ||
+      normalizedFull.match(
+        /\b(\d{1,5}\s+(?:\d{1,3}(?:st|nd|rd|th)?\s+)?[A-Za-z.\s]{2,25}?\b(?:Ave|Avenue|St|Street|Rd|Road|Way|Dr|Drive|Blvd|Boulevard|Crescent|Cres|Place|Pl|Court|Ct|Close|Lane|Trail|Bend|Point|Gate|Link|Loop|Common|Wynd)(?:\s+(?:NW|NE|SW|SE))?)\b/i
+      );
+    if (addrMatch && addrMatch[1]) {
+      streetPart = normalizeSpokenEdmontonStreet(addrMatch[1]);
+    }
+  }
+
+  let address = `${city}, AB${postalCode ? ` ${postalCode}` : ""}`;
+  if (streetPart) {
+    const cleanStreetOnly = streetPart
+      .replace(new RegExp(`,?\\s*${city}\\b.*$`, "i"), "")
+      .replace(/,?\s*(?:Edmonton|Leduc|Alberta|AB)\b.*$/i, "")
+      .replace(/\b[Tt]\d[A-Za-z]\s*\d[A-Za-z]\d\b/g, "")
+      .replace(/[.,;]+$/, "")
+      .trim();
+    address = `${cleanStreetOnly}, ${city}, AB${postalCode ? ` ${postalCode}` : ""}`;
+  } else if (lower.includes("el mora")) {
+    address = `El Mora Apartments — ${city}, AB`;
+  } else if (lower.includes("basement suite")) {
+    address = `Basement Suite — ${city}, AB`;
+  } else if (lower.includes("townhome")) {
+    address = `Townhome — ${city}, AB`;
+  }
+
+  // Extract preferred date & special requests from Sona AI Q&A
+  let preferredDate = "";
+  let specialRequests = "";
+  for (let i = 0; i < transcriptLines.length; i++) {
+    const t = transcriptLines[i];
+    if (t.isOwnOrAi && /(?:what date would you prefer|what day works best|when would you like)/i.test(t.text)) {
+      const nextCaller = transcriptLines.slice(i + 1, i + 4).find((nl) => !nl.isOwnOrAi);
+      if (nextCaller) {
+        preferredDate = nextCaller.text.replace(/[.,!]+$/, "").trim();
+      }
+    }
+    if (t.isOwnOrAi && /(?:specific areas|extra attention|special requests|anything else)/i.test(t.text)) {
+      const nextCaller = transcriptLines.slice(i + 1, i + 4).find((nl) => !nl.isOwnOrAi);
+      if (nextCaller && !/^(?:no|nope|nothing|none|that's all|all good)\b/i.test(nextCaller.text.trim())) {
+        specialRequests = nextCaller.text.replace(/[.,!]+$/, "").trim();
+      }
+    }
+  }
+
+  // Check if Sona AI asked "Basic, deep, move in, or move out?"
+  const sonaCleanTypeMatch =
+    rawTranscript.match(/Basic,\s*deep,?\s*move in,\s*or move out\?(?:\s*\n[^\n:]*:\s*No\.)*\s*\n[^\n:]*:\s*(Basic|Deep|Move in|Move out)/i) ||
+    rawTranscript.match(/:\s*(Deep|Basic|Move out|Move in)\s+cleaning\./i);
+  const sonaCleanType = sonaCleanTypeMatch ? sonaCleanTypeMatch[1].toLowerCase() : "";
+  const requestedDeepViaSona = sonaCleanType.includes("deep") || /:\s*Deep\.\s*\n/i.test(rawTranscript);
+  const requestedBasicViaSona = sonaCleanType.includes("basic");
+  const requestedMoveOutViaSona = sonaCleanType.includes("move out") || sonaCleanType.includes("move in");
 
   // Service requested & estimated quote
   let serviceRequested = "Residential Standard Cleaning";
   let quotedAmount = 221.07;
+  const shortBed = bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed");
+  const shortBath = bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath");
+
   if (lower.includes("airbnb") || lower.includes("basement suite")) {
-    serviceRequested = `${bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed")} ${bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath")} Airbnb / Basement Suite Cleaning`;
+    serviceRequested = `${shortBed} ${shortBath} Airbnb / Basement Suite Cleaning`;
     quotedAmount = 189.0;
   } else if (lower.includes("light housekeeping")) {
     serviceRequested = "Light Housekeeping (3 Hours Minimum)";
     quotedAmount = 140.0;
-  } else if ((lower.includes("move-out") || lower.includes("move out") || lower.includes("move in") || lower.includes("moving into") || lower.includes("selling the home")) && !lower.includes("not a move-out")) {
-    serviceRequested = `${bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed")} ${bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath")} Move-Out / Move-In Cleaning`;
-    quotedAmount = bedrooms.startsWith("4") ? 385.0 : 325.0;
-  } else if (requestedDeepViaSona || lower.includes("deep clean")) {
-    serviceRequested = `${bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed")} ${bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath")} Deep Cleaning`;
-    quotedAmount = bedrooms === "1 Bedroom" ? 165.0 : 275.0;
+  } else if (requestedDeepViaSona) {
+    serviceRequested = `${shortBed} ${shortBath} Deep Cleaning`;
+    quotedAmount = bedrooms === "1 Bedroom" ? 165.0 : bedrooms.startsWith("5") ? 345.0 : 275.0;
+  } else if (requestedBasicViaSona) {
+    serviceRequested = `${shortBed} ${shortBath} Regular House Cleaning`;
+    quotedAmount = bedrooms === "1 Bedroom" ? 140.0 : bedrooms.startsWith("2") ? 189.0 : 221.07;
+  } else if (
+    requestedMoveOutViaSona ||
+    ((lower.includes("move-out") || lower.includes("move out") || lower.includes("move in") || lower.includes("moving into") || lower.includes("selling the home")) &&
+      !lower.includes("not a move-out"))
+  ) {
+    serviceRequested = `${shortBed} ${shortBath} Move-Out / Move-In Cleaning`;
+    quotedAmount = bedrooms.startsWith("4") || bedrooms.startsWith("5") ? 385.0 : 325.0;
+  } else if (lower.includes("deep clean")) {
+    serviceRequested = `${shortBed} ${shortBath} Deep Cleaning`;
+    quotedAmount = bedrooms === "1 Bedroom" ? 165.0 : bedrooms.startsWith("5") ? 345.0 : 275.0;
   } else if (hasCleaningIntent) {
-    serviceRequested = `${bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed")} ${bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath")} Regular House Cleaning`;
+    serviceRequested = `${shortBed} ${shortBath} Regular House Cleaning`;
     quotedAmount = bedrooms === "1 Bedroom" ? 140.0 : bedrooms.startsWith("2") ? 189.0 : 221.07;
   } else {
     serviceRequested = "Inbound Phone Inquiry — Potential Cleaning Job (Follow-Up)";
     quotedAmount = 221.07;
   }
 
+  // Build an enriched summary that includes extracted Name, Address, Bed/Bath, Service, and Preferred Date
+  // so generic Sona AI summaries ("The assistant collected the service address...") never hide the caller's real info!
+  const structuredHighlights: string[] = [];
+  if (streetPart || city !== "Edmonton" || postalCode) {
+    structuredHighlights.push(`📍 ${address}`);
+  }
+  if (extractedName) {
+    structuredHighlights.push(`👤 ${extractedName} (${params.callerPhone})`);
+  }
+  if (hasCleaningIntent) {
+    structuredHighlights.push(`🛏️ ${bedrooms}, ${bathrooms}`);
+    structuredHighlights.push(`🧹 ${serviceRequested}`);
+  }
+  if (preferredDate) {
+    structuredHighlights.push(`📅 Preferred: ${preferredDate}`);
+  }
+  if (specialRequests) {
+    structuredHighlights.push(`✨ Note: ${specialRequests}`);
+  }
+
+  const baseSummaryText = cleanSummaryRaw.replace(/\bLaduke\b/gi, "Leduc");
+  const summaryMissingKeyFacts =
+    (streetPart && !baseSummaryText.toLowerCase().includes(streetPart.split(" ")[0].toLowerCase())) ||
+    (extractedName && !baseSummaryText.toLowerCase().includes(extractedName.split(" ")[0].toLowerCase()));
+
+  const enrichedSummary =
+    structuredHighlights.length > 0 && (summaryMissingKeyFacts || !baseSummaryText)
+      ? `${structuredHighlights.join(" • ")}${baseSummaryText ? ` — ${baseSummaryText}` : ""}`
+      : baseSummaryText || params.summaryText || "Inbound voice call completed";
+
   // Classify every call: GOOD_LEAD, POTENTIAL_JOB, or BAD_LEAD
   const dur = Number(params.duration || 0);
-  const hasMeaningfulSpeech = Boolean(callerOnlyTranscript.trim().length > 15 || cleanSummary.trim().length > 15 || params.hasVoicemail);
+  const hasMeaningfulSpeech = Boolean(callerSpeechOnly.trim().length > 15 || cleanSummaryRaw.trim().length > 15 || params.hasVoicemail);
 
   let leadVerdict: "GOOD_LEAD" | "POTENTIAL_JOB" | "BAD_LEAD" = "POTENTIAL_JOB";
   let leadVerdictReason = "Inbound phone call — Potential Cleaning Job (Follow-Up Recommended)";
@@ -13979,25 +14466,23 @@ function analyzeCallTranscriptForLead(params: {
 
   if (hasCleaningIntent) {
     leadVerdict = "GOOD_LEAD";
-    leadVerdictReason = `Confirmed Cleaning Inquiry: ${serviceRequested}`;
+    leadVerdictReason = `Confirmed Cleaning Inquiry: ${serviceRequested}${streetPart ? ` at ${address}` : ""}`;
     callCategory = "CLEANING_LEAD";
   } else if (isSalesOrNonCleaning) {
     leadVerdict = "BAD_LEAD";
-    leadVerdictReason = cleanSummary
-      ? `Non-Cleaning / Solicitor / B2B Call: ${cleanSummary.slice(0, 110)}`
+    leadVerdictReason = cleanSummaryRaw
+      ? `Non-Cleaning / Solicitor / B2B Call: ${cleanSummaryRaw.slice(0, 110)}`
       : "Screened Sales / Solicitor / Non-Cleaning Call";
     callCategory = "SALES_OR_MARKETING";
   } else if (hasMeaningfulSpeech || dur >= 12 || isAlbertaCaller) {
-    // Per owner rule: "ALL CALLS could be a potential job" — any non-solicitor call with speech, duration >= 12s, or local Alberta caller is surfaced as a Potential Job!
     leadVerdict = "POTENTIAL_JOB";
-    leadVerdictReason = cleanSummary
-      ? `Potential Job / Caller Follow-Up: ${cleanSummary.slice(0, 110)}`
+    leadVerdictReason = cleanSummaryRaw
+      ? `Potential Job / Caller Follow-Up: ${cleanSummaryRaw.slice(0, 110)}`
       : isAlbertaCaller
       ? `Local Alberta Caller (${params.callerPhone}) — Missed/Short Call, Call Back for Potential Job!`
       : "Inbound Caller — Check Transcript / Follow Up for Potential Job";
     callCategory = "POTENTIAL_JOB_FOLLOWUP";
   } else {
-    // Out-of-province 0s-11s silent/no-answer/robocall hangup
     leadVerdict = "BAD_LEAD";
     leadVerdictReason = `Short Hangup / Unanswered Out-of-Area Call (${dur}s)`;
     callCategory = "SHORT_HANGUP";
@@ -14017,6 +14502,11 @@ function analyzeCallTranscriptForLead(params: {
     bedrooms,
     bathrooms,
     address,
+    city,
+    postalCode,
+    preferredDate,
+    specialRequests,
+    enrichedSummary,
     serviceRequested,
     quotedAmount,
   };
@@ -14033,7 +14523,7 @@ function upsertCallLeadIntoCleanSheet(
   const callerDigits = normalizePhoneDigits(callLogEntry.callerPhone);
   if (!callerDigits || TIDYUPS_OWN_PHONE_DIGITS.has(callerDigits)) return null;
 
-  // Never insert or update a Clean Sheet lead if the call is blocked by Spam Shield (e.g. area code 408)
+  // Never insert or update a Clean Sheet lead if the call is blocked by Spam Shield or is an outbound call without an existing lead
   if (!forceInclude && (callLogEntry.isBlocked || callLogEntry.status === "SOLICITOR_BLOCKED" || analysis.leadVerdict === "BAD_LEAD")) {
     return null;
   }
@@ -14043,17 +14533,21 @@ function upsertCallLeadIntoCleanSheet(
     const lDigits = normalizePhoneDigits(l.phone);
     return lDigits && (lDigits === callerDigits || lDigits.endsWith(callerDigits) || callerDigits.endsWith(lDigits));
   });
+  if (!existingLead && callLogEntry.direction === "outbound") {
+    return null;
+  }
 
+  const summaryToUse = analysis.enrichedSummary || callLogEntry.summary || "";
   const hasRichSummary =
-    callLogEntry.summary &&
-    callLogEntry.summary !== "Inbound voice call completed" &&
-    !callLogEntry.summary.startsWith("+") &&
-    !callLogEntry.summary.includes("This call had no actionable details");
+    summaryToUse &&
+    summaryToUse !== "Inbound voice call completed" &&
+    !summaryToUse.startsWith("+") &&
+    !summaryToUse.includes("This call had no actionable details");
 
   const formattedTranscriptNote = [
     callLogEntry.answeredByAi ? `🤖 Screened by Sonia AI (${callLogEntry.lineName})` : `📞 Quo Call (${callLogEntry.lineName})`,
     `Verdict: ${analysis.leadVerdict === "GOOD_LEAD" ? "✅ GOOD LEAD" : analysis.leadVerdict === "POTENTIAL_JOB" ? "🟡 POTENTIAL JOB (FOLLOW UP)" : "🚫 BAD LEAD"}`,
-    hasRichSummary ? `AI Summary: ${callLogEntry.summary}` : "",
+    hasRichSummary ? `AI Summary: ${summaryToUse}` : "",
     callLogEntry.nextSteps?.length ? `Next Steps: ${callLogEntry.nextSteps.join("; ")}` : "",
     callLogEntry.transcriptText ? `Transcript: ${callLogEntry.transcriptText.replace(/\n+/g, " | ")}` : "",
   ]
@@ -14064,6 +14558,13 @@ function upsertCallLeadIntoCleanSheet(
     (existingLead as any).callId = callLogEntry.callId || callLogEntry.id;
     (existingLead as any).leadVerdict = analysis.leadVerdict;
     (existingLead as any).leadVerdictReason = analysis.leadVerdictReason;
+    existingLead.sourceTab = "Quo";
+    if (
+      callLogEntry.timestamp &&
+      (!existingLead.dateReceived || String(callLogEntry.timestamp) > String(existingLead.dateReceived))
+    ) {
+      existingLead.dateReceived = callLogEntry.timestamp;
+    }
     if (
       callLogEntry.transcriptText &&
       (!existingLead.transcriptText || callLogEntry.transcriptText.length > String(existingLead.transcriptText).length)
@@ -14071,30 +14572,46 @@ function upsertCallLeadIntoCleanSheet(
       (existingLead as any).transcriptText = callLogEntry.transcriptText;
     }
     if (hasRichSummary) {
-      (existingLead as any).aiSummary = callLogEntry.summary;
+      (existingLead as any).aiSummary = summaryToUse;
     }
     const hasLinkedQuote = Boolean(existingLead.quoteId || existingLead.quoteNumber);
-    if (
-      !hasLinkedQuote &&
-      analysis.extractedName &&
-      (existingLead.customerName?.startsWith("Inbound") ||
-        existingLead.customerName?.startsWith("Local Caller") ||
-        existingLead.customerName?.startsWith("Potential") ||
-        existingLead.customerName?.startsWith("just") ||
-        existingLead.customerName?.startsWith("Glade"))
-    ) {
-      existingLead.customerName = `${analysis.extractedName} (${
-        callLogEntry.answeredByAi || (existingLead as any).answeredByAi ? "Sonia AI / Voicemail" : "Phone Lead"
-      })`;
+    if (!hasLinkedQuote && analysis.extractedName) {
+      const currentCleanName = String(existingLead.customerName || "")
+        .replace(/\s*\((?:Sonia AI\s*\/?\s*Voicemail|Phone Lead|Voicemail)\)\s*$/i, "")
+        .trim();
+      const isGenericCurrent =
+        !currentCleanName ||
+        currentCleanName.startsWith("Inbound") ||
+        currentCleanName.startsWith("Local Caller") ||
+        currentCleanName.startsWith("Cleaning Caller") ||
+        currentCleanName.startsWith("Potential") ||
+        currentCleanName.startsWith("First name") ||
+        currentCleanName.toLowerCase().includes("undefined") ||
+        currentCleanName.toLowerCase().includes("deepcor") ||
+        currentCleanName.startsWith("just") ||
+        currentCleanName.startsWith("Glade") ||
+        currentCleanName.startsWith("+") ||
+        currentCleanName.startsWith("(");
+      const isFullUpgrade =
+        analysis.extractedName.split(/\s+/).length >= currentCleanName.split(/\s+/).length &&
+        analysis.extractedName !== currentCleanName;
+      if (isGenericCurrent || isFullUpgrade) {
+        existingLead.customerName = `${analysis.extractedName} (${
+          callLogEntry.answeredByAi || (existingLead as any).answeredByAi ? "Sonia AI / Voicemail" : "Phone Lead"
+        })`;
+      }
     }
     if (
       !hasLinkedQuote &&
       analysis.hasCleaningIntent &&
       (existingLead.serviceRequested?.includes("Potential Cleaning Job") ||
+        existingLead.serviceRequested?.includes("Regular House Cleaning") ||
         analysis.serviceRequested.includes("Airbnb") ||
         analysis.serviceRequested.includes("Deep Cleaning") ||
         analysis.serviceRequested.includes("Move-Out") ||
-        analysis.serviceRequested.includes("Housekeeping"))
+        analysis.serviceRequested.includes("Housekeeping") ||
+        analysis.bedrooms !== "3 Bedrooms" ||
+        analysis.bathrooms !== "2 Bathrooms")
     ) {
       existingLead.serviceRequested = analysis.serviceRequested;
       existingLead.bedrooms = analysis.bedrooms;
@@ -14106,17 +14623,26 @@ function upsertCallLeadIntoCleanSheet(
     if ((existingLead as any).answeredByAi && !hasLinkedQuote) {
       existingLead.source = `Sonia AI / Missed Call (${(existingLead as any).lineName || callLogEntry.lineName})`;
     }
-    if (hasRichSummary && !String(existingLead.notes || "").includes(callLogEntry.summary.slice(0, 35))) {
-      existingLead.notes = existingLead.notes
-        ? `${formattedTranscriptNote} | ${existingLead.notes}`
-        : formattedTranscriptNote;
+    // Always update notes when a full transcript or enriched summary arrives
+    if (formattedTranscriptNote && (!existingLead.notes || !String(existingLead.notes).includes("Transcript:") || String(formattedTranscriptNote).length > String(existingLead.notes).length)) {
+      existingLead.notes = formattedTranscriptNote;
     }
     if (
       !hasLinkedQuote &&
+      analysis.address &&
       analysis.address !== "Edmonton, AB" &&
-      (!existingLead.address || existingLead.address === "Edmonton, AB" || existingLead.address.startsWith("Basement Suite") || analysis.address.startsWith("Unit "))
+      (!existingLead.address ||
+        existingLead.address === "Edmonton, AB" ||
+        existingLead.address.startsWith("Basement Suite") ||
+        existingLead.address.length < analysis.address.length)
     ) {
       existingLead.address = analysis.address;
+    }
+    if (analysis.city && (!existingLead.city || existingLead.city === "Edmonton")) {
+      existingLead.city = analysis.city;
+    }
+    if (analysis.postalCode && !existingLead.postalCode) {
+      existingLead.postalCode = analysis.postalCode;
     }
     return existingLead;
   }
@@ -14139,8 +14665,8 @@ function upsertCallLeadIntoCleanSheet(
     phone: callLogEntry.callerPhone,
     email: "",
     address: analysis.address,
-    city: "Edmonton",
-    postalCode: "",
+    city: analysis.city || "Edmonton",
+    postalCode: analysis.postalCode || "",
     serviceRequested: analysis.serviceRequested,
     bedrooms: analysis.bedrooms,
     bathrooms: analysis.bathrooms,
@@ -14161,7 +14687,7 @@ function upsertCallLeadIntoCleanSheet(
     missingPhone: false,
     callId: callLogEntry.callId || callLogEntry.id,
     transcriptText: callLogEntry.transcriptText || "",
-    aiSummary: hasRichSummary ? callLogEntry.summary : "",
+    aiSummary: hasRichSummary ? summaryToUse : "",
     answeredByAi: Boolean(callLogEntry.answeredByAi),
     lineName: callLogEntry.lineName,
   };
@@ -14217,7 +14743,7 @@ async function processQuoCallEvent(
 
   const needsTranscriptFetch =
     !cachedCallLog ||
-    (!cachedCallLog.transcriptText && Number(dataObj.duration ?? cachedCallLog.duration ?? 0) > 0) ||
+    !cachedCallLog.transcriptText ||
     eventType.includes("transcript") ||
     eventType.includes("summary");
 
@@ -14353,6 +14879,57 @@ async function processQuoCallEvent(
     duration,
   });
 
+  // Cross-enrich from any other call in store.quoCallLogs from the same callerDigits
+  // (e.g. if caller called twice like Amandeep Kaur: 1st call missed, 2nd call gave Sona AI name, address, postal code, and 5 bed / 4 bath)
+  if (callerDigits && Array.isArray(store.quoCallLogs)) {
+    const siblingCalls = store.quoCallLogs.filter((c: any) => {
+      const cDig = normalizePhoneDigits(c?.callerPhone);
+      return cDig && cDig === callerDigits && (c.transcriptText || c.extractedAddress || c.callerName);
+    });
+    for (const sib of siblingCalls) {
+      const sibAnalysis = analyzeCallTranscriptForLead({
+        summaryText: sib.summary || "",
+        transcriptText: sib.transcriptText || "",
+        callerPhone: cleanCallerPhone,
+        callerNameFromPayload: sib.callerName || "",
+        lineName: sib.lineName || lineName,
+        answeredBy: sib.answeredBy,
+        duration: sib.duration,
+      });
+      if (
+        sibAnalysis.extractedName &&
+        (!analysis.extractedName || sibAnalysis.extractedName.split(/\s+/).length > analysis.extractedName.split(/\s+/).length)
+      ) {
+        analysis.extractedName = sibAnalysis.extractedName;
+      }
+      if (
+        sibAnalysis.address &&
+        sibAnalysis.address !== "Edmonton, AB" &&
+        (analysis.address === "Edmonton, AB" || sibAnalysis.address.length > analysis.address.length)
+      ) {
+        analysis.address = sibAnalysis.address;
+        analysis.city = sibAnalysis.city || analysis.city;
+        analysis.postalCode = sibAnalysis.postalCode || analysis.postalCode;
+      }
+      if (sibAnalysis.hasCleaningIntent && !analysis.hasCleaningIntent && !analysis.isSalesOrNonCleaning) {
+        analysis.hasCleaningIntent = true;
+        analysis.isPotentialOrGoodLead = true;
+        analysis.leadVerdict = "GOOD_LEAD";
+        analysis.callCategory = "CLEANING_LEAD";
+        analysis.bedrooms = sibAnalysis.bedrooms;
+        analysis.bathrooms = sibAnalysis.bathrooms;
+        analysis.serviceRequested = sibAnalysis.serviceRequested;
+        analysis.quotedAmount = sibAnalysis.quotedAmount;
+        analysis.leadVerdictReason = sibAnalysis.leadVerdictReason;
+        if (!transcriptText && sibAnalysis.enrichedSummary) {
+          analysis.enrichedSummary = sibAnalysis.enrichedSummary;
+        }
+      }
+    }
+  }
+
+  const effectiveSummary = analysis.enrichedSummary || summary;
+
   // 1. MATCH TO AN EXISTING JOB IN SCHEDULED VISITS
   let matchedJob: any = null;
   if (callerDigits) {
@@ -14474,7 +15051,7 @@ async function processQuoCallEvent(
     duration,
     recordingUrl: mediaRecording,
     transcriptText,
-    summary,
+    summary: effectiveSummary,
     nextSteps: nextStepsArr,
     lineName,
     phoneNumberId,
@@ -14493,9 +15070,13 @@ async function processQuoCallEvent(
       ? analysis.leadVerdictReason || `Screened Solicitor / Spam (${cleanCallerPhone})`
       : analysis.leadVerdictReason,
     extractedAddress: analysis.address,
+    extractedCity: analysis.city,
+    extractedPostalCode: analysis.postalCode,
     extractedBedrooms: analysis.bedrooms,
     extractedBathrooms: analysis.bathrooms,
     extractedService: analysis.serviceRequested,
+    preferredDate: analysis.preferredDate,
+    specialRequests: analysis.specialRequests,
     estimatedQuote: analysis.quotedAmount,
     timestamp,
     matchedJobId: matchedJob ? matchedJob.id : null,
@@ -14533,7 +15114,7 @@ async function processQuoCallEvent(
         countryCode: "+1",
         reason:
           callLogEntry.blockedReason ||
-          (summary ? `Sonia AI Screened: ${String(summary).slice(0, 90)}` : "Screened Call Auto-Blocked"),
+          (effectiveSummary ? `Sonia AI Screened: ${String(effectiveSummary).slice(0, 90)}` : "Screened Call Auto-Blocked"),
       });
     }
   }
@@ -14553,8 +15134,8 @@ async function processQuoCallEvent(
       matchedJob.callTranscripts.unshift(callLogEntry);
     }
 
-    const auditNote = `[Quo Call Log - ${lineName}]: ${summary}`;
-    if (!matchedJob.notes?.includes(summary.slice(0, 40))) {
+    const auditNote = `[Quo Call Log - ${lineName}]: ${effectiveSummary}`;
+    if (!matchedJob.notes?.includes(effectiveSummary.slice(0, 40))) {
       matchedJob.notes = matchedJob.notes ? `${matchedJob.notes}\n${auditNote}` : auditNote;
     }
   } else if (analysis.isPotentialOrGoodLead) {
@@ -14584,10 +15165,10 @@ async function processQuoCallEvent(
           title: `Inbound Call: ${effectiveCallerName}`,
           clientName: effectiveCallerName,
           clientPhone: cleanCallerPhone,
-          serviceType: detectServiceTypeFromText(`${summary} ${transcriptText}`),
+          serviceType: detectServiceTypeFromText(`${effectiveSummary} ${transcriptText}`),
           serviceAddress: analysis.address || "Edmonton, Alberta",
           status: "UNSCHEDULED",
-          notes: `[Inbound Phone Lead on ${lineName}]: ${summary}\nFull Transcript: ${transcriptText}`,
+          notes: `[Inbound Phone Lead on ${lineName}]: ${effectiveSummary}\nFull Transcript: ${transcriptText}`,
           createdAt: timestamp,
           callTranscripts: [callLogEntry],
           source: `Quo Call Intake (${lineName})`,
@@ -14595,6 +15176,51 @@ async function processQuoCallEvent(
         store.unscheduledJobs.unshift(newLeadTicket);
         callLogEntry.matchedJobId = newLeadTicket.id;
         callLogEntry.matchedJobTitle = newLeadTicket.title;
+        callLogEntry.status = "AUTO_CREATED_LEAD";
+      } else {
+        // Retroactively enrich existing unscheduled ticket when delayed transcript/summary arrives!
+        if (
+          effectiveCallerName &&
+          effectiveCallerName !== cleanCallerPhone &&
+          (!existingUnsched.clientName ||
+            existingUnsched.clientName === cleanCallerPhone ||
+            existingUnsched.clientName.startsWith("(") ||
+            existingUnsched.clientName.startsWith("+") ||
+            effectiveCallerName.split(/\s+/).length > String(existingUnsched.clientName).split(/\s+/).length)
+        ) {
+          existingUnsched.clientName = effectiveCallerName;
+          existingUnsched.title = `Inbound Call: ${effectiveCallerName}`;
+        }
+        if (
+          analysis.address &&
+          analysis.address !== "Edmonton, AB" &&
+          (!existingUnsched.serviceAddress ||
+            existingUnsched.serviceAddress === "Edmonton, AB" ||
+            existingUnsched.serviceAddress === "Edmonton, Alberta" ||
+            analysis.address.length > String(existingUnsched.serviceAddress).length)
+        ) {
+          existingUnsched.serviceAddress = analysis.address;
+        }
+        const detectedType = detectServiceTypeFromText(`${effectiveSummary} ${transcriptText}`);
+        if (detectedType) {
+          existingUnsched.serviceType = detectedType;
+        }
+        if (transcriptText || effectiveSummary) {
+          existingUnsched.notes = `[Inbound Phone Lead on ${lineName}]: ${effectiveSummary}\nFull Transcript: ${
+            transcriptText || existingUnsched.callTranscripts?.[0]?.transcriptText || ""
+          }`;
+        }
+        if (!Array.isArray(existingUnsched.callTranscripts)) existingUnsched.callTranscripts = [];
+        const exTrIdx = existingUnsched.callTranscripts.findIndex(
+          (c: any) => c.callId === callId || c.id === callId
+        );
+        if (exTrIdx >= 0) {
+          existingUnsched.callTranscripts[exTrIdx] = { ...existingUnsched.callTranscripts[exTrIdx], ...callLogEntry };
+        } else {
+          existingUnsched.callTranscripts.unshift(callLogEntry);
+        }
+        callLogEntry.matchedJobId = existingUnsched.id;
+        callLogEntry.matchedJobTitle = existingUnsched.title;
         callLogEntry.status = "AUTO_CREATED_LEAD";
       }
     }
@@ -14607,8 +15233,35 @@ async function processQuoCallEvent(
   });
 
   if (existingClient) {
-    if (effectiveCallerName && (!existingClient.name || existingClient.name.startsWith("+1") || existingClient.name.includes("Call ["))) {
+    if (
+      effectiveCallerName &&
+      effectiveCallerName !== cleanCallerPhone &&
+      (!existingClient.name ||
+        existingClient.name.startsWith("+") ||
+        existingClient.name.startsWith("(") ||
+        existingClient.name.includes("Call [") ||
+        effectiveCallerName.split(/\s+/).length > String(existingClient.name).split(/\s+/).length)
+    ) {
       existingClient.name = effectiveCallerName;
+    }
+    if (
+      analysis.address &&
+      analysis.address !== "Edmonton, AB" &&
+      (!existingClient.address ||
+        existingClient.address === "Edmonton, AB" ||
+        existingClient.address === "Edmonton, Alberta" ||
+        analysis.address.length > String(existingClient.address).length)
+    ) {
+      existingClient.address = analysis.address;
+    }
+    if (analysis.city && (!existingClient.city || existingClient.city === "Edmonton")) {
+      existingClient.city = analysis.city;
+    }
+    if (analysis.postalCode && (!existingClient.postalCode || existingClient.postalCode === "T5J 0A1")) {
+      existingClient.postalCode = analysis.postalCode;
+    }
+    if (effectiveSummary) {
+      existingClient.notes = `Inbound lead on ${lineName}. Last transcript: ${effectiveSummary}`;
     }
     existingClient.latestServiceDate = timestamp.slice(0, 10);
     if (!existingClient.callHistory) existingClient.callHistory = [];
@@ -14623,16 +15276,16 @@ async function processQuoCallEvent(
       phone: cleanCallerPhone,
       email: "",
       address: analysis.address || matchedJob?.serviceAddress || "Edmonton, Alberta",
-      city: "Edmonton",
+      city: analysis.city || "Edmonton",
       province: "AB",
-      postalCode: "T5J 0A1",
+      postalCode: analysis.postalCode || "T5J 0A1",
       verdict: "Good lead" as const,
       tags: ["quo-lead", "phone-inbound", "needs-jobber-sync"],
       isJobberLinked: Boolean(matchedJob),
       jobberId: matchedJob ? `jobber-${matchedJob.id}` : undefined,
       totalJobs: matchedJob ? 1 : 0,
       latestServiceDate: timestamp.slice(0, 10),
-      notes: `Inbound lead on ${lineName}. Last transcript: ${summary}`,
+      notes: `Inbound lead on ${lineName}. Last transcript: ${effectiveSummary}`,
       source: "Quo",
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -14684,7 +15337,7 @@ async function processQuoCallEvent(
       lastQuoteTotal: typeof matchedQuote?.total === "number" ? matchedQuote.total : undefined,
       isRepeatClient: Boolean(matchedClientRecord || matchedQuote || matchedJob),
       transcriptText: transcriptText || "",
-      summary: summary || "",
+      summary: effectiveSummary || "",
       countryCode: "+1",
       status: isAutoSolicitorOrSpam ? "BLOCKED" : "ALLOWED",
       liveState: eventType === "call.ringing" ? "RINGING" : isAutoSolicitorOrSpam ? "BLOCKED" : "ANSWERED_IN_APP",
@@ -14831,7 +15484,7 @@ async function syncLiveQuoCallsAndTranscripts() {
     }
   } catch {}
 
-  // 3. Query conversations across ALL 6 TidyUps OpenPhone lines
+  // 3. Query conversations across ALL 6 TidyUps OpenPhone lines (including updatedAfter=14d so active threads are never hidden at the tail)
   const allLineIds = Array.from(
     new Set([
       ...CANONICAL_QUO_PHONE_NUMBERS.map((p) => p.id),
@@ -14839,14 +15492,21 @@ async function syncLiveQuoCallsAndTranscripts() {
     ])
   ).filter(Boolean);
 
+  const updatedAfterIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
   const convResponses = await Promise.all([
-    fetch("https://api.openphone.com/v1/conversations?maxResults=40", {
+    fetch(`https://api.openphone.com/v1/conversations?maxResults=100&updatedAfter=${encodeURIComponent(updatedAfterIso)}`, {
+      headers: { Authorization: apiKey },
+    }).catch(() => null),
+    fetch("https://api.openphone.com/v1/conversations?maxResults=50", {
       headers: { Authorization: apiKey },
     }).catch(() => null),
     ...allLineIds.map((pnId) =>
-      fetch(`https://api.openphone.com/v1/conversations?phoneNumbers=${encodeURIComponent(pnId)}&maxResults=25`, {
-        headers: { Authorization: apiKey },
-      }).catch(() => null)
+      fetch(
+        `https://api.openphone.com/v1/conversations?phoneNumbers=${encodeURIComponent(pnId)}&maxResults=40&updatedAfter=${encodeURIComponent(updatedAfterIso)}`,
+        {
+          headers: { Authorization: apiKey },
+        }
+      ).catch(() => null)
     ),
   ]);
 
@@ -14939,7 +15599,17 @@ async function syncLiveQuoCallsAndTranscripts() {
     }
   }
 
+  // Second pass: re-process any stored Quo call logs so multi-call customers (e.g. Amandeep Kaur) cross-enrich
   if (Array.isArray(sharedStore.quoCallLogs)) {
+    for (const existingLog of [...sharedStore.quoCallLogs]) {
+      await processQuoCallEvent(
+        {
+          type: "call.transcript.completed",
+          data: { object: existingLog },
+        },
+        { existingStore: sharedStore, skipSave: true }
+      );
+    }
     sharedStore.quoCallLogs.sort((a: any, b: any) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
   }
   if (Array.isArray(sharedStore.adLeads)) {
@@ -14976,10 +15646,27 @@ async function syncLiveQuoCallsAndTranscripts() {
 // Inbound webhook from Quo for completed calls & transcripts (supports both /api/quo/webhook and /api/webhooks/quo)
 const handleQuoWebhookRequest = async (req: any, res: any) => {
   const event = req.body || {};
-  console.log("Inbound Quo Webhook Event:", event.type || event.event || "call.completed");
+  const evType = String(event.type || event.event || "call.completed");
+  console.log("Inbound Quo Webhook Event:", evType);
 
   try {
     const result = await processQuoCallEvent(event);
+    // OpenPhone generates transcripts & summaries 15–60s after call.completed / call.recording.completed.
+    // Automatically schedule delayed re-fetches (+12s, +35s, +75s) if the transcript wasn't ready yet!
+    const callLog = result?.callLog;
+    if (callLog && Number(callLog.duration || 0) >= 8 && !callLog.transcriptText) {
+      const targetCallId = String(callLog.callId || callLog.id || "").replace(/^QUO_([0-9a-f]{32})$/i, "AC$1");
+      if (targetCallId.startsWith("AC")) {
+        for (const delayMs of [12000, 35000, 75000]) {
+          setTimeout(() => {
+            processQuoCallEvent({
+              type: "call.transcript.completed",
+              data: { object: { id: targetCallId, callId: targetCallId } },
+            }).catch(() => {});
+          }, delayMs);
+        }
+      }
+    }
     res.status(200).json({ received: true, ...result });
   } catch (err: any) {
     console.error("Error processing Quo webhook event:", err);
@@ -16042,12 +16729,16 @@ async function pollRecentOpenPhoneCallsFast(projectId: string) {
   const apiKey = getEffectiveQuoApiKey();
   if (!apiKey) return;
   try {
-    const convRes = await fetch("https://api.openphone.com/v1/conversations?maxResults=10", {
-      headers: { Authorization: apiKey },
-    }).catch(() => null);
+    const updatedAfterIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const convRes = await fetch(
+      `https://api.openphone.com/v1/conversations?maxResults=15&updatedAfter=${encodeURIComponent(updatedAfterIso)}`,
+      {
+        headers: { Authorization: apiKey },
+      }
+    ).catch(() => null);
     if (!convRes || !convRes.ok) return;
     const convData = await convRes.json();
-    const convs = Array.isArray(convData?.data) ? convData.data.slice(0, 8) : [];
+    const convs = Array.isArray(convData?.data) ? convData.data.slice(0, 10) : [];
     const currentStore = loadStore(projectId);
     if (!currentStore) return;
     let changed = false;
@@ -16077,6 +16768,9 @@ async function pollRecentOpenPhoneCallsFast(projectId: string) {
     if (changed) {
       if (Array.isArray(currentStore.quoCallLogs)) {
         currentStore.quoCallLogs.sort((a: any, b: any) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
+      }
+      if (Array.isArray(currentStore.adLeads)) {
+        currentStore.adLeads.sort((a: any, b: any) => String(b.dateReceived || "").localeCompare(String(a.dateReceived || "")));
       }
       saveStore(currentStore, projectId);
     }
