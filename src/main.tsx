@@ -88,20 +88,35 @@ class RootErrorBoundary extends React.Component<
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
-          <div className="max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
-            <h2 className="text-lg font-extrabold text-white mb-2">Refreshing Application View</h2>
-            <p className="text-xs text-slate-300 mb-4">
-              Click below to reload the page while keeping all your saved settings and approvals intact.
-            </p>
-            <button
-              onClick={() => {
-                this.setState({ hasError: false, retried: false });
-                window.location.reload();
-              }}
-              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs cursor-pointer shadow-lg"
-            >
-              Reload Page Now
-            </button>
+          <div className="max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <h2 className="text-lg font-extrabold text-white">Application View Recovery</h2>
+            {this.state.errorMsg && (
+              <p className="text-xs font-mono text-amber-300 bg-slate-950/80 border border-slate-800 rounded-lg p-2.5 break-words">
+                {this.state.errorMsg}
+              </p>
+            )}
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => {
+                  try {
+                    localStorage.setItem('tidyups_active_tab', 'LEADS');
+                  } catch {}
+                  this.setState({ hasError: false, errorMsg: '', retried: false });
+                }}
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs cursor-pointer shadow-lg"
+              >
+                Continue to Console
+              </button>
+              <button
+                onClick={() => {
+                  this.setState({ hasError: false, errorMsg: '', retried: false });
+                  window.location.reload();
+                }}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs cursor-pointer"
+              >
+                Reload Page
+              </button>
+            </div>
           </div>
         </div>
       );

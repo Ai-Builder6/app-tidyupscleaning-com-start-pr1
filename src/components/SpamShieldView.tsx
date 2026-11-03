@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   ShieldAlert,
+  ShieldCheck,
   PhoneCall,
   CheckCircle2,
   Trash2,
@@ -830,7 +831,7 @@ export const SpamShieldView: React.FC<SpamShieldViewProps> = ({
 
         <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
           <button
-            onClick={fetchSpamShield}
+            onClick={() => fetchSpamShield({ forceSync: true })}
             disabled={isLoading}
             className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-slate-700"
           >

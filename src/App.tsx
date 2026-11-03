@@ -4783,8 +4783,8 @@ export function App() {
         {/* Global Cookie Consent Banner (Google Ads Consent Mode v2 for AW-18533917803) */}
         <CookieConsentBanner
           onOpenPrivacyPolicy={() => {
-            setActiveLegalPage('PRIVACY_POLICY');
-            setActiveTopView('LEGAL_PAGES');
+            setActiveLegalTab('PRIVACY');
+            setActiveTopView('LEGAL');
           }}
         />
       </div>
