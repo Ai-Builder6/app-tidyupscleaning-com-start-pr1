@@ -27,7 +27,14 @@ import { getCustomerIntelligence } from '../services/customerIntelligenceService
 import { CustomerIntelligenceBadge } from './CustomerIntelligenceBadge';
 import { QuoteDetailModal } from './QuoteDetailModal';
 import { ServiceCatalogModal } from './ServiceCatalogModal';
-import { ServiceCatalogItem, CANONICAL_SERVICE_CATALOG, matchCatalogItem, convertItemForCleanersCount } from '../data/serviceCatalogData';
+import {
+  ServiceCatalogItem,
+  CANONICAL_SERVICE_CATALOG,
+  matchCatalogItem,
+  convertItemForCleanersCount,
+  buildCanonicalQuoteBreakdown,
+  buildCleaningSummaryMessage,
+} from '../data/serviceCatalogData';
 
 interface QuotesViewProps {
   quotes: JobberQuote[];
@@ -100,10 +107,10 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
   const [newServiceAddress, setNewServiceAddress] = useState('');
   const [newService, setNewService] = useState('Move Out Cleaning Services 2026');
   const [newBedrooms, setNewBedrooms] = useState('3 Bedrooms');
-  const [newBathrooms, setNewBathrooms] = useState('2 Bathrooms');
-  const [newTotal, setNewTotal] = useState('354.38');
-  const [newDiscount, setNewDiscount] = useState('0');
-  const [newDeposit, setNewDeposit] = useState('50');
+  const [newBathrooms, setNewBathrooms] = useState('3 Bathrooms');
+  const [newTotal, setNewTotal] = useState('365.63');
+  const [newDiscount, setNewDiscount] = useState('10');
+  const [newDeposit, setNewDeposit] = useState('100');
   const [newScheduledDate, setNewScheduledDate] = useState('');
   const [newScheduledTime, setNewScheduledTime] = useState('10:00');
   const [newAssignedCleaners, setNewAssignedCleaners] = useState<string[]>([]);
@@ -112,28 +119,27 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
   const [selectedLineItems, setSelectedLineItems] = useState<any[]>([]);
 
   const handleSelectCatalogItemForNewQuote = (item: ServiceCatalogItem) => {
-    setNewService(item.categoryLabel || item.name);
-    if (item.bedrooms || item.beds) setNewBedrooms(item.bedrooms || item.beds || '2 Bedrooms');
-    if (item.bathrooms || item.baths) setNewBathrooms(item.bathrooms || item.baths || '2 Bathrooms');
-    const conv = convertItemForCleanersCount(item, item.cleanersCount || 2);
-    const qty = conv.quantity;
-    const unitPrice = conv.unitPrice;
-    const total = conv.total;
-    const exactJobberName = conv.jobberItemName || item.jobberItemName || item.name;
-    setNewTotal(String(total));
-    setNewDeposit(String(item.depositRequired));
-    if (conv.description || item.description) setNewNotes(conv.description || item.description);
-    setSelectedLineItems([
-      {
-        name: exactJobberName,
-        description: conv.description || item.description || `${exactJobberName} - (${qty} x $${unitPrice.toFixed(2)}) = $${total.toFixed(2)} CAD`,
-        quantity: qty,
-        unitPrice: unitPrice,
-        total: total,
-        taxable: true,
-      },
-    ]);
-    setSyncFeedback(`Applied Jobber item: ${exactJobberName} (${qty} x $${unitPrice.toFixed(2)} = $${total.toFixed(2)} CAD)`);
+    const beds = item.bedrooms || item.beds || '3 Bedrooms';
+    const baths = item.bathrooms || item.baths || '3 Bathrooms';
+    const svcLabel = item.jobberItemName || item.name || item.categoryLabel;
+    setNewService(svcLabel);
+    setNewBedrooms(beds);
+    setNewBathrooms(baths);
+    const canonical = buildCanonicalQuoteBreakdown({
+      serviceRequested: svcLabel,
+      bedrooms: beds,
+      bathrooms: baths,
+      sourceTab: 'Google Leads 1',
+      cleanersCount: item.cleanersCount || 2,
+    });
+    setNewTotal(String(canonical.total));
+    setNewDiscount(String(canonical.discountAmount));
+    setNewDeposit('100');
+    setNewNotes(canonical.cleaningSummaryMessage);
+    setSelectedLineItems(canonical.lineItems);
+    setSyncFeedback(
+      `Applied ${canonical.serviceName} ($${canonical.serviceTotal.toFixed(2)}) + $20.00 Fuel − $10.00 Promo + 12.5% Tax = $${canonical.total.toFixed(2)} CAD`
+    );
   };
 
   const uniqueQuotes = React.useMemo(() => {
@@ -331,47 +337,23 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
     setIsSubmittingQuote(true);
 
     try {
-      const totalNum = Number(newTotal) || 280;
-      let lineItems = selectedLineItems;
-      if (lineItems.length === 0) {
-        const crewOverride =
-          newAssignedCleaners.length >= 1 && newAssignedCleaners.length <= 3
-            ? newAssignedCleaners.length
-            : undefined;
-        const matched = matchCatalogItem(
-          newService,
-          newBedrooms,
-          newBathrooms,
-          localCatalog || CANONICAL_SERVICE_CATALOG,
-          crewOverride
-        );
-        if (matched) {
-          const qty = matched.quantity ?? matched.baseHours ?? 1;
-          const unitPrice = matched.unitPrice ?? matched.basePrice ?? 105;
-          const total = matched.total ?? (qty * unitPrice);
-          lineItems = [
-            {
-              name: matched.jobberItemName || matched.name,
-              description: matched.description || `${matched.jobberItemName || matched.name} (${newBedrooms}, ${newBathrooms})`,
-              quantity: qty,
-              unitPrice: unitPrice,
-              total: total,
-              taxable: true,
-            },
-          ];
-        } else {
-          lineItems = [
-            {
-              name: `${newService} (${newBedrooms}, ${newBathrooms})`,
-              description: `${newBedrooms}, ${newBathrooms} • ${newService} — ${newServiceAddress.trim() || 'Edmonton, AB'}`,
-              quantity: 1,
-              unitPrice: totalNum,
-              total: totalNum,
-              taxable: true,
-            },
-          ];
-        }
-      }
+      const totalNum = Number(newTotal) || 365.63;
+      const crewOverride =
+        newAssignedCleaners.length >= 1 && newAssignedCleaners.length <= 3
+          ? newAssignedCleaners.length
+          : 2;
+      const canonical = buildCanonicalQuoteBreakdown({
+        serviceRequested: newService,
+        bedrooms: newBedrooms,
+        bathrooms: newBathrooms,
+        sourceTab: 'Google Leads 1',
+        quotedAmount: totalNum,
+        customDiscount: Number(newDiscount) || 10,
+        cleanersCount: crewOverride,
+        notes: newNotes.trim(),
+      });
+      const lineItems =
+        selectedLineItems.length >= 2 ? selectedLineItems : canonical.lineItems;
 
       const res = await fetch(`/api/database/quotes?project=${projectId}`, {
         method: 'POST',
@@ -381,16 +363,16 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
           clientPhone: newClientPhone.trim() || '(780) 555-0199',
           clientEmail: newClientEmail.trim(),
           serviceAddress: newServiceAddress.trim() || 'Edmonton, AB',
-          service: newService,
+          service: canonical.serviceName,
           bedrooms: newBedrooms,
           bathrooms: newBathrooms,
-          total: totalNum,
-          discountAmount: Number(newDiscount) || 0,
-          depositRequired: Number(newDeposit) || 0,
+          total: canonical.total,
+          discountAmount: canonical.discountAmount,
+          depositRequired: Number(newDeposit) || 100,
           scheduledDate: newScheduledDate || undefined,
           scheduledTime: newScheduledDate ? newScheduledTime : undefined,
           assignedCleaners: newAssignedCleaners,
-          notes: newNotes.trim(),
+          notes: buildCleaningSummaryMessage(newService, newNotes.trim()),
           quoteStatus: 'DRAFT',
           lineItems,
         }),

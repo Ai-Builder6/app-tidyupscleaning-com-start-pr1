@@ -92,6 +92,8 @@ import {
   generatePriceListSheetRows,
   generateJobberMasterSinglePageSheetRows,
   convertItemForCleanersCount,
+  buildCanonicalQuoteBreakdown,
+  buildCleaningSummaryMessage,
 } from "./src/data/serviceCatalogData";
 
 dotenv.config();
@@ -5579,70 +5581,51 @@ app.post("/api/database/quotes", async (req, res) => {
 
   const resolvedBedrooms = bedrooms || "3 Bedrooms";
   const resolvedBathrooms = bathrooms || "2 Bathrooms";
-  const resolvedService = service || "Residential Deep & Standard Cleaning";
+  const resolvedService = service || "Move-Out Cleaning";
+
+  const canonicalPkg = buildCanonicalQuoteBreakdown({
+    service: resolvedService,
+    bedrooms: resolvedBedrooms,
+    bathrooms: resolvedBathrooms,
+    source: selectedSource || source,
+    discountAmountOverride: discountAmount !== undefined ? Number(discountAmount) : 10,
+    depositOverride: depositRequired !== undefined && Number(depositRequired) > 0 ? Number(depositRequired) : 100,
+    notes,
+    catalog: currentStore.serviceCatalog || CANONICAL_SERVICE_CATALOG,
+  });
+
+  const hasProvidedFuel =
+    Array.isArray(lineItems) &&
+    lineItems.some((li: any) => /fuel|surcharge/i.test(`${li.name || ""} ${li.description || ""}`));
 
   const defaultLineItems =
-    Array.isArray(lineItems) && lineItems.length > 0
-      ? lineItems.map((li: any) => {
+    Array.isArray(lineItems) && lineItems.length >= 2 && hasProvidedFuel
+      ? lineItems.map((li: any, idx: number) => {
           const qty = Number(li.quantity) || 1;
           const up = Number(li.unitPrice) || Number(li.total) || 0;
           const tot =
             li.total !== undefined && !isNaN(Number(li.total))
               ? Number(li.total)
               : Math.round(qty * up * 100) / 100;
+          const isPrimary = idx === 0 && up > 0 && !/fuel|discount/i.test(`${li.name || ""} ${li.description || ""}`);
           return {
-            name: li.name || li.description,
-            description: li.description || li.name,
+            name: li.name || (isPrimary ? canonicalPkg.cleanItemName : li.description),
+            description:
+              li.description ||
+              (isPrimary ? `${canonicalPkg.cleanItemName}\n${canonicalPkg.crewLabel}` : li.name),
             quantity: qty,
             unitPrice: up,
             total: tot,
+            unitCost: isPrimary ? Math.round(up * 0.5 * 100) / 100 : 0,
+            taxable: true,
           };
         })
-      : (() => {
-          const matched = matchCatalogItem(
-            resolvedService,
-            resolvedBedrooms,
-            resolvedBathrooms,
-            currentStore.serviceCatalog || CANONICAL_SERVICE_CATALOG
-          );
-          if (matched) {
-            const qty = matched.quantity ?? matched.baseHours ?? 1;
-            const up = matched.unitPrice ?? matched.basePrice ?? 105;
-            const tot = matched.total ?? (qty * up);
-            return [
-              {
-                name: matched.jobberItemName || matched.name,
-                description: matched.description || `${matched.name} (${resolvedBedrooms}, ${resolvedBathrooms})`,
-                quantity: qty,
-                unitPrice: up,
-                total: tot,
-              },
-              {
-                name: "Fuel Surcharge 2",
-                description: "Fuel Surcharge 2",
-                quantity: 1,
-                unitPrice: 12.5,
-                total: 12.5,
-              },
-            ];
-          }
-          return [
-            {
-              name: `${resolvedService} (${resolvedBedrooms}, ${resolvedBathrooms})`,
-              description: `${resolvedService} (${resolvedBedrooms}, ${resolvedBathrooms})`,
-              quantity: 1,
-              unitPrice: Math.max(0, Number(total) - 12.5),
-              total: Math.max(0, Number(total) - 12.5),
-            },
-            {
-              name: "Fuel Surcharge 2",
-              description: "Fuel Surcharge 2",
-              quantity: 1,
-              unitPrice: 12.5,
-              total: 12.5,
-            },
-          ];
-        })();
+      : canonicalPkg.lineItems;
+
+  const effectiveTotal = Number(total) > 0 ? Number(total) : canonicalPkg.total;
+  const effectiveDeposit =
+    Number(depositRequired) >= 100 ? Number(depositRequired) : canonicalPkg.depositRequired || 100;
+  const effectiveNotes = buildCleaningSummaryMessage(resolvedService, notes);
 
   // Check if a quote or client for this person was already created recently to prevent duplicate creations
   const normalizePersonKey = (s?: string) =>
@@ -5764,12 +5747,12 @@ app.post("/api/database/quotes", async (req, res) => {
       clientPhone: mergedClientPhone,
       clientEmail: mergedClientEmail,
       serviceAddress: mergedServiceAddress,
-      service: resolvedService,
+      service: canonicalPkg.cleanItemName || resolvedService,
       bedrooms: resolvedBedrooms,
       bathrooms: resolvedBathrooms,
-      total: Number(total) || 280,
-      depositRequired: Number(depositRequired) || 0,
-      notes,
+      total: effectiveTotal,
+      depositRequired: effectiveDeposit,
+      notes: effectiveNotes,
       createRequestOnly: Boolean(createRequestOnly),
       existingJobberQuoteId: existingRealJobberQuoteId,
       existingJobberClientId: existingRealJobberClientId,
@@ -5807,13 +5790,19 @@ app.post("/api/database/quotes", async (req, res) => {
     clientPhone: clientPhone?.trim() || "(780) 555-0199",
     clientEmail: clientEmail?.trim() || "",
     serviceAddress: serviceAddress?.trim() || "Edmonton, AB",
-    service: resolvedService,
+    service: canonicalPkg.cleanItemName || resolvedService,
     bedrooms: resolvedBedrooms,
     bathrooms: resolvedBathrooms,
     quoteStatus: quoteStatus || existingRecentQuote?.quoteStatus || "DRAFT",
-    total: Number(total) || 280,
-    discountAmount: Number(discountAmount) || 0,
-    depositRequired: Number(depositRequired) || 0,
+    subtotal: canonicalPkg.subtotal,
+    taxAmount: canonicalPkg.taxAmount,
+    taxLabel: canonicalPkg.taxLabel,
+    fuelSurcharge: canonicalPkg.fuelSurcharge,
+    total: effectiveTotal,
+    discountAmount: Number(discountAmount ?? canonicalPkg.discountAmount) || 10,
+    depositRequired: effectiveDeposit,
+    estimatedCost: canonicalPkg.estimatedCost,
+    estimatedMargin: canonicalPkg.estimatedMargin,
     createdAt: existingRecentQuote?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     syncedAt: new Date().toISOString(),
@@ -5831,7 +5820,7 @@ app.post("/api/database/quotes", async (req, res) => {
     jobberRequestId: pushRes.jobberRequestId,
     googleSheetSynced: true,
     googleSheetUrl,
-    notes: notes || "",
+    notes: effectiveNotes,
     lineItems: defaultLineItems,
     source: selectedSource || source || "Voice / Quick Quote",
     isLiveSynced: Boolean(pushRes.isLiveSynced),
@@ -7880,7 +7869,15 @@ const handleInboundLeadWebhook = (forcedPlatform?: string) => (req: any, res: an
   const requestedDate = String(
     body.date_of_service_requested || body.preferredDate || colMap["preferred_date"] || new Date().toISOString().slice(0, 10)
   ).trim();
-  const quotedAmount = Number(body.quotedAmount || 221.07);
+  const inboundPkg = buildCanonicalQuoteBreakdown({
+    service: serviceRequested,
+    bedrooms,
+    bathrooms,
+    source,
+    sourceTab,
+    notes: body.message || body.notes,
+  });
+  const quotedAmount = Number(body.quotedAmount) > 0 ? Number(body.quotedAmount) : inboundPkg.total;
 
   const store = loadStore(projectId);
   const leadId = `lead-webhook-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
@@ -8870,12 +8867,18 @@ app.post("/api/leads/sync", async (req, res) => {
   });
 });
 
-// POST /api/leads/add: Add 1 or multiple leads (FB Lead, Google Lead, Voice Quote, or Pasted Table rows) to the Clean Sheet
+// POST /api/leads/add (and /api/leads): Add 1 or multiple leads (FB Lead, Google Lead, Voice Quote, or Pasted Table rows) to the Clean Sheet
 // and optionally execute Step 1 (Create Client & Property in Jobber) -> Step 2 (Create Request & Quote in Jobber)
-app.post("/api/leads/add", async (req, res) => {
+app.post(["/api/leads", "/api/leads/add"], async (req, res) => {
   const projectId = getProjectId(req);
   const { leads: incomingLeads, lead: singleLead, syncToJobber = false, createRequestOnly = false } = req.body || {};
-  const rawItems = Array.isArray(incomingLeads) ? incomingLeads : singleLead ? [singleLead] : [];
+  const rawItems = Array.isArray(incomingLeads)
+    ? incomingLeads
+    : singleLead
+    ? [singleLead]
+    : req.body?.customerName || req.body?.phone
+    ? [req.body]
+    : [];
   if (rawItems.length === 0) {
     return res.status(400).json({ error: "Lead payload is required" });
   }
@@ -8896,11 +8899,12 @@ app.post("/api/leads/add", async (req, res) => {
   if (!Array.isArray(store.adLeads)) store.adLeads = [];
   (store as any).cleanSheetExplicitlyBlank = false;
 
+  const activeJobberToken = syncToJobber ? await ensureValidJobberToken() : jobberConfig.accessToken;
   const addedLeads: any[] = [];
   let createdQuotesCount = 0;
 
   for (const item of rawItems) {
-    const { source, sourceTab } = resolveCleanSheetTab(item.sourceTab || item.source);
+    const { source, sourceTab } = resolveCleanSheetTab(item.sourceTab || item.source || req.body?.sourceTab);
     const customerName = String(item.customerName || item.name || "New Lead").trim();
     const phone = String(item.phone || item.clientPhone || "").trim();
     const email = String(item.email || item.clientEmail || "").trim();
@@ -8910,9 +8914,28 @@ app.post("/api/leads/add", async (req, res) => {
       String(item.postalCode || address.match(/[A-Z]\d[A-Z]\s*\d[A-Z]\d/i)?.[0]?.toUpperCase() || "").trim();
     const bedrooms = String(item.bedrooms || "3 Bedrooms").trim();
     const bathrooms = String(item.bathrooms || "2 Bathrooms").trim();
-    const serviceRequested = String(item.serviceRequested || item.service || "Residential Standard Cleaning").trim();
-    const quotedAmount = Number(item.quotedAmount || item.total || 221.07);
-    const depositRequired = Number(item.depositRequired ?? 50);
+    const rawServiceRequested = String(item.serviceRequested || item.service || "Move-Out Cleaning").trim();
+
+    // Build canonical TidyUps quote package (Service Package + $20 Fuel Surcharge - $10 Ad Discount + 12.5% Federal Tax & Supplies + $100 Deposit)
+    const canonicalPkg = buildCanonicalQuoteBreakdown({
+      service: rawServiceRequested,
+      bedrooms,
+      bathrooms,
+      source,
+      sourceTab,
+      depositOverride: item.depositRequired !== undefined && Number(item.depositRequired) >= 100 ? Number(item.depositRequired) : 100,
+      notes: item.notes,
+      catalog: store.serviceCatalog || CANONICAL_SERVICE_CATALOG,
+    });
+
+    const serviceRequested = canonicalPkg.cleanItemName || rawServiceRequested;
+    const rawEnteredAmount = Number(item.quotedAmount || item.total || 0);
+    // If user left default 221.07 or 0, or if it matches pre-tax service total, use the full canonical total with Fuel ($20), Promo (-$10), and 12.5% Tax
+    const quotedAmount =
+      !rawEnteredAmount || rawEnteredAmount === 221.07 || rawEnteredAmount === canonicalPkg.serviceTotal
+        ? canonicalPkg.total
+        : rawEnteredAmount;
+    const depositRequired = canonicalPkg.depositRequired;
 
     let jobberClientId = item.jobberClientId;
     let quoteId = item.quoteId;
@@ -8931,10 +8954,11 @@ app.post("/api/leads/add", async (req, res) => {
           bathrooms,
           total: quotedAmount,
           depositRequired,
-          notes: item.notes || `Added from Clean Google Sheet (${sourceTab})`,
+          notes: canonicalPkg.summaryMessage,
+          lineItems: canonicalPkg.lineItems,
           createRequestOnly: Boolean(createRequestOnly),
         },
-        jobberConfig.accessToken,
+        activeJobberToken,
         getJobberCreds()
       );
       jobberClientId = pushRes.jobberClientId;
@@ -8954,8 +8978,16 @@ app.post("/api/leads/add", async (req, res) => {
           bedrooms,
           bathrooms,
           quoteStatus: "DRAFT" as const,
+          subtotal: canonicalPkg.subtotal,
+          taxAmount: canonicalPkg.taxAmount,
+          taxLabel: canonicalPkg.taxLabel,
+          fuelSurcharge: canonicalPkg.fuelSurcharge,
+          discountAmount: canonicalPkg.discountAmount,
           total: quotedAmount,
           depositRequired,
+          estimatedCost: canonicalPkg.estimatedCost,
+          estimatedMargin: canonicalPkg.estimatedMargin,
+          lineItems: canonicalPkg.lineItems,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           syncedAt: new Date().toISOString(),
@@ -8969,7 +9001,8 @@ app.post("/api/leads/add", async (req, res) => {
           jobberRequestId: pushRes.jobberRequestId,
           googleSheetSynced: true,
           googleSheetUrl: googleSheetsSyncState.sheetUrl,
-          notes: item.notes || "",
+          notes: canonicalPkg.summaryMessage,
+          source: sourceTab,
           isLiveSynced: Boolean(pushRes.isLiveSynced),
           isLocal: !pushRes.isLiveSynced,
         };
@@ -9001,7 +9034,7 @@ app.post("/api/leads/add", async (req, res) => {
       quoteId,
       quoteNumber,
       quotedAmount,
-      notes: item.notes || "",
+      notes: item.notes || `${serviceRequested} (${canonicalPkg.hours} hrs @ $${canonicalPkg.hourlyRate.toFixed(2)}/hr + $${canonicalPkg.fuelSurcharge.toFixed(2)} Fuel - $${canonicalPkg.discountAmount.toFixed(2)} Promo + 12.5% Tax = $${quotedAmount.toFixed(2)})`,
       missingPhone: !phone,
     };
 
@@ -9053,7 +9086,7 @@ app.post("/api/leads/add", async (req, res) => {
     clients: store.clients,
     message: syncToJobber
       ? `✓ Step 1: Created Client in Jobber → Step 2: Created ${
-          createRequestOnly ? "Request" : `Quote (${createdQuotesCount})`
+          createRequestOnly ? "Request" : `Quote (${createdQuotesCount}) with Service + $20 Fuel - $10 Promo + 12.5% Tax`
         } in Jobber & added ${addedLeads.length} row(s) to Clean Google Sheet!`
       : `✓ Added ${addedLeads.length} row(s) to your Clean Google Sheet!`,
   });
@@ -9073,21 +9106,44 @@ app.post("/api/leads/:id/sync-jobber", async (req, res) => {
     return res.status(404).json({ error: "Lead row not found" });
   }
 
+  const activeJobberToken = await ensureValidJobberToken();
+
+  // Build canonical TidyUps quote package so pushing from the 7-Tab Clean Leads Sheet produces the exact same quote as Master Quotes
+  const canonicalPkg = buildCanonicalQuoteBreakdown({
+    service: lead.serviceRequested || "Move-Out Cleaning",
+    bedrooms: lead.bedrooms || "3 Bedrooms",
+    bathrooms: lead.bathrooms || "2 Bathrooms",
+    source: lead.source,
+    sourceTab: lead.sourceTab,
+    depositOverride: 100,
+    notes: lead.notes,
+    catalog: store.serviceCatalog || CANONICAL_SERVICE_CATALOG,
+  });
+
+  const resolvedTotal =
+    !lead.quotedAmount || Number(lead.quotedAmount) === 221.07 || Number(lead.quotedAmount) === canonicalPkg.serviceTotal
+      ? canonicalPkg.total
+      : Number(lead.quotedAmount);
+
+  lead.quotedAmount = resolvedTotal;
+  lead.serviceRequested = canonicalPkg.cleanItemName || lead.serviceRequested;
+
   const pushRes = await pushQuoteToJobber(
     {
       clientName: lead.customerName,
       clientPhone: lead.phone,
       clientEmail: lead.email,
       serviceAddress: [lead.address, lead.city || "Edmonton", "AB", lead.postalCode].filter(Boolean).join(", "),
-      service: lead.serviceRequested || "Residential Standard Cleaning",
+      service: canonicalPkg.cleanItemName || lead.serviceRequested || "Move-Out Cleaning",
       bedrooms: lead.bedrooms || "3 Bedrooms",
       bathrooms: lead.bathrooms || "2 Bathrooms",
-      total: Number(lead.quotedAmount) || 221.07,
-      depositRequired: 50,
-      notes: lead.notes || `Synced from Clean Google Sheet (${lead.sourceTab})`,
+      total: resolvedTotal,
+      depositRequired: canonicalPkg.depositRequired,
+      notes: canonicalPkg.summaryMessage,
+      lineItems: canonicalPkg.lineItems,
       createRequestOnly: Boolean(createRequestOnly),
     },
-    jobberConfig.accessToken,
+    activeJobberToken,
     getJobberCreds()
   );
 
@@ -9107,12 +9163,20 @@ app.post("/api/leads/:id/sync-jobber", async (req, res) => {
       clientPhone: lead.phone,
       clientEmail: lead.email,
       serviceAddress: [lead.address, lead.city || "Edmonton", "AB", lead.postalCode].filter(Boolean).join(", "),
-      service: lead.serviceRequested || "Residential Standard Cleaning",
+      service: canonicalPkg.cleanItemName || lead.serviceRequested || "Move-Out Cleaning",
       bedrooms: lead.bedrooms || "3 Bedrooms",
       bathrooms: lead.bathrooms || "2 Bathrooms",
       quoteStatus: "DRAFT" as const,
-      total: Number(lead.quotedAmount) || 221.07,
-      depositRequired: 50,
+      subtotal: canonicalPkg.subtotal,
+      taxAmount: canonicalPkg.taxAmount,
+      taxLabel: canonicalPkg.taxLabel,
+      fuelSurcharge: canonicalPkg.fuelSurcharge,
+      discountAmount: canonicalPkg.discountAmount,
+      total: resolvedTotal,
+      depositRequired: canonicalPkg.depositRequired,
+      estimatedCost: canonicalPkg.estimatedCost,
+      estimatedMargin: canonicalPkg.estimatedMargin,
+      lineItems: canonicalPkg.lineItems,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       syncedAt: new Date().toISOString(),
@@ -9126,7 +9190,8 @@ app.post("/api/leads/:id/sync-jobber", async (req, res) => {
       jobberRequestId: pushRes.jobberRequestId,
       googleSheetSynced: true,
       googleSheetUrl: googleSheetsSyncState.sheetUrl,
-      notes: lead.notes || "",
+      notes: canonicalPkg.summaryMessage,
+      source: lead.sourceTab || lead.source,
       isLiveSynced: Boolean(pushRes.isLiveSynced),
       isLocal: !pushRes.isLiveSynced,
     };

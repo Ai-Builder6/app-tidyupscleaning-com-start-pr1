@@ -6,6 +6,7 @@
 
 import { mergeWithBaseScheduledVisits } from "../data/jobberCalendarData";
 import { isFalseOrCatalogLeadRow } from "./styledLeadsWorkbookBuilder";
+import { buildCanonicalQuoteBreakdown, buildCleaningSummaryMessage } from "../data/serviceCatalogData";
 
 export const JOBBER_GRAPHQL_URL = "https://api.getjobber.com/api/graphql";
 export const JOBBER_GRAPHQL_VERSION = "2025-04-16";
@@ -2549,27 +2550,69 @@ async function executePushQuoteToJobberInternal(
 
       // ─────────────────────────────────────────────────────────────────────────
       // STEP 2B: Create (or Update existing) Draft Quote in Jobber (quoteCreate / quoteEdit)
-      // IMPORTANT: Line item descriptions must ONLY contain the clean service scope,
-      // never the phone call transcription. Call summaries/links belong in the quote message/note.
+      // Uses canonical TidyUps quote package so 7-Tab Clean Leads Sheet and Master Quotes
+      // produce identical Jobber drafts (Summary Header + Service + $20 Fuel - $10 Discount + 12.5% Tax + $100 Deposit)
       // ─────────────────────────────────────────────────────────────────────────
-      const cleanQuoteNoteMessage = (() => {
-        const rawNote = String(quote.notes || "").trim();
-        if (!rawNote) {
-          return `Thank you for choosing TidyUps Cleaning Service Inc! ${quoteTitle} at ${
-            quote.serviceAddress || "Edmonton, AB"
-          }. Dispatch Summary: https://app.tidyupscleaning.com/?view=QUICK_QUOTE`;
-        }
-        return rawNote.includes("https://")
-          ? rawNote
-          : `${rawNote} | Call & Quote Link: https://app.tidyupscleaning.com/?view=QUICK_QUOTE`;
-      })();
+      const canonicalPkg = buildCanonicalQuoteBreakdown({
+        service: quote.service || quoteTitle,
+        bedrooms: quote.bedrooms,
+        bathrooms: quote.bathrooms,
+        depositOverride: Number(quote.depositRequired) >= 100 ? Number(quote.depositRequired) : 100,
+        notes: quote.notes,
+      });
+
+      const cleanQuoteNoteMessage = buildCleaningSummaryMessage(
+        quote.service || quoteTitle,
+        quote.notes
+      );
 
       const sanitizeLineItemDescription = (rawDesc: string | undefined, fallbackTitle: string): string => {
         const base = String(rawDesc || fallbackTitle).trim();
         // Strip any trailing "| Notes: ..." that might contain call transcripts
         const withoutNotes = base.split(/\s*\|\s*Notes:/i)[0].trim();
-        return withoutNotes.length > 200 ? withoutNotes.slice(0, 200).trim() : withoutNotes || fallbackTitle;
+        return withoutNotes.length > 250 ? withoutNotes.slice(0, 250).trim() : withoutNotes || fallbackTitle;
       };
+
+      const hasFuelInProvided =
+        Array.isArray(quote.lineItems) &&
+        quote.lineItems.some((li) => /fuel|surcharge/i.test(`${li.name || ""} ${li.description || ""}`));
+
+      const effectiveLineItems =
+        Array.isArray(quote.lineItems) && quote.lineItems.length >= 2 && hasFuelInProvided
+          ? quote.lineItems.map((li, idx) => {
+              const qty = Number(li.quantity) || 1;
+              const up = Number(li.unitPrice ?? li.total ?? 0);
+              const isPrimaryService = idx === 0 && up > 0 && !/fuel|discount/i.test(li.name || li.description || "");
+              return {
+                name: li.name || (isPrimaryService ? canonicalPkg.cleanItemName : quoteTitle),
+                description: sanitizeLineItemDescription(
+                  li.description,
+                  isPrimaryService
+                    ? `${canonicalPkg.cleanItemName}\n${canonicalPkg.crewLabel}`
+                    : li.name || quoteTitle
+                ),
+                quantity: qty,
+                unitPrice: up,
+                unitCost:
+                  (li as any).unitCost !== undefined
+                    ? Number((li as any).unitCost)
+                    : isPrimaryService
+                    ? Math.round(up * 0.5 * 100) / 100
+                    : 0,
+              };
+            })
+          : canonicalPkg.lineItems.map((li) => ({
+              name: li.name,
+              description: li.description,
+              quantity: li.quantity,
+              unitPrice: li.unitPrice,
+              unitCost: li.unitCost ?? 0,
+            }));
+
+      const effectiveDeposit =
+        Number(quote.depositRequired) >= 100
+          ? Number(quote.depositRequired)
+          : canonicalPkg.depositRequired || 100;
 
       if (!quote.createRequestOnly && jobberClientId && propertyId) {
         if (liveQuoteId) {
@@ -2592,7 +2635,7 @@ async function executePushQuoteToJobberInternal(
               }
             `;
             const editAttrs: any = {
-              title: quoteTitle,
+              title: canonicalPkg.cleanItemName || quoteTitle,
               message: cleanQuoteNoteMessage,
             };
             const editRes = await jobberGraphql<any>(
@@ -2612,26 +2655,22 @@ async function executePushQuoteToJobberInternal(
             // Keep existing liveQuoteId metadata if quoteEdit fails
           }
         } else {
-          const lineItemsInput =
-            quote.lineItems && quote.lineItems.length > 0
-              ? quote.lineItems.map((li) => ({
-                  name: li.name || quoteTitle,
-                  description: sanitizeLineItemDescription(li.description, li.name || quoteTitle),
-                  quantity: Number(li.quantity) || 1,
-                  unitPrice: Number(li.unitPrice ?? li.total ?? 0),
-                  saveToProductsAndServices: false,
-                }))
-              : [
-                  {
-                    name: quoteTitle,
-                    description: `${quoteTitle} — ${quote.serviceAddress || "Edmonton, AB"}${
-                      quote.depositRequired ? ` (Deposit: $${quote.depositRequired})` : ""
-                    }`,
-                    quantity: 1,
-                    unitPrice: Number(quote.total) || 280,
-                    saveToProductsAndServices: false,
-                  },
-                ];
+          const lineItemsWithCost = effectiveLineItems.map((li) => ({
+            name: li.name,
+            description: li.description,
+            quantity: Number(li.quantity) || 1,
+            unitPrice: Number(li.unitPrice),
+            ...(li.unitCost && li.unitCost > 0 ? { unitCost: Number(li.unitCost) } : {}),
+            saveToProductsAndServices: false,
+          }));
+
+          const lineItemsBasic = effectiveLineItems.map((li) => ({
+            name: li.name,
+            description: li.description,
+            quantity: Number(li.quantity) || 1,
+            unitPrice: Number(li.unitPrice),
+            saveToProductsAndServices: false,
+          }));
 
           const createQuoteMutation = `
             mutation CreateJobberQuote($attributes: QuoteCreateAttributes!) {
@@ -2650,38 +2689,58 @@ async function executePushQuoteToJobberInternal(
             }
           `;
 
-          const baseAttributes: any = {
+          const baseAttributesWithCost: any = {
             clientId: jobberClientId,
             propertyId,
-            title: quoteTitle,
+            title: canonicalPkg.cleanItemName || quoteTitle,
             message: cleanQuoteNoteMessage,
-            lineItems: lineItemsInput,
-          };
-          if (Number(quote.depositRequired) > 0) {
-            baseAttributes.deposit = {
-              rate: Number(quote.depositRequired),
+            lineItems: lineItemsWithCost,
+            deposit: {
+              rate: effectiveDeposit,
               type: "Unit",
-            };
-          }
+            },
+          };
+
+          const baseAttributesBasic: any = {
+            clientId: jobberClientId,
+            propertyId,
+            title: canonicalPkg.cleanItemName || quoteTitle,
+            message: cleanQuoteNoteMessage,
+            lineItems: lineItemsBasic,
+            deposit: {
+              rate: effectiveDeposit,
+              type: "Unit",
+            },
+          };
 
           let createdQuote: any = null;
           try {
             const quoteRes = await jobberGraphql<any>(
               cleanToken,
               createQuoteMutation,
-              { attributes: baseAttributes },
+              { attributes: baseAttributesWithCost },
               credentials
             );
             createdQuote = quoteRes?.quoteCreate?.quote;
           } catch {
-            const { deposit: _dep, ...fallbackAttributes } = baseAttributes;
-            const quoteRes2 = await jobberGraphql<any>(
-              cleanToken,
-              createQuoteMutation,
-              { attributes: fallbackAttributes },
-              credentials
-            );
-            createdQuote = quoteRes2?.quoteCreate?.quote;
+            try {
+              const quoteResBasic = await jobberGraphql<any>(
+                cleanToken,
+                createQuoteMutation,
+                { attributes: baseAttributesBasic },
+                credentials
+              );
+              createdQuote = quoteResBasic?.quoteCreate?.quote;
+            } catch {
+              const { deposit: _dep, ...fallbackAttributes } = baseAttributesBasic;
+              const quoteResFallback = await jobberGraphql<any>(
+                cleanToken,
+                createQuoteMutation,
+                { attributes: fallbackAttributes },
+                credentials
+              );
+              createdQuote = quoteResFallback?.quoteCreate?.quote;
+            }
           }
 
           if (createdQuote?.id) {

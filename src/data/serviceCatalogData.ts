@@ -2325,3 +2325,335 @@ export function matchCatalogItem(
 
   return finalizeMatchedItem(catalog[0]);
 }
+
+export interface CanonicalQuoteLineItem {
+  name: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  unitCost?: number;
+  totalCost?: number;
+  taxable?: boolean;
+}
+
+export interface CanonicalQuoteBreakdown {
+  serviceTitle: string;
+  serviceName: string;
+  cleanItemName: string;
+  cleanersCount: number;
+  crewLabel: string;
+  hours: number;
+  hourlyRate: number;
+  serviceTotal: number;
+  fuelSurcharge: number;
+  discountAmount: number;
+  discountName: string;
+  discountDescription: string;
+  subtotal: number;
+  taxRate: number;
+  taxLabel: string;
+  taxAmount: number;
+  total: number;
+  estimatedCost: number;
+  costs: number;
+  estimatedMargin: number;
+  estimatedMarginPercent: number;
+  depositRequired: number;
+  summaryMessage: string;
+  cleaningSummaryMessage: string;
+  lineItems: CanonicalQuoteLineItem[];
+}
+
+/**
+ * Generates the official TidyUps Cleaning Summary block shown at the top of Jobber Quotes
+ * (matching the QA reference screenshots for Move-Out, Deep, and Standard Cleaning).
+ */
+export function buildCleaningSummaryMessage(
+  serviceType?: string,
+  customNotes?: string
+): string {
+  const norm = String(serviceType || '').toLowerCase();
+  const isMoveOut =
+    norm.includes('move') || norm.includes('vacate') || norm.includes('turnover') || norm.includes('post');
+  const isDeep = norm.includes('deep') || norm.includes('scrub');
+
+  let headerBlock = '';
+  if (isMoveOut) {
+    headerBlock = [
+      'Move-Out Cleaning Summary:',
+      'The Standard Move-Out Cleaning Service encompasses the following areas:',
+      '',
+      '**Kitchen**: Thorough cleaning of appliances both inside and out, cupboards, countertops, sinks, and more.',
+      '',
+      '**Bathrooms**: Comprehensive sanitation of toilets, tubs and showers, sinks, mirrors, and additional fixtures.',
+      '',
+      '**Floors**: Detailed vacuuming and mopping, including baseboards.',
+      '',
+      '**Walls, Doors, and Trim**: Cleaning of all surfaces to ensure a polished finish.',
+      '',
+      '**Windows**: Interior window cleaning, including tracks and sills.',
+      '',
+      '**Additional Details**: Attention to closets, light fixtures, vents, and other essential areas.',
+    ].join('\n');
+  } else if (isDeep) {
+    headerBlock = [
+      'Deep Cleaning Summary:',
+      'The Comprehensive Deep Cleaning Service encompasses the following areas:',
+      '',
+      '**Kitchen**: Thorough degreasing and cleaning of appliances, cupboard exteriors, countertops, sinks, and more.',
+      '',
+      '**Bathrooms**: Comprehensive sanitation and descaling of toilets, tubs and showers, sinks, mirrors, and additional fixtures.',
+      '',
+      '**Floors**: Detailed vacuuming and mopping, including baseboards.',
+      '',
+      '**Walls, Doors, and Trim**: Cleaning of doors, frames, trim, and high-touch surfaces to ensure a polished finish.',
+      '',
+      '**Windows**: Interior window cleaning, including sills and ledges.',
+      '',
+      '**Additional Details**: Attention to blinds, light fixtures, vents, and other essential areas.',
+    ].join('\n');
+  } else {
+    headerBlock = [
+      'Standard Cleaning Summary:',
+      'The Standard Residential Cleaning Service encompasses the following areas:',
+      '',
+      '**Kitchen**: Thorough cleaning of appliance exteriors, microwave interior, cupboards, countertops, sinks, and more.',
+      '',
+      '**Bathrooms**: Comprehensive sanitation of toilets, tubs and showers, sinks, mirrors, and additional fixtures.',
+      '',
+      '**Floors**: Detailed vacuuming and mopping, including baseboards.',
+      '',
+      '**Walls, Doors, and Trim**: Wiping of high-touch surfaces, doors, and trim to ensure a polished finish.',
+      '',
+      '**Windows**: Interior mirror and glass surface cleaning, including sills.',
+      '',
+      '**Additional Details**: Attention to dusting, light fixtures, vents, and other essential areas.',
+    ].join('\n');
+  }
+
+  const trimmedNotes = String(customNotes || '').trim();
+  if (!trimmedNotes) {
+    return headerBlock;
+  }
+  if (trimmedNotes.includes('Cleaning Summary:') && trimmedNotes.includes('**Kitchen**')) {
+    return trimmedNotes;
+  }
+  return `${headerBlock}\n\n${trimmedNotes}`;
+}
+
+/**
+ * Canonical Quote Package Builder used across:
+ * 1) 7-Tab Clean Leads Sheet (LeadsView + /api/leads/add + /api/leads/:id/sync-jobber)
+ * 2) Master Leads & Quotes Hub (MasterLeadsAndQuotesHubView)
+ * 3) Quick Quote Calculator (QuickQuoteModal)
+ * 4) Quotes View & Quote Detail Modal (QuotesView + QuoteDetailModal + /api/database/quotes)
+ * 5) Jobber GraphQL Quote Push (pushQuoteToJobber)
+ *
+ * Ensures EVERY quote has:
+ * - Service Package line item (e.g. "3Bed 3Bath Moveout Cleaning" / "3Bed 3Bath Moveout Cleaning\n2 Pro Cleaners", Qty = hours, Unit Price = $105.00, 50% unitCost)
+ * - Fuel Surcharge line item ("Fuel Surcharge", Qty = 1, Unit Price = $20.00)
+ * - Ad Promo Discount line item ("Discount $10 Google Ad" or "Discount $10 Facebook Ad", Qty = 1, Unit Price = -$10.00)
+ * - Subtotal + Federal Tax & Supplies (12.5%) = Total (e.g. $325.00 + $40.63 = $365.63)
+ * - Costs (50% of service labor = $157.50) & Estimated Margin ($167.50 / 51.54%)
+ * - Required Deposit ($100.00)
+ */
+export function buildCanonicalQuoteBreakdown(params: {
+  service?: string;
+  serviceRequested?: string;
+  bedrooms?: string;
+  bathrooms?: string;
+  source?: string;
+  sourceTab?: string;
+  quotedAmount?: number;
+  hours?: number;
+  hoursOverride?: number;
+  hourlyRate?: number;
+  hourlyRateOverride?: number;
+  cleanersCount?: number;
+  cleanersCountOverride?: number;
+  fuelSurcharge?: number;
+  fuelSurchargeOverride?: number;
+  discountAmount?: number;
+  discountAmountOverride?: number;
+  depositAmount?: number;
+  depositOverride?: number;
+  notes?: string;
+  customNotes?: string;
+  catalog?: ServiceCatalogItem[];
+}): CanonicalQuoteBreakdown {
+  const bedrooms = params.bedrooms || '3 Bedrooms';
+  const bathrooms = params.bathrooms || '2 Bathrooms';
+  const rawService = params.service || params.serviceRequested || 'Move-Out Cleaning';
+  const catalog = params.catalog && params.catalog.length > 0 ? params.catalog : CANONICAL_SERVICE_CATALOG;
+
+  const cleanersOverride = params.cleanersCountOverride ?? params.cleanersCount;
+  const rateOverride = params.hourlyRateOverride ?? params.hourlyRate;
+  const hrsOverride = params.hoursOverride ?? params.hours;
+  const fuelOverride = params.fuelSurchargeOverride ?? params.fuelSurcharge;
+  const discOverride = params.discountAmountOverride ?? params.discountAmount;
+  const depOverride = params.depositOverride ?? params.depositAmount;
+  const notesVal = params.notes ?? params.customNotes;
+
+  const matched = matchCatalogItem(
+    rawService,
+    bedrooms,
+    bathrooms,
+    catalog,
+    cleanersOverride
+  );
+
+  const bedNum = String(bedrooms).match(/\d+/)?.[0] || '3';
+  const bathNum = String(bathrooms).match(/\d+(?:\.5)?/)?.[0] || '2';
+  const normService = rawService.toLowerCase();
+  const isMoveOut =
+    normService.includes('move') || normService.includes('vacate') || matched?.category === 'MOVE_OUT';
+  const isDeep =
+    normService.includes('deep') || normService.includes('scrub') || matched?.category === 'DEEP_CLEAN';
+
+  const typeLabel = isMoveOut
+    ? 'Moveout Cleaning'
+    : isDeep
+    ? 'Deep Cleaning'
+    : 'Standard Cleaning';
+
+  // Clean concise name matching Jobber screenshot: e.g. "3Bed 3Bath Moveout Cleaning"
+  const cleanItemName =
+    matched?.name
+      ? matched.name
+          .replace(/\s*2026\b/gi, '')
+          .replace(/\s*\([123]\s*Cleaners?[^)]*\)/gi, '')
+          .trim()
+      : `${bedNum}Bed ${bathNum}Bath ${typeLabel}`;
+
+  const cleanersCount =
+    cleanersOverride ||
+    (rateOverride && rateOverride >= 90
+      ? 2
+      : rateOverride && rateOverride <= 60
+      ? 1
+      : matched?.cleanersCount || 2);
+
+  const crewLabel = `${cleanersCount} Pro Cleaner${cleanersCount > 1 ? 's' : ''}`;
+
+  const hourlyRate =
+    rateOverride !== undefined && rateOverride > 0
+      ? Number(rateOverride)
+      : matched?.unitPrice || (cleanersCount >= 2 ? 105.0 : 52.5);
+
+  const hours =
+    hrsOverride !== undefined && hrsOverride > 0
+      ? Number(hrsOverride)
+      : matched?.quantity ?? matched?.baseHours ?? 3;
+
+  const serviceTotal = Math.round(hours * hourlyRate * 100) / 100;
+  const unitCost = Math.round(hourlyRate * 0.5 * 100) / 100;
+  const estimatedCost = Math.round(serviceTotal * 0.5 * 100) / 100;
+
+  const fuelSurcharge =
+    fuelOverride !== undefined && !isNaN(Number(fuelOverride))
+      ? Number(fuelOverride)
+      : 20.0;
+
+  const discountAmount =
+    discOverride !== undefined && !isNaN(Number(discOverride))
+      ? Math.abs(Number(discOverride))
+      : 10.0;
+
+  const combinedSource = `${params.source || ''} ${params.sourceTab || ''}`.toLowerCase();
+  const isFacebook = combinedSource.includes('facebook') || combinedSource.includes('fb') || combinedSource.includes('meta');
+  const adChannelName = isFacebook ? 'Facebook Ad' : 'Google Ad';
+  const discountName =
+    discountAmount === 10
+      ? `Discount $10 ${adChannelName}`
+      : `Discount $${discountAmount.toFixed(0)} ${adChannelName}`;
+  const discountDescription = `${discountName} Promo`;
+
+  const subtotal = Math.max(0, Math.round((serviceTotal + fuelSurcharge - discountAmount) * 100) / 100);
+  const taxRate = 0.125;
+  const taxLabel = 'Federal Tax & Supplies (12.5%)';
+  const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
+  const total = Math.round((subtotal + taxAmount) * 100) / 100;
+
+  const estimatedMargin = Math.round((subtotal - estimatedCost) * 100) / 100;
+  const estimatedMarginPercent =
+    subtotal > 0 ? Math.round((estimatedMargin / subtotal) * 10000) / 100 : 50;
+
+  const depositRequired =
+    depOverride !== undefined && Number(depOverride) > 0
+      ? Number(depOverride)
+      : matched?.depositRequired && matched.depositRequired >= 100
+      ? matched.depositRequired
+      : 100.0;
+
+  const lineItems: CanonicalQuoteLineItem[] = [
+    {
+      name: cleanItemName,
+      description: `${cleanItemName}\n${crewLabel}`,
+      quantity: hours,
+      unitPrice: hourlyRate,
+      total: serviceTotal,
+      unitCost,
+      totalCost: estimatedCost,
+      taxable: true,
+    },
+  ];
+
+  if (fuelSurcharge > 0) {
+    lineItems.push({
+      name: 'Fuel Surcharge',
+      description: 'Fuel Surcharge',
+      quantity: 1,
+      unitPrice: fuelSurcharge,
+      total: fuelSurcharge,
+      unitCost: 0,
+      totalCost: 0,
+      taxable: true,
+    });
+  }
+
+  if (discountAmount > 0) {
+    lineItems.push({
+      name: discountName,
+      description: discountDescription,
+      quantity: 1,
+      unitPrice: -discountAmount,
+      total: -discountAmount,
+      unitCost: 0,
+      totalCost: 0,
+      taxable: true,
+    });
+  }
+
+  const summaryMessage = buildCleaningSummaryMessage(rawService, notesVal);
+
+  return {
+    serviceTitle: cleanItemName,
+    serviceName: cleanItemName,
+    cleanItemName,
+    cleanersCount,
+    crewLabel,
+    hours,
+    hourlyRate,
+    serviceTotal,
+    fuelSurcharge,
+    discountAmount,
+    discountName,
+    discountDescription,
+    subtotal,
+    taxRate,
+    taxLabel,
+    taxAmount,
+    total,
+    estimatedCost,
+    costs: estimatedCost,
+    estimatedMargin,
+    estimatedMarginPercent,
+    depositRequired,
+    summaryMessage,
+    cleaningSummaryMessage: summaryMessage,
+    lineItems,
+  };
+}
+
+

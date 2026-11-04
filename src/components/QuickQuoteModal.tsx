@@ -25,6 +25,7 @@ import {
 import { getCustomerIntelligence } from '../services/customerIntelligenceService';
 import { CustomerIntelligenceBadge } from './CustomerIntelligenceBadge';
 import { AddressAutocompleteInput } from './AddressAutocompleteInput';
+import { buildCanonicalQuoteBreakdown, buildCleaningSummaryMessage } from '../data/serviceCatalogData';
 
 interface QuickQuoteModalProps {
   isOpen: boolean;
@@ -62,17 +63,17 @@ export const QuickQuoteModal: React.FC<QuickQuoteModalProps> = ({
   clients = [],
   projectId = 'dispatchgeeni',
 }) => {
-  // Calculator state matching Screenshot 2
+  // Calculator state matching QA Screenshots (2 Pro Cleaners @ $105/hr, $20 Fuel Surcharge, -$10 Ad Promo, 12.5% Federal Tax & Supplies, $100 Deposit)
   const [hours, setHours] = useState<number>(3);
-  const [crewSelection, setCrewSelection] = useState<'1_CLEANER' | '2_CLEANERS' | 'CUSTOM'>('1_CLEANER');
-  const [customHourlyRate, setCustomHourlyRate] = useState<number>(55);
+  const [crewSelection, setCrewSelection] = useState<'1_CLEANER' | '2_CLEANERS' | 'CUSTOM'>('2_CLEANERS');
+  const [customHourlyRate, setCustomHourlyRate] = useState<number>(105);
   const [selectedSource, setSelectedSource] = useState<string>('Google');
-  const [discountAmount, setDiscountAmount] = useState<number>(0);
-  const [fuelSurcharge, setFuelSurcharge] = useState<number>(12.50);
-  const [depositAmount, setDepositAmount] = useState<number>(0);
+  const [discountAmount, setDiscountAmount] = useState<number>(10);
+  const [fuelSurcharge, setFuelSurcharge] = useState<number>(20.00);
+  const [depositAmount, setDepositAmount] = useState<number>(100);
   const [quoteNote, setQuoteNote] = useState<string>('');
   const [applyTax, setApplyTax] = useState<boolean>(true);
-  const [taxRate] = useState<number>(0.125); // 12.5% tax per Screenshot 2
+  const [taxRate] = useState<number>(0.125); // 12.5% Federal Tax & Supplies
 
   // Customer Contact & Property Size Fields for Fast Phone Quoting + Booking System Sync
   const [customerName, setCustomerName] = useState<string>('');
@@ -80,8 +81,8 @@ export const QuickQuoteModal: React.FC<QuickQuoteModalProps> = ({
   const [customerEmail, setCustomerEmail] = useState<string>('');
   const [serviceAddress, setServiceAddress] = useState<string>('');
   const [bedrooms, setBedrooms] = useState<string>('3 Bedrooms');
-  const [bathrooms, setBathrooms] = useState<string>('2 Bathrooms');
-  const [serviceType, setServiceType] = useState<string>('Residential Standard Cleaning');
+  const [bathrooms, setBathrooms] = useState<string>('3 Bathrooms');
+  const [serviceType, setServiceType] = useState<string>('Turnover Move-Out / Vacate Cleaning');
   const [scheduledDate, setScheduledDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [scheduledTime, setScheduledTime] = useState<string>('10:00');
   const [assignedCleaners, setAssignedCleaners] = useState<string[]>([]);
@@ -102,7 +103,7 @@ export const QuickQuoteModal: React.FC<QuickQuoteModalProps> = ({
         setServiceAddress(fullAddr);
       }
       if (initialLead.serviceType || initialLead.serviceRequested) {
-        setServiceType(initialLead.serviceType || initialLead.serviceRequested || 'Residential Standard Cleaning');
+        setServiceType(initialLead.serviceType || initialLead.serviceRequested || 'Turnover Move-Out / Vacate Cleaning');
       }
       if (initialLead.bedrooms) {
         const bStr = String(initialLead.bedrooms);
@@ -124,20 +125,24 @@ export const QuickQuoteModal: React.FC<QuickQuoteModalProps> = ({
     return customHourlyRate;
   }, [crewSelection, customHourlyRate]);
 
-  // Formula matching Screenshot 2:
-  // "Pick the hours and the crew to price this job. Fuel ($12.50), and 12.5% tax are added automatically."
+  // Formula matching QA Screenshots:
+  // Service (3 hrs @ $105 = $315) + Fuel Surcharge ($20.00) - Promo Discount (-$10.00) = $325.00 Subtotal + 12.5% Federal Tax & Supplies ($40.63) = $365.63 Total
   const calculations = useMemo(() => {
     const labor = Math.round(hours * hourlyRate * 100) / 100;
     const subtotalBeforeDiscount = labor + Number(fuelSurcharge);
     const subtotal = Math.max(0, subtotalBeforeDiscount - Number(discountAmount));
     const tax = applyTax ? Math.round(subtotal * taxRate * 100) / 100 : 0;
     const total = Math.round((subtotal + tax) * 100) / 100;
+    const costs = Math.round(labor * 0.5 * 100) / 100;
+    const estimatedMargin = Math.round((subtotal - costs) * 100) / 100;
 
     return {
       labor,
       subtotal,
       tax,
       total,
+      costs,
+      estimatedMargin,
     };
   }, [hours, hourlyRate, fuelSurcharge, discountAmount, applyTax, taxRate]);
 
@@ -324,28 +329,68 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
     setIsSubmitting(true);
     setFeedbackNotice(null);
     try {
-      const lineItems = [
+      const isFbSource = /facebook|fb|meta|instagram/i.test(selectedSource);
+      const bedCount = parseInt(String(bedrooms).replace(/[^0-9]/g, ''), 10) || 3;
+      const bathCount = parseFloat(String(bathrooms).replace(/[^0-9.]/g, '')) || 3;
+      const isMoveOut = /move/i.test(serviceType);
+      const isDeep = /deep/i.test(serviceType);
+      const serviceItemName = isMoveOut
+        ? `${bedCount}Bed ${bathCount}Bath Moveout Cleaning`
+        : isDeep
+        ? `${bedCount}Bed ${bathCount}Bath Deep Cleaning`
+        : `${bedCount}Bed ${bathCount}Bath Basic Initial Cleaning`;
+      const crewLabel =
+        crewSelection === '1_CLEANER'
+          ? '1 Pro Cleaner'
+          : crewSelection === '2_CLEANERS'
+          ? '2 Pro Cleaners'
+          : `${assignedCleaners.length || 2} Pro Cleaners`;
+
+      const lineItems: any[] = [
         {
-          description: `${serviceType} — ${bedrooms}, ${bathrooms} (${hours} hrs @ $${hourlyRate.toFixed(2)}/hr)`,
+          name: serviceItemName,
+          description: `${serviceItemName}\n${crewLabel}`,
           quantity: hours,
           unitPrice: hourlyRate,
+          unitCost: Math.round(hourlyRate * 0.5 * 100) / 100,
           total: calculations.labor,
+          taxable: true,
         },
         {
-          description: 'Fuel & Travel Surcharge',
+          name: 'Fuel Surcharge',
+          description: 'Fuel Surcharge',
           quantity: 1,
           unitPrice: Number(fuelSurcharge),
+          unitCost: 0,
           total: Number(fuelSurcharge),
+          taxable: true,
         },
       ];
       if (Number(discountAmount) > 0) {
+        const promoName =
+          Number(discountAmount) === 10
+            ? isFbSource
+              ? 'Discount $10 Facebook Ad'
+              : 'Discount $10 Google Ad'
+            : `Discount $${Number(discountAmount).toFixed(0)} Promo`;
+        const promoDesc =
+          Number(discountAmount) === 10
+            ? isFbSource
+              ? 'Discount $10 Facebook Ad Promo'
+              : 'Discount $10 Google Ad Promo'
+            : `Discount $${Number(discountAmount).toFixed(2)} Applied`;
         lineItems.push({
-          description: 'Client Discount Applied',
+          name: promoName,
+          description: promoDesc,
           quantity: 1,
           unitPrice: -Number(discountAmount),
+          unitCost: 0,
           total: -Number(discountAmount),
+          taxable: true,
         });
       }
+
+      const cleaningSummaryNotes = buildCleaningSummaryMessage(serviceType, quoteNote);
 
       const res = await fetch(`/api/database/quotes?project=${projectId}`, {
         method: 'POST',
@@ -355,17 +400,17 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           clientPhone: customerPhone || '(780) 555-0199',
           clientEmail: customerEmail,
           serviceAddress: serviceAddress || 'Edmonton, AB',
-          service: `${serviceType} (${bedrooms}, ${bathrooms} • ${hours} hrs)`,
+          service: serviceItemName,
           bedrooms,
           bathrooms,
           total: calculations.total,
           discountAmount: Number(discountAmount) || 0,
-          depositRequired: depositAmount,
+          depositRequired: Number(depositAmount) || 100,
           scheduledDate,
           scheduledTime,
           assignedCleaners,
           lineItems,
-          notes: `Property: ${bedrooms}, ${bathrooms}. Fast Quote: ${hours} hrs @ $${hourlyRate}/hr + $${fuelSurcharge} fuel. Source: ${selectedSource}. Specific Info: ${quoteNote}`,
+          notes: cleaningSummaryNotes,
         }),
       });
       const data = await res.json();
@@ -536,7 +581,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
             )}
           </div>
 
-          {/* 3. Big Calculated Price Box (Matches Screenshot 2) */}
+          {/* 3. Big Calculated Price Box (Matches QA Screenshots) */}
           <div className="p-4 bg-[#191621] border border-[#2b2536] rounded-2xl flex items-center justify-between">
             <div>
               <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">Total Quoted Price</span>
@@ -544,15 +589,19 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
                 <span className="text-pink-500">$</span>
                 <span>{calculations.total.toFixed(2)}</span>
               </div>
+              <div className="text-[10px] text-slate-400 font-mono mt-1">
+                Costs: ${calculations.costs.toFixed(2)} • Margin: ${calculations.estimatedMargin.toFixed(2)} • Dep: ${Number(depositAmount).toFixed(2)}
+              </div>
             </div>
 
             <div className="text-right text-[11px] text-slate-400 space-y-0.5">
-              <div>Labor: <span className="font-mono text-slate-200">${calculations.labor.toFixed(2)}</span></div>
-              <div>Fuel: <span className="font-mono text-slate-200">+${Number(fuelSurcharge).toFixed(2)}</span></div>
+              <div>Service ({hours}h): <span className="font-mono text-slate-200">${calculations.labor.toFixed(2)}</span></div>
+              <div>Fuel Surcharge: <span className="font-mono text-slate-200">+${Number(fuelSurcharge).toFixed(2)}</span></div>
               {discountAmount > 0 && (
-                <div className="text-emerald-400 font-bold">Discount: -${Number(discountAmount).toFixed(2)}</div>
+                <div className="text-emerald-400 font-bold">Ad Promo: -${Number(discountAmount).toFixed(2)}</div>
               )}
-              <div>Tax (12.5%): <span className="font-mono text-slate-200">+${calculations.tax.toFixed(2)}</span></div>
+              <div>Subtotal: <span className="font-mono text-slate-200">${calculations.subtotal.toFixed(2)}</span></div>
+              <div>Federal Tax &amp; Supplies (12.5%): <span className="font-mono text-slate-200">+${calculations.tax.toFixed(2)}</span></div>
             </div>
           </div>
 
@@ -617,7 +666,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
             </div>
           </div>
 
-          {/* 6. Fuel Surcharge & Deposit (Matches Screenshot 2) */}
+          {/* 6. Fuel Surcharge & Deposit (Matches QA Screenshots: $20 Fuel & $100 Deposit) */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex items-center gap-2 bg-[#1b1723] p-2.5 rounded-xl border border-[#2b2537]">
               <span className="text-slate-400 whitespace-nowrap">Fuel surcharge $</span>
@@ -642,7 +691,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           </div>
 
           <p className="text-[11px] text-slate-400 italic">
-            Pick the hours and the crew to price this job. Fuel ($12.50), and 12.5% tax are added automatically.
+            Standard TidyUps Jobber Quote Formula: 2 Pro Cleaners ($105/hr) + Fuel Surcharge ($20.00) − Ad Promo (-$10.00) + Federal Tax &amp; Supplies (12.5%) + $100.00 Deposit.
           </p>
 
           {/* 7. Caller / Client & Property Details for Live Booking System Sync */}
