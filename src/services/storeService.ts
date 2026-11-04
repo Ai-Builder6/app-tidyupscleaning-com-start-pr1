@@ -87,6 +87,11 @@ export interface AppPersistentStore {
     mapInspectDate?: string | null;
     updatedAt?: string;
   };
+  fbPages?: any[];
+  fbBotSettings?: any;
+  fbMessengerThreads?: any[];
+  ownerLeadNotifications?: any[];
+  cleanSheetConfig?: any;
 }
 
 // Ensure data directory exists

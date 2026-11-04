@@ -2476,6 +2476,7 @@ export function buildCanonicalQuoteBreakdown(params: {
   fuelSurchargeOverride?: number;
   discountAmount?: number;
   discountAmountOverride?: number;
+  customDiscount?: number;
   depositAmount?: number;
   depositOverride?: number;
   notes?: string;
@@ -2491,7 +2492,7 @@ export function buildCanonicalQuoteBreakdown(params: {
   const rateOverride = params.hourlyRateOverride ?? params.hourlyRate;
   const hrsOverride = params.hoursOverride ?? params.hours;
   const fuelOverride = params.fuelSurchargeOverride ?? params.fuelSurcharge;
-  const discOverride = params.discountAmountOverride ?? params.discountAmount;
+  const discOverride = params.discountAmountOverride ?? params.discountAmount ?? params.customDiscount;
   const depOverride = params.depositOverride ?? params.depositAmount;
   const notesVal = params.notes ?? params.customNotes;
 

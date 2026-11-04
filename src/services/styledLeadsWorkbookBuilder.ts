@@ -275,6 +275,7 @@ export function hasLeadBeenCommunicatedWith(lead: any): boolean {
   if (!lead || typeof lead !== 'object') return false;
   if (lead.communicatedAt || lead.hasCommunicated) return true;
   if (lead.isJobberSynced || lead.quoteId || lead.quoteNumber || lead.convertedJobId) return true;
+  if (String(lead.id || '').startsWith('fblead-') || String(lead.sourceTab || '') === 'Facebook AI') return true;
 
   const statusLower = String(lead.status || '').trim().toLowerCase();
   if (
@@ -395,13 +396,12 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
     phone.includes('555-0148') ||
     phone.includes('555-0194') ||
     phone.includes('555-0271') ||
-    phone.includes('555-0100') ||
-    phone.includes('555-0199')
+    phone.includes('555-0100')
   ) {
     return true;
   }
 
-  // Block test/simulation notes or campaigns
+  // Block test/simulation notes or campaigns (Note: real Facebook AI leads are NOT blocked)
   if (
     notes.includes('test inbound lead') ||
     notes.includes('simulation') ||
@@ -409,7 +409,6 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
     notes.includes('business funding') ||
     notes.includes('north advance') ||
     notes.includes('squarespace advisor') ||
-    notes.includes('[draft for owner review]') ||
     notes.includes('january 24') ||
     (campaign.includes('direct webhook') && name.includes('test'))
   ) {
@@ -452,6 +451,7 @@ export function isOutOfEdmontonOrFakeOrOutdatedLead(lead: any): boolean {
   const outOfServiceTerms = [
     'wetaskiwin',
     'red deer',
+    'airdrie',
     'calgary',
     'toronto',
     'vancouver',
@@ -461,6 +461,7 @@ export function isOutOfEdmontonOrFakeOrOutdatedLead(lead: any): boolean {
     't9a',
     't4n',
     't4r',
+    't4b',
   ];
   if (outOfServiceTerms.some((term) => combinedLocation.includes(term))) {
     return true;
