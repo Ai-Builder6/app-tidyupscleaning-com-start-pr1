@@ -4049,6 +4049,8 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       "QT-4378",
       "QT-4380",
       "QT-4381",
+      "QT-7346",
+      "Z2lkOi8vSm9iYmVyL1F1b3RlLzY4NDQwNTY0",
     ]);
     const seenIds = new Set<string>();
     const seenNums = new Set<string>();
@@ -4059,7 +4061,7 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       const cname = String(q.clientName || "").toLowerCase();
       if (fakeQuoteIds.has(qid) || fakeQuoteIds.has(qnum)) return false;
       if (qid.startsWith("qt-2026-")) return false;
-      if (cname.includes("devon clark") || cname.includes("test customer edmonton")) return false;
+      if (cname.includes("devon clark") || cname.includes("test customer edmonton") || cname.startsWith("i need a cleaning job")) return false;
       if ((qid && seenIds.has(qid)) || (qnum && seenNums.has(qnum))) return false;
       if (qid) seenIds.add(qid);
       if (qnum) seenNums.add(qnum);
@@ -4203,8 +4205,237 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       }
     }
 
-    // Do NOT auto-convert historical or seeded Jobber quotes into adLeads on store repair
-    // Only user-initiated leads, webhooks, and live Quo calls appear in store.adLeads.
+    // Enrich Stacey Whitty (QT-7350) with full booking details from her app.tidyupscleaning.com/booking submission
+    for (const q of store.quotes) {
+      if (q.quoteNumber === "QT-7350" || String(q.clientName || "").toLowerCase() === "stacey whitty") {
+        if (!q.notes || !q.notes.includes("app.tidyupscleaning.com/booking")) {
+          q.notes =
+            "Online Booking (app.tidyupscleaning.com/booking • Move-Out Cleaning • 2 Cleaners) | Home Size: 3 Bedrooms, 1.5 Bathrooms | Catalog Package: Move Out Cleaning Services 2026 (Main Level) (2 Cleaners) (3 hrs × $105.00 = $315.00) | Preferred Date: 2026-11-07 (Afternoon (12:00 PM - 4:00 PM)) | Source: Facebook / Instagram Ad";
+          mutated = true;
+        }
+        if (q.bathrooms !== "1.5 Bathrooms") {
+          q.bathrooms = "1.5 Bathrooms";
+          mutated = true;
+        }
+        if (!q.scheduledDate) {
+          q.scheduledDate = "2026-11-07";
+          q.scheduledTime = "Afternoon (12:00 PM - 4:00 PM)";
+          q.requestedDate = "2026-11-07";
+          mutated = true;
+        }
+        if (!q.source) {
+          q.source = "Facebook / Instagram Ad";
+          mutated = true;
+        }
+        if (q.total === 325) {
+          q.subtotal = 325;
+          q.tax = 40.63;
+          q.total = 365.63;
+          mutated = true;
+        }
+      }
+    }
+
+    // Prevent local un-synced quote numbers (e.g. quote_local_*) from colliding with real Jobber quote numbers (Z2lkOi8v...)
+    if (Array.isArray(store.adLeads)) {
+      const realJobberQuoteByNum = new Map<string, any>();
+      for (const q of store.quotes) {
+        if (q && q.quoteNumber && String(q.id || "").startsWith("Z2lkOi8v")) {
+          realJobberQuoteByNum.set(String(q.quoteNumber), q);
+        }
+      }
+      let fallbackLocalSeq = 4910;
+      for (const l of store.adLeads) {
+        if (!l || !l.quoteNumber) continue;
+        const realQ = realJobberQuoteByNum.get(String(l.quoteNumber));
+        if (realQ) {
+          const lPhone = normalizePhoneDigits(l.phone);
+          const qPhone = normalizePhoneDigits(realQ.clientPhone);
+          const lName = String(l.customerName || "").trim().toLowerCase();
+          const qName = String(realQ.clientName || "").trim().toLowerCase();
+          const isSameClient =
+            (lPhone && qPhone && lPhone === qPhone) ||
+            (lName && qName && (lName === qName || lName.includes(qName) || qName.includes(lName)));
+          if (!isSameClient && String(l.quoteId || "").startsWith("quote_local_")) {
+            l.quoteNumber = `QT-${fallbackLocalSeq++}`;
+            mutated = true;
+          }
+        }
+      }
+
+      // Ensure all recent November 2026 bookings & Jobber quotes (e.g. Stacey Whitty QT-7350, Sam Munro QT-7348, Isho Hashim Muse QT-7343, Lisa Maybee QT-7342) exist in store.adLeads, store.clients, store.tickets, and store.unscheduledJobs
+      for (const q of store.quotes) {
+        if (!q || !q.clientName) continue;
+        const createdIso = String(q.createdAt || "");
+        const isOnlineBooking = String(q.notes || "").includes("app.tidyupscleaning.com/booking") || String(q.source || "").includes("booking");
+        if (createdIso < "2026-11-01" && !isOnlineBooking) continue;
+        const qNameLower = String(q.clientName || "").trim().toLowerCase();
+        if (
+          qNameLower === "fb leads v1" ||
+          qNameLower.startsWith("i need a cleaning job") ||
+          isFalseOrCatalogLeadRow(qNameLower)
+        ) {
+          continue;
+        }
+        const qPhone10 = normalizePhoneDigits(q.clientPhone);
+        const existingLead = store.adLeads.find((l: any) => {
+          if (!l) return false;
+          if (l.quoteId && q.id && l.quoteId === q.id) return true;
+          const lPhone10 = normalizePhoneDigits(l.phone);
+          if (qPhone10 && lPhone10 && qPhone10 === lPhone10) return true;
+          const lNameLower = String(l.customerName || "").trim().toLowerCase();
+          if (qNameLower && lNameLower && (lNameLower === qNameLower || lNameLower.includes(qNameLower) || qNameLower.includes(lNameLower))) {
+            return true;
+          }
+          return false;
+        });
+
+        const formattedPhone = qPhone10.length === 10
+          ? `(${qPhone10.slice(0, 3)}) ${qPhone10.slice(3, 6)}-${qPhone10.slice(6)}`
+          : String(q.clientPhone || "");
+        const rawNote = String(q.notes || "");
+        const isFbBooking = rawNote.toLowerCase().includes("facebook") || String(q.source || "").toLowerCase().includes("facebook");
+        const isGoogBooking = rawNote.toLowerCase().includes("google") || String(q.source || "").toLowerCase().includes("google");
+        const isQuoQuote = rawNote.toLowerCase().includes("quo") || qNameLower.includes("sonia ai") || qNameLower.includes("realtor lekan");
+        const resolvedTab: any = isQuoQuote
+          ? "Quo"
+          : isFbBooking
+          ? "Facebook Leads 1"
+          : isGoogBooking
+          ? "Google Leads 1"
+          : "Other Ads";
+        const resolvedSourceLabel: any =
+          resolvedTab === "Quo"
+            ? "Quo Call / Voice"
+            : resolvedTab === "Facebook Leads 1"
+            ? "Facebook Lead"
+            : resolvedTab === "Google Leads 1"
+            ? "Google Lead"
+            : "Other Ads";
+
+        if (!existingLead) {
+          const nameParts = String(q.clientName || "").trim().split(/\s+/);
+          const firstName = nameParts[0] || "";
+          const lastName = nameParts.slice(1).join(" ") || "";
+          const postalMatch = String(q.serviceAddress || "").match(/[A-Z]\d[A-Z]\s*\d[A-Z]\d/i);
+          const newBookingLead: any = {
+            id: isOnlineBooking ? `lead-book-${String(q.quoteNumber || "").toLowerCase().replace(/[^a-z0-9]/g, "")}` : `lead-jobber-${String(q.quoteNumber || "").toLowerCase().replace(/[^a-z0-9]/g, "")}`,
+            firstName,
+            lastName,
+            customerName: q.clientName,
+            phone: formattedPhone,
+            email: q.clientEmail || "",
+            address: q.serviceAddress || "Edmonton, AB",
+            city: "Edmonton",
+            postalCode: postalMatch ? postalMatch[0].toUpperCase() : "",
+            serviceRequested: `${q.service || "Move-Out Cleaning"}${q.bedrooms || q.bathrooms ? ` (${[q.bedrooms, q.bathrooms].filter(Boolean).join(", ")})` : ""}`,
+            bedrooms: q.bedrooms || "3 Bedrooms",
+            bathrooms: q.bathrooms || "2 Bathrooms",
+            dateOfServiceRequested: q.scheduledDate || q.requestedDate || createdIso.slice(0, 10),
+            source: resolvedSourceLabel,
+            sourceTab: resolvedTab,
+            campaignName: isOnlineBooking
+              ? `app.tidyupscleaning.com/booking (${q.source || "Online Booking Form"})`
+              : `Online Booking / Form (${q.quoteNumber})`,
+            dateReceived: createdIso || new Date().toISOString(),
+            communicatedAt: createdIso || new Date().toISOString(),
+            hasCommunicated: true,
+            status: "Quoted",
+            verdict: "Good lead",
+            isJobberSynced: true,
+            jobberClientId: q.jobberClientId,
+            quoteId: q.id,
+            quoteNumber: q.quoteNumber,
+            quotedAmount: q.total || 365.63,
+            notes: rawNote || `Online Booking / Quote ${q.quoteNumber} (${q.service || "Cleaning Service"})`,
+            googleSheetSynced: true,
+            googleSheetUrl,
+          };
+          store.adLeads.unshift(newBookingLead);
+          mutated = true;
+        } else {
+          if (existingLead.quoteNumber !== q.quoteNumber || !existingLead.isJobberSynced) {
+            existingLead.quoteId = q.id;
+            existingLead.quoteNumber = q.quoteNumber;
+            existingLead.quotedAmount = q.total || existingLead.quotedAmount;
+            existingLead.isJobberSynced = true;
+            existingLead.status = "Quoted";
+            mutated = true;
+          }
+        }
+
+        // Also ensure client exists in store.clients
+        const hasClient = store.clients.some((c: any) => {
+          const cPhone10 = normalizePhoneDigits(c?.phone);
+          if (qPhone10 && cPhone10 && qPhone10 === cPhone10) return true;
+          return String(c?.name || "").trim().toLowerCase() === qNameLower;
+        });
+        if (!hasClient) {
+          const nameParts = String(q.clientName || "").trim().split(/\s+/);
+          const postalMatch = String(q.serviceAddress || "").match(/[A-Z]\d[A-Z]\s*\d[A-Z]\d/i);
+          store.clients.unshift({
+            id: q.jobberClientId || `cli-book-${String(q.quoteNumber || "").toLowerCase()}`,
+            firstName: nameParts[0] || "",
+            lastName: nameParts.slice(1).join(" ") || "",
+            name: q.clientName,
+            phone: formattedPhone,
+            email: q.clientEmail || "",
+            address: q.serviceAddress || "Edmonton, AB",
+            city: "Edmonton",
+            province: "AB",
+            postalCode: postalMatch ? postalMatch[0].toUpperCase() : "",
+            verdict: "Good lead",
+            tags: [isOnlineBooking ? "app.tidyupscleaning.com/booking" : "online-booking", String(q.quoteNumber || "").toLowerCase()],
+            isJobberLinked: true,
+            jobberId: q.jobberClientId,
+            jobberClientId: q.jobberClientId,
+            totalJobs: 1,
+            latestServiceDate: q.scheduledDate || createdIso.slice(0, 10),
+            notes: rawNote || `Quote ${q.quoteNumber} — ${q.service}`,
+            source: isOnlineBooking ? "app.tidyupscleaning.com/booking" : resolvedTab,
+            createdAt: createdIso || new Date().toISOString(),
+            updatedAt: createdIso || new Date().toISOString(),
+          });
+          mutated = true;
+        }
+
+        // If this was an online booking (e.g. Stacey Whitty QT-7350 or Sam Munro QT-7348), ensure it also appears in unscheduledJobs & tickets
+        if (isOnlineBooking || q.quoteNumber === "QT-7350" || q.quoteNumber === "QT-7348") {
+          if (!Array.isArray(store.unscheduledJobs)) store.unscheduledJobs = [];
+          const hasUnscheduled = store.unscheduledJobs.some(
+            (uj: any) =>
+              uj?.quoteNumber === q.quoteNumber ||
+              (qPhone10 && normalizePhoneDigits(uj?.clientPhone) === qPhone10) ||
+              String(uj?.clientName || "").trim().toLowerCase() === qNameLower
+          );
+          if (!hasUnscheduled) {
+            store.unscheduledJobs.unshift({
+              id: `job-book-${String(q.quoteNumber || "").toLowerCase()}`,
+              jobNumber: q.quoteNumber || "JOB-7350",
+              clientName: q.clientName,
+              clientPhone: formattedPhone,
+              clientEmail: q.clientEmail || "",
+              serviceAddress: q.serviceAddress || "Edmonton, AB",
+              serviceType: (String(q.service || "").toLowerCase().includes("move")
+                ? "Move-Out Cleaning"
+                : String(q.service || "").toLowerCase().includes("deep")
+                ? "Deep Cleaning"
+                : "Standard Cleaning") as any,
+              totalAmount: q.total || 365.63,
+              status: "UNSCHEDULED",
+              requestedWindow: `${q.scheduledDate || createdIso.slice(0, 10)} • ${q.scheduledTime || "Afternoon (12:00 PM - 4:00 PM)"}`,
+              scheduledDate: q.scheduledDate || createdIso.slice(0, 10),
+              scheduledTime: q.scheduledTime || "Afternoon (12:00 PM - 4:00 PM)",
+              notes: `${rawNote || q.service} | Linked Quote: ${q.quoteNumber} ($${Number(q.total || 365.63).toFixed(2)})`,
+              jobberWebUri: q.jobberWebUri || "https://secure.getjobber.com/quotes",
+              lineItems: q.lineItems || [],
+              createdAt: createdIso || new Date().toISOString(),
+            });
+            mutated = true;
+          }
+        }
+      }
+    }
 
     // Ensure every adLead has a strictly unique ID and move local/recent quote leads to the front
     if (Array.isArray(store.adLeads)) {
@@ -8038,9 +8269,21 @@ app.get("/api/leads/google", handleLeadWebhookVerification);
 const handleInboundLeadWebhook = (forcedPlatform?: string) => (req: any, res: any) => {
   const projectId = getProjectId(req);
   const rawBody = req.body || {};
-  // Unwrap native Meta Leadgen nested payload if sent directly from Meta Graph Webhooks
+  // Unwrap native Meta Leadgen nested payload if sent directly from Meta Graph Webhooks, or Jotform rawRequest JSON string
   const metaChangeVal = rawBody?.entry?.[0]?.changes?.[0]?.value;
-  const body = metaChangeVal && typeof metaChangeVal === "object" ? { ...rawBody, ...metaChangeVal } : rawBody;
+  let jotformParsed: Record<string, any> = {};
+  if (typeof rawBody?.rawRequest === "string") {
+    try {
+      jotformParsed = JSON.parse(rawBody.rawRequest);
+    } catch {}
+  } else if (rawBody?.rawRequest && typeof rawBody.rawRequest === "object") {
+    jotformParsed = rawBody.rawRequest;
+  }
+  const body: Record<string, any> = {
+    ...rawBody,
+    ...(metaChangeVal && typeof metaChangeVal === "object" ? metaChangeVal : {}),
+    ...jotformParsed,
+  };
 
   // Support Google Ads Lead Form Extension "Send test data" verification ping (returns 200 OK without inserting fake test leads)
   if (body.is_test === true || body.is_test === "true") {
@@ -8054,7 +8297,7 @@ const handleInboundLeadWebhook = (forcedPlatform?: string) => (req: any, res: an
     });
   }
 
-  // Support Google Ads Lead Form Extension format (user_column_data array), Meta Leadgen nested changes, as well as Zapier / Make flat JSON
+  // Support Google Ads Lead Form Extension format (user_column_data array), Meta Leadgen nested changes, Jotform q*_ fields, as well as Zapier / Make flat JSON
   const colMap: Record<string, string> = {};
   if (Array.isArray(body.user_column_data)) {
     for (const col of body.user_column_data) {
@@ -8069,6 +8312,35 @@ const handleInboundLeadWebhook = (forcedPlatform?: string) => (req: any, res: an
       if (key && val) colMap[key] = String(val);
     }
   }
+  // Extract Jotform q1_name, q2_phoneNumber, q3_email, q4_address style keys automatically
+  for (const [rawKey, rawVal] of Object.entries(body)) {
+    const k = rawKey.toLowerCase().replace(/^q\d+_/, "");
+    if (rawVal && typeof rawVal === "object" && !Array.isArray(rawVal)) {
+      const objVal = rawVal as Record<string, any>;
+      if (objVal.first || objVal.last) {
+        if (!colMap["first_name"] && objVal.first) colMap["first_name"] = String(objVal.first).trim();
+        if (!colMap["last_name"] && objVal.last) colMap["last_name"] = String(objVal.last).trim();
+        if (!colMap["full_name"]) colMap["full_name"] = `${objVal.first || ""} ${objVal.last || ""}`.trim();
+      } else if (objVal.full || objVal.phone) {
+        colMap["phone"] = String(objVal.full || objVal.phone || "").trim();
+      } else if (objVal.addr_line1 || objVal.street1) {
+        colMap["address"] = String(objVal.addr_line1 || objVal.street1 || "").trim();
+        if (objVal.city) colMap["city"] = String(objVal.city).trim();
+        if (objVal.postal) colMap["postal_code"] = String(objVal.postal).trim();
+      }
+    } else if (typeof rawVal === "string" && rawVal.trim()) {
+      if (k.includes("first") && k.includes("name") && !colMap["first_name"]) colMap["first_name"] = rawVal.trim();
+      else if (k.includes("last") && k.includes("name") && !colMap["last_name"]) colMap["last_name"] = rawVal.trim();
+      else if ((k === "name" || k === "fullname" || k === "full_name") && !colMap["full_name"]) colMap["full_name"] = rawVal.trim();
+      else if (k.includes("phone") && !colMap["phone"]) colMap["phone"] = rawVal.trim();
+      else if (k.includes("email") && !colMap["email"]) colMap["email"] = rawVal.trim();
+      else if ((k.includes("address") || k.includes("street")) && !colMap["address"]) colMap["address"] = rawVal.trim();
+      else if (k.includes("bed") && !colMap["bedrooms"]) colMap["bedrooms"] = rawVal.trim();
+      else if (k.includes("bath") && !colMap["bathrooms"]) colMap["bathrooms"] = rawVal.trim();
+      else if (k.includes("service") && !colMap["service"]) colMap["service"] = rawVal.trim();
+      else if (k.includes("date") && !colMap["preferred_date"]) colMap["preferred_date"] = rawVal.trim();
+    }
+  }
 
   const queryTabHint = String(
     req.query?.tab ||
@@ -8078,6 +8350,7 @@ const handleInboundLeadWebhook = (forcedPlatform?: string) => (req: any, res: an
       ""
   ).trim();
 
+  const isJotformPayload = Boolean(rawBody?.rawRequest || rawBody?.formID || rawBody?.submissionID);
   const rawSource = String(
     queryTabHint ||
       forcedPlatform ||
@@ -8088,7 +8361,7 @@ const handleInboundLeadWebhook = (forcedPlatform?: string) => (req: any, res: an
       body.utm_source ||
       body.campaign_name ||
       body.campaignName ||
-      (body.google_key || body.gclid || body.user_column_data ? "Google Leads 1" : "Facebook Leads 1")
+      (isJotformPayload ? "Other Ads" : body.google_key || body.gclid || body.user_column_data ? "Google Leads 1" : "Facebook Leads 1")
   );
   const { source, sourceTab } = resolveCleanSheetTab(rawSource, body);
 
@@ -8132,7 +8405,7 @@ const handleInboundLeadWebhook = (forcedPlatform?: string) => (req: any, res: an
   const bedrooms = String(body.bedrooms || colMap["bedrooms"] || "3 Bedrooms").trim();
   const bathrooms = String(body.bathrooms || colMap["bathrooms"] || "2 Bathrooms").trim();
   const serviceRequested = String(
-    body.service || body.serviceRequested || colMap["service"] || "Residential Standard Cleaning"
+    body.service || body.serviceRequested || colMap["service"] || "Move-Out Cleaning"
   ).trim();
   const requestedDate = String(
     body.date_of_service_requested || body.preferredDate || colMap["preferred_date"] || new Date().toISOString().slice(0, 10)
@@ -8258,8 +8531,12 @@ const handleInboundLeadWebhook = (forcedPlatform?: string) => (req: any, res: an
 app.post("/api/leads/webhook", handleInboundLeadWebhook());
 app.post("/api/webhooks/facebook", handleInboundLeadWebhook("Facebook Leads 1"));
 app.post("/api/webhooks/google", handleInboundLeadWebhook("Google Leads 1"));
+app.post("/api/webhooks/jotform", handleInboundLeadWebhook("Other Ads"));
 app.post("/api/leads/facebook", handleInboundLeadWebhook("Facebook Leads 1"));
 app.post("/api/leads/google", handleInboundLeadWebhook("Google Leads 1"));
+app.post("/api/leads/jotform", handleInboundLeadWebhook("Other Ads"));
+app.get("/api/webhooks/jotform", handleLeadWebhookVerification);
+app.get("/api/leads/jotform", handleLeadWebhookVerification);
 
 // Helper: Parse RFC-4180 CSV text into a 2D array of string cells (preserving quoted commas and newlines)
 function parseCsvTo2DMatrix(csvText: string): string[][] {
@@ -10068,15 +10345,17 @@ app.post("/api/public/book", async (req, res) => {
         : 1.0;
 
     const discountedBaseTotal = Math.round(catalogBaseTotal * discountMultiplier * 100) / 100;
-    const computedSubtotal = Math.round((discountedBaseTotal + addonsSubtotal) * 100) / 100;
+    const fuelSurchargeAmount = 20.0;
+    const promoDiscountAmount = -10.0;
+    const computedSubtotal = Math.round((discountedBaseTotal + addonsSubtotal + fuelSurchargeAmount + promoDiscountAmount) * 100) / 100;
 
     const baseSub =
       Number(estimatedSubtotal) > 0 ? Number(estimatedSubtotal) : computedSubtotal;
+    const taxAmount = Math.round(baseSub * 0.125 * 100) / 100;
     const totalWithTax =
       Number(estimatedTotal) > 0
         ? Number(estimatedTotal)
-        : Math.round(baseSub * 1.05 * 100) / 100;
-    const taxAmount = Math.round((totalWithTax - baseSub) * 100) / 100;
+        : Math.round((baseSub + taxAmount) * 100) / 100;
     const depositRequired = matchedCatalog?.depositRequired || 100;
 
     const reqDate = preferredDate || new Date().toISOString().slice(0, 10);
@@ -10137,6 +10416,22 @@ app.post("/api/public/book", async (req, res) => {
         taxable: true,
       },
       ...addonLineItems,
+      {
+        name: "Fuel Surcharge",
+        description: "Fuel Surcharge",
+        quantity: 1,
+        unitPrice: fuelSurchargeAmount,
+        total: fuelSurchargeAmount,
+        taxable: true,
+      },
+      {
+        name: "Discount $10 Google Ad",
+        description: "Discount $10 Google Ad Promo",
+        quantity: 1,
+        unitPrice: promoDiscountAmount,
+        total: promoDiscountAmount,
+        taxable: true,
+      },
     ];
 
     // Push Quote to Jobber if connected so the quote is immediately live in Jobber
@@ -10144,6 +10439,7 @@ app.post("/api/public/book", async (req, res) => {
     let clientHubUri: string | undefined;
     let jobberClientId: string | undefined;
     try {
+      await ensureValidJobberToken();
       const pushRes = await pushQuoteToJobber(
         {
           clientName: customerName,
@@ -10151,9 +10447,13 @@ app.post("/api/public/book", async (req, res) => {
           clientEmail: customerEmail || "",
           serviceAddress: `${address}, ${city || "Edmonton"}, AB`,
           service: `${canonicalServiceLabel} (${bedrooms || "3 Bedrooms"}, ${bathrooms || "2 Bathrooms"})`,
+          bedrooms: bedrooms || "3 Bedrooms",
+          bathrooms: bathrooms || "2 Bathrooms",
           total: totalWithTax,
           depositRequired,
           notes: fullDetailsNote,
+          source: resolvedSourceLabel,
+          sourceTab: resolvedSourceTab,
           lineItems: quoteLineItems.map((li) => ({
             description: `${li.name} — ${li.description}`,
             quantity: li.quantity,
@@ -10367,6 +10667,17 @@ app.post("/api/public/book", async (req, res) => {
       curStore.lastSavedAt = new Date().toISOString();
       saveStore(curStore, projectId);
       saveStore(curStore, "tidyups");
+      pushStoreUpdateToLiveProduction(
+        {
+          tickets: curStore.tickets,
+          adLeads: curStore.adLeads,
+          quotes: curStore.quotes,
+          clients: curStore.clients,
+          unscheduledJobs: curStore.unscheduledJobs,
+        },
+        projectId,
+        req
+      );
     }
 
     res.json({

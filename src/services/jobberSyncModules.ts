@@ -328,9 +328,12 @@ export interface JobberQuote {
   bedrooms?: string;
   bathrooms?: string;
   quoteStatus: "DRAFT" | "AWAITING_RESPONSE" | "APPROVED" | "CHANGES_REQUESTED" | "CONVERTED" | "ARCHIVED";
+  subtotal?: number;
+  tax?: number;
   total: number;
   depositRequired: number;
   discountAmount?: number;
+  source?: string;
   createdAt: string;
   sentAt?: string;
   updatedAt?: string;
@@ -972,6 +975,7 @@ export function isFakeOrPurgedJobberQuote(q: any): boolean {
     numericNum === 7336 ||
     numericNum === 7337 ||
     numericNum === 7340 ||
+    numericNum === 7346 ||
     numericNum === 7537 ||
     numericNum === 7538
   ) {
@@ -986,6 +990,7 @@ export function isFakeOrPurgedJobberQuote(q: any): boolean {
   const nameLower = String(q.clientName || q.customerName || q.client?.name || "").trim().toLowerCase();
   if (
     isFalseOrCatalogLeadRow(nameLower) ||
+    nameLower.startsWith("i need a cleaning job") ||
     nameLower.includes("sheralee") ||
     nameLower.includes("donna noel") ||
     nameLower.includes("tidyups cleaning") ||
@@ -1405,6 +1410,7 @@ export async function syncJobberQuotes(
               id
               quoteNumber
               title
+              message
               quoteStatus
               jobberWebUri
               clientHubUri
@@ -1505,8 +1511,15 @@ export async function syncJobberQuotes(
         }
 
         const key = node.id || quoteNumber;
-        const total = node.amounts?.total || 380;
-        const depositRequired = node.amounts?.depositAmount || 0;
+        const rawSubtotal = Number(node.amounts?.subtotal || 0);
+        const rawTotal = Number(node.amounts?.total || 0);
+        const total =
+          status === "DRAFT" && rawSubtotal > 0 && Math.abs(rawTotal - rawSubtotal) < 0.01
+            ? Math.round(rawSubtotal * 1.125 * 100) / 100
+            : rawTotal || 365.63;
+        const subtotal = rawSubtotal > 0 ? rawSubtotal : Math.round((total / 1.125) * 100) / 100;
+        const tax = Math.round((total - subtotal) * 100) / 100;
+        const depositRequired = node.amounts?.depositAmount || (total >= 300 ? 100 : 50);
         const rawPhone = Array.isArray(node.client?.defaultPhones)
           ? node.client.defaultPhones[0]
           : node.client?.defaultPhones || "";
@@ -1520,9 +1533,22 @@ export async function syncJobberQuotes(
               .join(", ")
           : undefined;
         const rawTitle = node.title || "";
-        const firstLineText = `${rawTitle} ${lineNodes[0]?.name || ""} ${lineNodes[0]?.description || ""}`;
-        const bedMatch = firstLineText.match(/(\d+)\s*(?:bed|br|bedroom)/i);
-        const bathMatch = firstLineText.match(/(\d+(?:\.\d+)?)\s*(?:bath|ba|bathroom)/i);
+        const rawMessage = String(node.message || "").trim();
+        const combinedTextForExtraction = `${rawTitle} ${lineNodes[0]?.name || ""} ${lineNodes[0]?.description || ""} ${rawMessage}`;
+        const homeSizeMatch = rawMessage.match(/Home Size:\s*(\d+(?:\.\d+)?)\s*Bedrooms?,\s*(\d+(?:\.\d+)?)\s*Bathrooms?/i);
+        const bedMatch = homeSizeMatch
+          ? [homeSizeMatch[0], homeSizeMatch[1]]
+          : combinedTextForExtraction.match(/(\d+)\s*(?:bed|br|bedroom)/i);
+        const bathMatch = homeSizeMatch
+          ? [homeSizeMatch[0], homeSizeMatch[2]]
+          : combinedTextForExtraction.match(/(\d+(?:\.\d+)?)\s*(?:bath|ba|bathroom)/i);
+        const prefDateMatch = rawMessage.match(/Preferred Date:\s*(\d{4}-\d{2}-\d{2})(?:\s*\(([^)]+)\))?/i);
+        const sourceMatch = rawMessage.match(/Source:\s*([^\n|]+)/i);
+        const extractedSource = sourceMatch
+          ? sourceMatch[1].trim()
+          : rawMessage.includes("app.tidyupscleaning.com/booking")
+          ? "app.tidyupscleaning.com/booking"
+          : undefined;
         const mappedLineItems = lineNodes.map((li: any) => ({
           description: li.name || li.description || rawTitle,
           quantity: Number(li.quantity) || 1,
@@ -1540,8 +1566,14 @@ export async function syncJobberQuotes(
           if (rawTitle && (!existing.service || existing.service === "Residential Deep & Standard Cleaning")) {
             existing.service = rawTitle;
           }
-          if (bedMatch && !existing.bedrooms) existing.bedrooms = `${bedMatch[1]} Bedrooms`;
-          if (bathMatch && !existing.bathrooms) existing.bathrooms = `${bathMatch[1]} Bathrooms`;
+          if (bedMatch) existing.bedrooms = `${bedMatch[1]} Bedrooms`;
+          if (bathMatch) existing.bathrooms = `${bathMatch[1]} Bathrooms`;
+          if (rawMessage && !existing.notes) existing.notes = rawMessage;
+          if (prefDateMatch?.[1] && !existing.scheduledDate) existing.scheduledDate = prefDateMatch[1];
+          if (prefDateMatch?.[2] && !existing.scheduledTime) existing.scheduledTime = prefDateMatch[2];
+          if (extractedSource && !existing.source) existing.source = extractedSource;
+          existing.subtotal = subtotal;
+          existing.tax = tax;
           if (mappedLineItems.length > 0 && (!existing.lineItems || existing.lineItems.length === 0)) {
             existing.lineItems = mappedLineItems;
           }
@@ -1573,10 +1605,17 @@ export async function syncJobberQuotes(
             bedrooms: bedMatch ? `${bedMatch[1]} Bedrooms` : undefined,
             bathrooms: bathMatch ? `${bathMatch[1]} Bathrooms` : undefined,
             quoteStatus: status,
+            subtotal,
+            tax,
             total,
             depositRequired,
             createdAt: node.createdAt || new Date().toISOString(),
             updatedAt: node.updatedAt,
+            scheduledDate: prefDateMatch?.[1],
+            scheduledTime: prefDateMatch?.[2],
+            requestedDate: prefDateMatch?.[1],
+            notes: rawMessage || undefined,
+            source: extractedSource,
             jobberClientId: node.client?.id,
             jobberPropertyId: node.property?.id,
             jobberClientWebUri: node.client?.jobberWebUri || (node.client?.id ? resolveJobberWebUri("clients", node.client.id) : undefined),
@@ -1931,6 +1970,8 @@ export async function pushQuoteToJobber(
     total: number;
     depositRequired?: number;
     notes?: string;
+    source?: string;
+    sourceTab?: string;
     createRequestOnly?: boolean;
     existingJobberQuoteId?: string;
     existingJobberClientId?: string;
@@ -1994,6 +2035,8 @@ async function executePushQuoteToJobberInternal(
     total: number;
     depositRequired?: number;
     notes?: string;
+    source?: string;
+    sourceTab?: string;
     createRequestOnly?: boolean;
     existingJobberQuoteId?: string;
     existingJobberClientId?: string;

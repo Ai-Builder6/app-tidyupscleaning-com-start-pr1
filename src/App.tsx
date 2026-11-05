@@ -2161,6 +2161,33 @@ export function App() {
         }
       })
       .catch((err) => console.warn('Could not load persistent store:', err));
+
+    // Background delta refresh every 30s so customer submissions on app.tidyupscleaning.com/booking or webhooks appear automatically
+    const pollTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetch(`/api/store?project=${activeProjectId}`, {
+        headers: { 'x-project-id': activeProjectId },
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data) return;
+          if (Array.isArray(data.adLeads)) {
+            setLeadsList(filterValidRecentLeads(data.adLeads));
+          }
+          if (Array.isArray(data.quotes) && data.quotes.length > 0) {
+            setQuotesList((prev) => dedupeQuotesList([...data.quotes, ...prev]));
+          }
+          if (Array.isArray(data.clients) && data.clients.length > 0) {
+            setClientsList(data.clients);
+          }
+          if (Array.isArray(data.unscheduledJobs)) {
+            setUnscheduledJobsList(data.unscheduledJobs.filter((j: any) => !isFakeSimulationItem(j)));
+          }
+        })
+        .catch(() => {});
+    }, 30000);
+
+    return () => clearInterval(pollTimer);
   }, [activeProjectId]);
 
   // Persist exact workspace position (active tab, Master Hub block, Schedule sub-tab, Map date) so reloading ALWAYS resumes right where you left off
