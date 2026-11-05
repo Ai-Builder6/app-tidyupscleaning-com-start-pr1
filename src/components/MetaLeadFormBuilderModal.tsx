@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Copy,
   Check,
   Code2,
-  Sparkles,
   Smartphone,
   FileJson,
   Layers,
@@ -13,11 +12,16 @@ import {
   ExternalLink,
   CheckCircle2,
   ShieldCheck,
-  Home,
   ArrowRight,
   Zap,
-  Globe,
-  ClipboardList
+  ClipboardList,
+  Plus,
+  Trash2,
+  Edit3,
+  RotateCcw,
+  AlertCircle,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 interface MetaLeadFormBuilderModalProps {
@@ -25,21 +29,21 @@ interface MetaLeadFormBuilderModalProps {
   onClose: () => void;
 }
 
-interface CustomQuestionSpec {
+export interface CustomQuestionSpec {
   type: 'CUSTOM';
   key: string;
   label: string;
   options: { value: string; key: string }[];
 }
 
-interface StandardQuestionSpec {
+export interface StandardQuestionSpec {
   type: 'FULL_NAME' | 'PHONE' | 'EMAIL' | 'STREET_ADDRESS' | 'CITY' | 'POST_CODE';
   key: string;
 }
 
-type QuestionSpec = CustomQuestionSpec | StandardQuestionSpec;
+export type QuestionSpec = CustomQuestionSpec | StandardQuestionSpec;
 
-interface LeadFormPreset {
+export interface LeadFormPreset {
   id: 'all_in_one' | 'move_out' | 'deep_clean';
   badge: string;
   title: string;
@@ -50,6 +54,7 @@ interface LeadFormPreset {
   accentText: string;
   buttonBg: string;
   formName: string;
+  questionPageHeadline: string;
   contextCard: {
     title: string;
     style: 'LIST_STYLE' | 'PARAGRAPH_STYLE';
@@ -82,7 +87,7 @@ interface LeadFormPreset {
   };
 }
 
-const PRESETS: LeadFormPreset[] = [
+const DEFAULT_PRESETS: LeadFormPreset[] = [
   {
     id: 'all_in_one',
     badge: 'MOST POPULAR • ALL 3 TIERS',
@@ -94,6 +99,7 @@ const PRESETS: LeadFormPreset[] = [
     accentText: 'text-emerald-300',
     buttonBg: 'bg-emerald-600 hover:bg-emerald-500',
     formName: 'TidyUps Cleaning - Instant Quote & $10 Off Promo (2025)',
+    questionPageHeadline: 'Tell Us About Your Home for an Instant Exact Price',
     contextCard: {
       title: 'Get Your Instant Cleaning Quote + $10 Off Today!',
       style: 'LIST_STYLE',
@@ -196,6 +202,7 @@ const PRESETS: LeadFormPreset[] = [
     accentText: 'text-rose-300',
     buttonBg: 'bg-rose-600 hover:bg-rose-500',
     formName: 'TidyUps Move-Out Cleaning - 100% Deposit Back Guarantee ($10 Off)',
+    questionPageHeadline: 'Tell Us About Your Property for an Instant Move-Out Price',
     contextCard: {
       title: 'Pass Your Move-Out Inspection Guaranteed + Get $10 Off!',
       style: 'LIST_STYLE',
@@ -296,6 +303,7 @@ const PRESETS: LeadFormPreset[] = [
     accentText: 'text-purple-300',
     buttonBg: 'bg-purple-600 hover:bg-purple-500',
     formName: 'TidyUps Deep Cleaning - Top-to-Bottom Home Reset ($10 Off)',
+    questionPageHeadline: 'Tell Us About Your Home for an Instant Deep Clean Quote',
     contextCard: {
       title: 'Give Your Home a Sparkling Top-to-Bottom Deep Clean!',
       style: 'LIST_STYLE',
@@ -385,36 +393,340 @@ const PRESETS: LeadFormPreset[] = [
   }
 ];
 
-export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> = ({
-  isOpen,
-  onClose
-}) => {
-  const [selectedPresetId, setSelectedPresetId] = useState<LeadFormPreset['id']>('all_in_one');
-  const [activeTab, setActiveTab] = useState<'api_json' | 'quick_copy' | 'webhook_json'>('api_json');
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [previewStep, setPreviewStep] = useState<'intro' | 'questions' | 'contact' | 'thankyou'>('questions');
-  const [sendingTestLead, setSendingTestLead] = useState(false);
-  const [testLeadResult, setTestLeadResult] = useState<{ ok: boolean; message: string } | null>(null);
+const ALL_STANDARD_CONTACT_FIELDS: {
+  type: StandardQuestionSpec['type'];
+  key: string;
+  label: string;
+}[] = [
+  { type: 'FULL_NAME', key: 'full_name', label: 'Full Name' },
+  { type: 'PHONE', key: 'phone_number', label: 'Phone Number' },
+  { type: 'EMAIL', key: 'email', label: 'Email Address' },
+  { type: 'STREET_ADDRESS', key: 'street_address', label: 'Street Address' },
+  { type: 'CITY', key: 'city', label: 'City' },
+  { type: 'POST_CODE', key: 'post_code', label: 'Postal Code' }
+];
 
-  if (!isOpen) return null;
+const STORAGE_KEY = 'tidyups_editable_meta_lead_presets_v1';
 
-  const preset = PRESETS.find((p) => p.id === selectedPresetId) || PRESETS[0];
+function slugifyKey(input: string, fallback = 'option'): string {
+  const clean = input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  return clean || fallback;
+}
 
-  // Official Meta Graph API `POST /{page-id}/leadgen_forms` payload
-  const metaGraphApiPayload = {
+export function buildMetaGraphApiPayload(preset: LeadFormPreset) {
+  return {
     name: preset.formName,
     locale: 'EN_US',
     block_display_for_non_targeted_viewer: false,
-    follow_up_action_url: 'https://app.tidyupscleaning.com/booking',
+    follow_up_action_url: preset.thankYouPage.website_url || 'https://app.tidyupscleaning.com/booking',
     is_optimized_for_quality: true,
-    question_page_custom_headline: 'Tell Us About Your Home for an Instant Exact Price',
+    question_page_custom_headline:
+      preset.questionPageHeadline || 'Tell Us About Your Home for an Instant Exact Price',
     context_card: preset.contextCard,
     questions: [...preset.customQuestions, ...preset.standardQuestions] as QuestionSpec[],
     privacy_policy: preset.privacyPolicy,
     thank_you_page: preset.thankYouPage
   };
+}
 
-  // Webhook / CRM Integration Payload (matches `/api/webhooks/leads` automatically)
+export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> = ({
+  isOpen,
+  onClose
+}) => {
+  const [presets, setPresets] = useState<LeadFormPreset[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === DEFAULT_PRESETS.length) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return DEFAULT_PRESETS;
+  });
+
+  const [selectedPresetId, setSelectedPresetId] = useState<LeadFormPreset['id']>('all_in_one');
+  const [activeTab, setActiveTab] = useState<
+    'visual_editor' | 'api_json' | 'quick_copy' | 'webhook_json'
+  >('visual_editor');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [previewStep, setPreviewStep] = useState<'intro' | 'questions' | 'contact' | 'thankyou'>('questions');
+  const [sendingTestLead, setSendingTestLead] = useState(false);
+  const [testLeadResult, setTestLeadResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Raw JSON Editor state for two-way editing
+  const [rawJsonText, setRawJsonText] = useState<string>('');
+  const [rawJsonError, setRawJsonError] = useState<string | null>(null);
+  const [rawJsonSavedNotice, setRawJsonSavedNotice] = useState<string | null>(null);
+
+  const preset = presets.find((p) => p.id === selectedPresetId) || presets[0];
+
+  // Save presets to localStorage whenever modified
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+    } catch {
+      // ignore
+    }
+  }, [presets]);
+
+  // Keep rawJsonText synced whenever preset changes or user switches preset
+  useEffect(() => {
+    const payload = buildMetaGraphApiPayload(preset);
+    setRawJsonText(JSON.stringify(payload, null, 2));
+    setRawJsonError(null);
+  }, [preset]);
+
+  if (!isOpen) return null;
+
+  const updateCurrentPreset = (updater: (current: LeadFormPreset) => LeadFormPreset) => {
+    setPresets((prev) =>
+      prev.map((item) => (item.id === selectedPresetId ? updater(item) : item))
+    );
+  };
+
+  const handleResetCurrentPreset = () => {
+    const defaultMatch = DEFAULT_PRESETS.find((d) => d.id === selectedPresetId);
+    if (!defaultMatch) return;
+    setPresets((prev) =>
+      prev.map((item) => (item.id === selectedPresetId ? JSON.parse(JSON.stringify(defaultMatch)) : item))
+    );
+    setRawJsonError(null);
+    setRawJsonSavedNotice('Reset to default TidyUps template!');
+    setTimeout(() => setRawJsonSavedNotice(null), 2500);
+  };
+
+  // Handlers for editing Custom Questions & Answer Options
+  const handleQuestionLabelChange = (qIdx: number, newLabel: string) => {
+    updateCurrentPreset((curr) => {
+      const nextQuestions = [...curr.customQuestions];
+      nextQuestions[qIdx] = {
+        ...nextQuestions[qIdx],
+        label: newLabel
+      };
+      return { ...curr, customQuestions: nextQuestions };
+    });
+  };
+
+  const handleQuestionKeyChange = (qIdx: number, newKey: string) => {
+    updateCurrentPreset((curr) => {
+      const nextQuestions = [...curr.customQuestions];
+      nextQuestions[qIdx] = {
+        ...nextQuestions[qIdx],
+        key: slugifyKey(newKey, `question_${qIdx + 1}`)
+      };
+      return { ...curr, customQuestions: nextQuestions };
+    });
+  };
+
+  const handleMoveQuestion = (qIdx: number, direction: 'up' | 'down') => {
+    updateCurrentPreset((curr) => {
+      const targetIdx = direction === 'up' ? qIdx - 1 : qIdx + 1;
+      if (targetIdx < 0 || targetIdx >= curr.customQuestions.length) return curr;
+      const nextQuestions = [...curr.customQuestions];
+      const temp = nextQuestions[qIdx];
+      nextQuestions[qIdx] = nextQuestions[targetIdx];
+      nextQuestions[targetIdx] = temp;
+      return { ...curr, customQuestions: nextQuestions };
+    });
+  };
+
+  const handleDeleteQuestion = (qIdx: number) => {
+    updateCurrentPreset((curr) => ({
+      ...curr,
+      customQuestions: curr.customQuestions.filter((_, idx) => idx !== qIdx)
+    }));
+  };
+
+  const handleAddQuestion = () => {
+    updateCurrentPreset((curr) => {
+      const newIndex = curr.customQuestions.length + 1;
+      const newQ: CustomQuestionSpec = {
+        type: 'CUSTOM',
+        key: `custom_question_${newIndex}`,
+        label: 'Any special requests or add-ons for your cleaning?',
+        options: [
+          { value: 'Inside Fridge & Inside Oven Cleaning', key: 'inside_fridge_oven' },
+          { value: 'Interior Windows & Blinds', key: 'interior_windows' },
+          { value: 'Pet Hair Removal / Extra Scrub', key: 'pet_hair' },
+          { value: 'No Extra Add-Ons Needed', key: 'no_addons' }
+        ]
+      };
+      return {
+        ...curr,
+        customQuestions: [...curr.customQuestions, newQ]
+      };
+    });
+    setPreviewStep('questions');
+  };
+
+  const handleOptionValueChange = (qIdx: number, optIdx: number, newValue: string) => {
+    updateCurrentPreset((curr) => {
+      const nextQuestions = [...curr.customQuestions];
+      const targetQ = nextQuestions[qIdx];
+      const nextOptions = [...targetQ.options];
+      nextOptions[optIdx] = {
+        value: newValue,
+        key: slugifyKey(newValue, `opt_${optIdx + 1}`)
+      };
+      nextQuestions[qIdx] = { ...targetQ, options: nextOptions };
+      return { ...curr, customQuestions: nextQuestions };
+    });
+  };
+
+  const handleAddOption = (qIdx: number) => {
+    updateCurrentPreset((curr) => {
+      const nextQuestions = [...curr.customQuestions];
+      const targetQ = nextQuestions[qIdx];
+      const nextOptNum = targetQ.options.length + 1;
+      const newOptValue = `New Answer Choice ${nextOptNum}`;
+      nextQuestions[qIdx] = {
+        ...targetQ,
+        options: [
+          ...targetQ.options,
+          { value: newOptValue, key: `option_${nextOptNum}_${Date.now().toString().slice(-3)}` }
+        ]
+      };
+      return { ...curr, customQuestions: nextQuestions };
+    });
+  };
+
+  const handleDeleteOption = (qIdx: number, optIdx: number) => {
+    updateCurrentPreset((curr) => {
+      const nextQuestions = [...curr.customQuestions];
+      const targetQ = nextQuestions[qIdx];
+      if (targetQ.options.length <= 1) return curr; // keep at least 1 option
+      nextQuestions[qIdx] = {
+        ...targetQ,
+        options: targetQ.options.filter((_, idx) => idx !== optIdx)
+      };
+      return { ...curr, customQuestions: nextQuestions };
+    });
+  };
+
+  const handleToggleStandardField = (fieldSpec: {
+    type: StandardQuestionSpec['type'];
+    key: string;
+  }) => {
+    updateCurrentPreset((curr) => {
+      const exists = curr.standardQuestions.some((s) => s.type === fieldSpec.type);
+      const nextStandard = exists
+        ? curr.standardQuestions.filter((s) => s.type !== fieldSpec.type)
+        : [...curr.standardQuestions, { type: fieldSpec.type, key: fieldSpec.key }];
+      return { ...curr, standardQuestions: nextStandard };
+    });
+  };
+
+  // Apply Raw JSON edits back to the visual state
+  const handleRawJsonChange = (newText: string) => {
+    setRawJsonText(newText);
+    try {
+      const parsed = JSON.parse(newText);
+      setRawJsonError(null);
+
+      // Sync parsed JSON back into the active preset
+      updateCurrentPreset((curr) => {
+        const rawQuestions = Array.isArray(parsed.questions) ? parsed.questions : [];
+        const customQs: CustomQuestionSpec[] = rawQuestions
+          .filter((q: any) => q && q.type === 'CUSTOM')
+          .map((q: any, idx: number) => ({
+            type: 'CUSTOM' as const,
+            key: String(q.key || `custom_${idx + 1}`),
+            label: String(q.label || 'Custom Question'),
+            options: Array.isArray(q.options)
+              ? q.options.map((o: any, oIdx: number) => ({
+                  value: String(o?.value ?? ''),
+                  key: String(o?.key || slugifyKey(String(o?.value || ''), `opt_${oIdx + 1}`))
+                }))
+              : []
+          }));
+
+        const standardQs: StandardQuestionSpec[] = rawQuestions
+          .filter((q: any) => q && q.type && q.type !== 'CUSTOM')
+          .map((q: any) => ({
+            type: q.type as StandardQuestionSpec['type'],
+            key: String(q.key || slugifyKey(String(q.type), 'field'))
+          }));
+
+        return {
+          ...curr,
+          formName: typeof parsed.name === 'string' ? parsed.name : curr.formName,
+          questionPageHeadline:
+            typeof parsed.question_page_custom_headline === 'string'
+              ? parsed.question_page_custom_headline
+              : curr.questionPageHeadline,
+          contextCard: parsed.context_card
+            ? {
+                title: String(parsed.context_card.title ?? curr.contextCard.title),
+                style:
+                  parsed.context_card.style === 'PARAGRAPH_STYLE' ? 'PARAGRAPH_STYLE' : 'LIST_STYLE',
+                content: Array.isArray(parsed.context_card.content)
+                  ? parsed.context_card.content.map((c: any) => String(c))
+                  : curr.contextCard.content,
+                button_text: String(
+                  parsed.context_card.button_text ?? curr.contextCard.button_text
+                )
+              }
+            : curr.contextCard,
+          customQuestions: customQs.length > 0 ? customQs : curr.customQuestions,
+          standardQuestions: standardQs.length > 0 ? standardQs : curr.standardQuestions,
+          privacyPolicy: parsed.privacy_policy
+            ? {
+                url: String(parsed.privacy_policy.url ?? curr.privacyPolicy.url),
+                link_text: String(parsed.privacy_policy.link_text ?? curr.privacyPolicy.link_text)
+              }
+            : curr.privacyPolicy,
+          thankYouPage: parsed.thank_you_page
+            ? {
+                title: String(parsed.thank_you_page.title ?? curr.thankYouPage.title),
+                body: String(parsed.thank_you_page.body ?? curr.thankYouPage.body),
+                button_text: String(
+                  parsed.thank_you_page.button_text ?? curr.thankYouPage.button_text
+                ),
+                button_type: 'VIEW_WEBSITE',
+                website_url: String(
+                  parsed.thank_you_page.website_url ?? curr.thankYouPage.website_url
+                )
+              }
+            : curr.thankYouPage
+        };
+      });
+    } catch (err: any) {
+      setRawJsonError(err?.message || 'Invalid JSON syntax');
+    }
+  };
+
+  const handleFormatRawJson = () => {
+    try {
+      const parsed = JSON.parse(rawJsonText);
+      setRawJsonText(JSON.stringify(parsed, null, 2));
+      setRawJsonError(null);
+      setRawJsonSavedNotice('JSON Formatted & Validated!');
+      setTimeout(() => setRawJsonSavedNotice(null), 2000);
+    } catch (err: any) {
+      setRawJsonError(err?.message || 'Fix JSON syntax error before formatting.');
+    }
+  };
+
+  const metaGraphApiPayload = buildMetaGraphApiPayload(preset);
+  const metaJsonString = rawJsonError ? rawJsonText : JSON.stringify(metaGraphApiPayload, null, 2);
+
+  // Dynamically build the CRM webhook sample payload including any new custom question keys the user added
+  const dynamicCustomKeysObject: Record<string, string> = {};
+  for (const q of preset.customQuestions) {
+    dynamicCustomKeysObject[q.key] = `{{${q.key}}}`;
+  }
+  for (const s of preset.standardQuestions) {
+    dynamicCustomKeysObject[s.key] = `{{${s.key}}}`;
+  }
+
   const webhookIntegrationSpec = {
     webhook_endpoint: 'https://app.tidyupscleaning.com/api/webhooks/leads',
     facebook_native_webhook: 'https://app.tidyupscleaning.com/api/facebook/webhook',
@@ -431,21 +743,11 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
     sample_meta_lead_payload: {
       source: 'Facebook Lead Form',
       form_name: preset.formName,
-      full_name: '{{full_name}}',
-      phone_number: '{{phone_number}}',
-      email: '{{email}}',
-      street_address: '{{street_address}}',
-      city: '{{city}}',
-      post_code: '{{post_code}}',
-      service_type: '{{service_type}}',
-      bedrooms: '{{bedrooms}}',
-      bathrooms: '{{bathrooms}}',
-      preferred_date: '{{preferred_date}}',
+      ...dynamicCustomKeysObject,
       notes: 'Submitted via Meta Instant Lead Form ($10 Off Promo)'
     }
   };
 
-  const metaJsonString = JSON.stringify(metaGraphApiPayload, null, 2);
   const webhookJsonString = JSON.stringify(webhookIntegrationSpec, null, 2);
 
   const curlCommandString = `curl -X POST "https://graph.facebook.com/v21.0/YOUR_PAGE_ID/leadgen_forms" \\
@@ -484,11 +786,14 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
           phone: preset.sampleTestLead.phone,
           email: preset.sampleTestLead.email,
           address: preset.sampleTestLead.address,
-          serviceType: preset.sampleTestLead.serviceType,
+          serviceType:
+            preset.customQuestions[0]?.options[0]?.value || preset.sampleTestLead.serviceType,
           bedrooms: preset.sampleTestLead.bedrooms,
           bathrooms: preset.sampleTestLead.bathrooms,
           preferredDate: preset.sampleTestLead.preferredDate,
-          notes: preset.sampleTestLead.notes
+          notes: `${preset.formName} — Custom Questions: ${preset.customQuestions
+            .map((q) => `${q.label} [${q.options[0]?.value || 'N/A'}]`)
+            .join(' | ')}`
         })
       });
       const data = await response.json();
@@ -526,17 +831,21 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
               <div>
                 <div className="flex flex-wrap items-center gap-2 mb-1">
                   <span className="px-2.5 py-0.5 rounded-md bg-black/30 border border-white/20 text-[11px] font-bold uppercase tracking-wider">
-                    Meta Ads Instant Lead Form Studio
+                    Editable Meta Lead Form Studio
                   </span>
                   <span className="px-2.5 py-0.5 rounded-md bg-white/20 text-[11px] font-semibold">
-                    Auto-Syncs to 7-Tab Sheet + Jobber Draft Quote
+                    Add / Update Questions & Answers • Live JSON Sync
                   </span>
                 </div>
                 <h2 className="text-xl sm:text-2xl font-bold tracking-tight">
-                  TidyUps Meta Lead Form API JSON & Copy-Paste Kit
+                  TidyUps Meta Lead Form Builder &amp; Editable API JSON
                 </h2>
                 <p className="text-xs sm:text-sm text-white/85 mt-0.5">
-                  Copy the complete Meta Graph API <code className="bg-black/30 px-1.5 py-0.5 rounded font-mono text-xs">leadgen_forms</code> JSON or copy individual fields directly into Meta Ads Manager.
+                  Add or edit any question or answer choice below — your Meta Graph API{' '}
+                  <code className="bg-black/30 px-1.5 py-0.5 rounded font-mono text-xs">
+                    leadgen_forms
+                  </code>{' '}
+                  JSON and Phone Preview update automatically in real time.
                 </p>
               </div>
             </div>
@@ -549,7 +858,7 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                 {copiedKey === 'header_full_json' ? (
                   <>
                     <Check className="w-4 h-4 text-emerald-600" />
-                    <span>Copied Meta API JSON!</span>
+                    <span>Copied Updated Meta JSON!</span>
                   </>
                 ) : (
                   <>
@@ -568,6 +877,15 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
               </button>
 
               <button
+                onClick={handleResetCurrentPreset}
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-black/30 hover:bg-black/50 border border-white/20 text-white text-xs font-semibold transition cursor-pointer"
+                title="Reset this preset back to the original TidyUps questions"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Reset Default</span>
+              </button>
+
+              <button
                 onClick={onClose}
                 className="p-2.5 rounded-xl bg-black/30 hover:bg-black/50 border border-white/20 text-white transition cursor-pointer"
                 title="Close"
@@ -583,10 +901,10 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
               <Layers className="w-4 h-4 text-emerald-400" />
-              <span>1. Choose Your Meta Ad Campaign Template:</span>
+              <span>1. Select Campaign Template to Edit:</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 flex-1 max-w-4xl">
-              {PRESETS.map((item) => {
+              {presets.map((item) => {
                 const isSelected = item.id === selectedPresetId;
                 return (
                   <button
@@ -616,65 +934,455 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
           </div>
         </div>
 
-        {/* Main Content Grid: Left = Code / Copy-Paste Cards, Right = Live Meta Instant Form Mobile Preview */}
+        {/* Main Content Grid: Left = Visual Editor / Editable JSON / Copy Cards, Right = Live Meta Instant Form Mobile Preview */}
         <div className="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800">
-          {/* Left 7 Columns: JSON & Quick-Copy Studio */}
+          {/* Left 7 Columns */}
           <div className="lg:col-span-7 p-5 sm:p-6 flex flex-col gap-5 overflow-y-auto">
             {/* Mode Switcher Tabs */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-3">
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={() => setActiveTab('api_json')}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    activeTab === 'api_json'
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  onClick={() => setActiveTab('visual_editor')}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    activeTab === 'visual_editor'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                       : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-white'
                   }`}
                 >
-                  <Code2 className="w-4 h-4" />
-                  <span>Meta API JSON (leadgen_forms)</span>
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edit Questions &amp; Answers</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('api_json')}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    activeTab === 'api_json'
+                      ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm'
+                      : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-white'
+                  }`}
+                >
+                  <Code2 className="w-3.5 h-3.5" />
+                  <span>Editable Meta API JSON</span>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('quick_copy')}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                     activeTab === 'quick_copy'
-                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
                       : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-white'
                   }`}
                 >
-                  <ClipboardList className="w-4 h-4" />
-                  <span>Ads Manager Copy-Paste Fields</span>
+                  <ClipboardList className="w-3.5 h-3.5" />
+                  <span>Ads Manager Copy-Paste</span>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('webhook_json')}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                     activeTab === 'webhook_json'
-                      ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                      ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                       : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-white'
                   }`}
                 >
-                  <Zap className="w-4 h-4" />
-                  <span>CRM Webhook JSON & Live Test</span>
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>CRM Webhook &amp; Live Test</span>
                 </button>
               </div>
             </div>
 
-            {/* TAB 1: META GRAPH API JSON */}
+            {rawJsonSavedNotice && (
+              <div className="px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{rawJsonSavedNotice}</span>
+              </div>
+            )}
+
+            {/* TAB 0: VISUAL QUESTION & ANSWER EDITOR */}
+            {activeTab === 'visual_editor' && (
+              <div className="flex flex-col gap-5">
+                {/* Form Name & Intro Headline Editor */}
+                <div className="bg-zinc-900/70 border border-zinc-800 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                      Form Title &amp; Intro Card (Editable)
+                    </span>
+                    <span className="text-[11px] text-zinc-400">Auto-saves as you type</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
+                        Meta Form Name
+                      </label>
+                      <input
+                        type="text"
+                        value={preset.formName}
+                        onChange={(e) =>
+                          updateCurrentPreset((curr) => ({ ...curr, formName: e.target.value }))
+                        }
+                        className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 focus:border-emerald-500 text-xs text-white font-semibold outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
+                        Intro Headline
+                      </label>
+                      <input
+                        type="text"
+                        value={preset.contextCard.title}
+                        onChange={(e) =>
+                          updateCurrentPreset((curr) => ({
+                            ...curr,
+                            contextCard: { ...curr.contextCard, title: e.target.value }
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 focus:border-emerald-500 text-xs text-white font-semibold outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-semibold text-zinc-400">
+                        Intro Bullet Points (Shown on Form Intro Card)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateCurrentPreset((curr) => ({
+                            ...curr,
+                            contextCard: {
+                              ...curr.contextCard,
+                              content: [
+                                ...curr.contextCard.content,
+                                '✅ $10 Off First-Time Promo Applied Automatically'
+                              ]
+                            }
+                          }))
+                        }
+                        className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Add Bullet</span>
+                      </button>
+                    </div>
+                    <div className="space-y-1.5">
+                      {preset.contextCard.content.map((bullet, bIdx) => (
+                        <div key={bIdx} className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={bullet}
+                            onChange={(e) =>
+                              updateCurrentPreset((curr) => {
+                                const nextBullets = [...curr.contextCard.content];
+                                nextBullets[bIdx] = e.target.value;
+                                return {
+                                  ...curr,
+                                  contextCard: { ...curr.contextCard, content: nextBullets }
+                                };
+                              })
+                            }
+                            className="flex-1 px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 focus:border-emerald-500 text-xs text-zinc-200 outline-none"
+                          />
+                          {preset.contextCard.content.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateCurrentPreset((curr) => ({
+                                  ...curr,
+                                  contextCard: {
+                                    ...curr.contextCard,
+                                    content: curr.contextCard.content.filter((_, i) => i !== bIdx)
+                                  }
+                                }))
+                              }
+                              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-rose-500/20 text-zinc-400 hover:text-rose-400 transition cursor-pointer"
+                              title="Remove bullet"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Custom Multiple-Choice Questions & Answers Editor */}
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                        Custom Questions &amp; Answer Choices ({preset.customQuestions.length})
+                      </span>
+                      <p className="text-[11px] text-zinc-400">
+                        Click any question or answer below to edit it, add new answer choices, or add a brand-new question.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleAddQuestion}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md transition cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>+ Add New Question</span>
+                    </button>
+                  </div>
+
+                  {preset.customQuestions.map((q, qIdx) => (
+                    <div
+                      key={`${qIdx}_${q.key}`}
+                      className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 space-y-3"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-zinc-800">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold">
+                            Question #{qIdx + 1}
+                          </span>
+                          <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+                            <span>Webhook Key:</span>
+                            <input
+                              type="text"
+                              value={q.key}
+                              onChange={(e) => handleQuestionKeyChange(qIdx, e.target.value)}
+                              className="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 focus:border-emerald-500 font-mono text-[11px] text-emerald-300 w-36 outline-none"
+                              title="Field key used in Meta Lead Ads JSON & CRM webhook"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleMoveQuestion(qIdx, 'up')}
+                            disabled={qIdx === 0}
+                            className="p-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-white disabled:opacity-30 cursor-pointer"
+                            title="Move question up"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMoveQuestion(qIdx, 'down')}
+                            disabled={qIdx === preset.customQuestions.length - 1}
+                            className="p-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-white disabled:opacity-30 cursor-pointer"
+                            title="Move question down"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteQuestion(qIdx)}
+                            className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            title="Delete this question"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Delete</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Question Label Input */}
+                      <div>
+                        <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
+                          Question Text (Shown to Customer)
+                        </label>
+                        <input
+                          type="text"
+                          value={q.label}
+                          onChange={(e) => handleQuestionLabelChange(qIdx, e.target.value)}
+                          placeholder="Enter your question..."
+                          className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 focus:border-emerald-500 text-xs sm:text-sm font-bold text-white outline-none"
+                        />
+                      </div>
+
+                      {/* Answer Options List */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-zinc-400">
+                            Multiple-Choice Answers ({q.options.length})
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => handleAddOption(qIdx)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>+ Add Answer Choice</span>
+                          </button>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {q.options.map((opt, optIdx) => (
+                            <div key={optIdx} className="flex items-center gap-2">
+                              <span className="w-6 text-center text-[11px] font-mono text-zinc-500">
+                                {optIdx + 1}.
+                              </span>
+                              <input
+                                type="text"
+                                value={opt.value}
+                                onChange={(e) =>
+                                  handleOptionValueChange(qIdx, optIdx, e.target.value)
+                                }
+                                placeholder="Answer option text..."
+                                className="flex-1 px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 focus:border-emerald-500 text-xs text-zinc-100 outline-none"
+                              />
+                              <span className="hidden sm:inline-block px-2 py-1 rounded bg-zinc-950 border border-zinc-900 font-mono text-[10px] text-zinc-500">
+                                {opt.key}
+                              </span>
+                              {q.options.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteOption(qIdx, optIdx)}
+                                  className="p-1.5 rounded-lg bg-zinc-950 hover:bg-rose-500/20 border border-zinc-800 text-zinc-400 hover:text-rose-400 transition cursor-pointer"
+                                  title="Delete this answer option"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Standard Contact Fields Toggles */}
+                <div className="bg-zinc-900/70 border border-zinc-800 rounded-xl p-4 space-y-3">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-teal-400">
+                      Auto-Filled Contact Fields (Meta Pre-Fill)
+                    </span>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      Toggle which contact fields Meta automatically pre-fills from the customer&apos;s Facebook/Instagram account:
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {ALL_STANDARD_CONTACT_FIELDS.map((field) => {
+                      const isIncluded = preset.standardQuestions.some(
+                        (s) => s.type === field.type
+                      );
+                      return (
+                        <button
+                          key={field.type}
+                          type="button"
+                          onClick={() => handleToggleStandardField(field)}
+                          className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                            isIncluded
+                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                              : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >
+                          <CheckCircle2
+                            className={`w-3.5 h-3.5 ${
+                              isIncluded ? 'text-emerald-400' : 'text-zinc-600'
+                            }`}
+                          />
+                          <span>{field.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Thank-You Screen & Booking Redirect Editor */}
+                <div className="bg-zinc-900/70 border border-zinc-800 rounded-xl p-4 space-y-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-purple-400">
+                    Completion Screen &amp; Booking Link
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
+                        Thank-You Headline
+                      </label>
+                      <input
+                        type="text"
+                        value={preset.thankYouPage.title}
+                        onChange={(e) =>
+                          updateCurrentPreset((curr) => ({
+                            ...curr,
+                            thankYouPage: { ...curr.thankYouPage, title: e.target.value }
+                          }))
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 focus:border-emerald-500 text-xs text-white font-semibold outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
+                        Button Text
+                      </label>
+                      <input
+                        type="text"
+                        value={preset.thankYouPage.button_text}
+                        onChange={(e) =>
+                          updateCurrentPreset((curr) => ({
+                            ...curr,
+                            thankYouPage: { ...curr.thankYouPage, button_text: e.target.value }
+                          }))
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 focus:border-emerald-500 text-xs text-white font-semibold outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
+                      Thank-You Message Body
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={preset.thankYouPage.body}
+                      onChange={(e) =>
+                        updateCurrentPreset((curr) => ({
+                          ...curr,
+                          thankYouPage: { ...curr.thankYouPage, body: e.target.value }
+                        }))
+                      }
+                      className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 focus:border-emerald-500 text-xs text-zinc-200 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
+                      Follow-Up Website / Online Booking URL
+                    </label>
+                    <input
+                      type="text"
+                      value={preset.thankYouPage.website_url}
+                      onChange={(e) =>
+                        updateCurrentPreset((curr) => ({
+                          ...curr,
+                          thankYouPage: { ...curr.thankYouPage, website_url: e.target.value }
+                        }))
+                      }
+                      className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 focus:border-emerald-500 text-xs font-mono text-emerald-300 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 1: DIRECT EDITABLE META GRAPH API JSON */}
             {activeTab === 'api_json' && (
               <div className="flex flex-col gap-4">
                 <div className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <div>
                       <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                        Meta Graph API • Instant Form Payload
+                        Live Two-Way Editable JSON • Meta Graph API (leadgen_forms)
                       </span>
                       <h3 className="text-sm font-bold text-white">
-                        Ready to Paste into Meta Graph API Explorer or Ads Automation
+                        Type directly inside the JSON below or use the &ldquo;Edit Questions &amp; Answers&rdquo; tab
                       </h3>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={handleFormatRawJson}
+                        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-zinc-700 transition cursor-pointer"
+                      >
+                        Format &amp; Validate JSON
+                      </button>
                       <button
                         onClick={() => handleCopy(metaJsonString, 'main_json_box')}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition cursor-pointer"
@@ -710,25 +1418,32 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                     </div>
                   </div>
                   <p className="text-xs text-zinc-400 leading-relaxed">
-                    Every field key (<code className="text-emerald-300">service_type</code>,{' '}
-                    <code className="text-emerald-300">bedrooms</code>,{' '}
-                    <code className="text-emerald-300">bathrooms</code>,{' '}
-                    <code className="text-emerald-300">preferred_date</code>,{' '}
-                    <code className="text-emerald-300">full_name</code>,{' '}
-                    <code className="text-emerald-300">phone_number</code>,{' '}
-                    <code className="text-emerald-300">email</code>) is pre-mapped to your TidyUps pricing calculator so leads automatically get the $20 Fuel Surcharge, -$10 Promo Discount, 12.5% Tax & Supplies, and $100 Deposit in Jobber.
+                    You can directly edit any question, answer choice, or field key inside the JSON editor below. Valid edits automatically update the Phone Preview on the right and save to your preset.
                   </p>
                 </div>
 
-                {/* Code Block */}
+                {rawJsonError && (
+                  <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-semibold flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>JSON Syntax Notice: {rawJsonError}</span>
+                  </div>
+                )}
+
+                {/* Editable JSON Textarea */}
                 <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-400 font-mono">
                     <span>POST https://graph.facebook.com/v21.0/&#123;page-id&#125;/leadgen_forms</span>
-                    <span className="text-emerald-400 font-semibold">Valid Meta v21.0 Schema</span>
+                    <span className={rawJsonError ? 'text-rose-400 font-semibold' : 'text-emerald-400 font-semibold'}>
+                      {rawJsonError ? 'Check JSON Syntax' : '✓ Valid Meta v21.0 Schema (Editable)'}
+                    </span>
                   </div>
-                  <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto max-h-[420px] leading-relaxed select-all">
-                    {metaJsonString}
-                  </pre>
+                  <textarea
+                    value={rawJsonText}
+                    onChange={(e) => handleRawJsonChange(e.target.value)}
+                    spellCheck={false}
+                    rows={22}
+                    className="w-full p-4 bg-zinc-950 text-xs font-mono text-emerald-300 focus:outline-none leading-relaxed resize-y"
+                  />
                 </div>
               </div>
             )}
@@ -738,20 +1453,18 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
               <div className="flex flex-col gap-4">
                 <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4">
                   <h3 className="text-sm font-bold text-white mb-1">
-                    Creating the Form Inside Meta Ads Manager UI?
+                    Copy &amp; Paste Your Updated Questions into Meta Ads Manager
                   </h3>
                   <p className="text-xs text-zinc-400">
-                    Click any <strong>Copy</strong> button below and paste directly into the corresponding box in Meta Ads Manager &rarr; <strong>Instant Forms</strong> &rarr; <strong>Create Form</strong>.
+                    All cards below reflect your latest custom questions and answer choices. Click any <strong>Copy</strong> button to paste directly into Meta Ads Manager.
                   </p>
                 </div>
 
                 {/* Form Name + Intro Card */}
                 <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-wider text-rose-400">
-                      Step 1 • Form Name & Intro Section
-                    </span>
-                  </div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-rose-400">
+                    Step 1 • Form Name &amp; Intro Section
+                  </span>
 
                   <div className="flex items-center justify-between gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3">
                     <div className="min-w-0">
@@ -762,7 +1475,11 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                       onClick={() => handleCopy(preset.formName, 'copy_form_name')}
                       className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-white shrink-0 flex items-center gap-1.5 cursor-pointer"
                     >
-                      {copiedKey === 'copy_form_name' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedKey === 'copy_form_name' ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
                       <span>{copiedKey === 'copy_form_name' ? 'Copied' : 'Copy'}</span>
                     </button>
                   </div>
@@ -776,14 +1493,20 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                       onClick={() => handleCopy(preset.contextCard.title, 'copy_intro_headline')}
                       className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-white shrink-0 flex items-center gap-1.5 cursor-pointer"
                     >
-                      {copiedKey === 'copy_intro_headline' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedKey === 'copy_intro_headline' ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
                       <span>{copiedKey === 'copy_intro_headline' ? 'Copied' : 'Copy'}</span>
                     </button>
                   </div>
 
                   <div className="flex items-start justify-between gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3">
                     <div className="min-w-0">
-                      <div className="text-[11px] text-zinc-500 font-semibold mb-1">Intro Benefits List</div>
+                      <div className="text-[11px] text-zinc-500 font-semibold mb-1">
+                        Intro Benefits List
+                      </div>
                       <ul className="space-y-1 text-xs text-zinc-200">
                         {preset.contextCard.content.map((line, i) => (
                           <li key={i}>{line}</li>
@@ -791,10 +1514,16 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                       </ul>
                     </div>
                     <button
-                      onClick={() => handleCopy(preset.contextCard.content.join('\n'), 'copy_intro_bullets')}
+                      onClick={() =>
+                        handleCopy(preset.contextCard.content.join('\n'), 'copy_intro_bullets')
+                      }
                       className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-white shrink-0 flex items-center gap-1.5 cursor-pointer"
                     >
-                      {copiedKey === 'copy_intro_bullets' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedKey === 'copy_intro_bullets' ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
                       <span>{copiedKey === 'copy_intro_bullets' ? 'Copied' : 'Copy All'}</span>
                     </button>
                   </div>
@@ -803,13 +1532,16 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                 {/* Custom Questions Cards */}
                 <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-4 space-y-3">
                   <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                    Step 2 • Custom Multiple-Choice Questions (4 Questions)
+                    Step 2 • Custom Multiple-Choice Questions ({preset.customQuestions.length} Questions)
                   </span>
 
                   {preset.customQuestions.map((q, idx) => {
                     const optionsText = q.options.map((o) => o.value).join('\n');
                     return (
-                      <div key={q.key} className="bg-zinc-950 border border-zinc-800 rounded-lg p-3.5 space-y-2.5">
+                      <div
+                        key={`${idx}_${q.key}`}
+                        className="bg-zinc-950 border border-zinc-800 rounded-lg p-3.5 space-y-2.5"
+                      >
                         <div className="flex items-center justify-between gap-2">
                           <div>
                             <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 mr-2">
@@ -818,81 +1550,49 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                             <span className="text-xs font-bold text-white">{q.label}</span>
                           </div>
                           <button
-                            onClick={() => handleCopy(q.label, `q_label_${q.key}`)}
+                            onClick={() => handleCopy(q.label, `q_label_${idx}`)}
                             className="px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[11px] font-bold text-white shrink-0 flex items-center gap-1 cursor-pointer"
                           >
-                            {copiedKey === `q_label_${q.key}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            {copiedKey === `q_label_${idx}` ? (
+                              <Check className="w-3 h-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
                             <span>Copy Question</span>
                           </button>
                         </div>
 
                         <div className="flex items-start justify-between gap-2 pt-1 border-t border-zinc-900">
                           <div className="flex flex-wrap gap-1.5">
-                            {q.options.map((opt) => (
+                            {q.options.map((opt, oIdx) => (
                               <span
-                                key={opt.key}
-                                onClick={() => handleCopy(opt.value, `opt_${q.key}_${opt.key}`)}
+                                key={`${opt.key}_${oIdx}`}
+                                onClick={() => handleCopy(opt.value, `opt_${idx}_${oIdx}`)}
                                 className="px-2.5 py-1 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] text-zinc-200 cursor-pointer flex items-center gap-1"
                                 title="Click to copy option"
                               >
                                 <span>{opt.value}</span>
-                                {copiedKey === `opt_${q.key}_${opt.key}` && (
+                                {copiedKey === `opt_${idx}_${oIdx}` && (
                                   <Check className="w-3 h-3 text-emerald-400" />
                                 )}
                               </span>
                             ))}
                           </div>
                           <button
-                            onClick={() => handleCopy(optionsText, `q_opts_${q.key}`)}
+                            onClick={() => handleCopy(optionsText, `q_opts_${idx}`)}
                             className="px-2.5 py-1 rounded-md bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-[11px] font-bold text-emerald-300 shrink-0 flex items-center gap-1 cursor-pointer"
                           >
-                            {copiedKey === `q_opts_${q.key}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            {copiedKey === `q_opts_${idx}` ? (
+                              <Check className="w-3 h-3" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
                             <span>Copy Choices</span>
                           </button>
                         </div>
                       </div>
                     );
                   })}
-                </div>
-
-                {/* Privacy Policy & Completion Screen */}
-                <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-4 space-y-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-purple-400">
-                    Step 3 • Privacy Policy & Completion Screen Links
-                  </span>
-
-                  <div className="flex items-center justify-between gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3">
-                    <div className="min-w-0">
-                      <div className="text-[11px] text-zinc-500 font-semibold">Privacy Policy & Website Action URL</div>
-                      <div className="text-xs font-mono text-emerald-300 truncate">
-                        {preset.thankYouPage.website_url}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleCopy(preset.thankYouPage.website_url, 'copy_booking_url')}
-                      className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-white shrink-0 flex items-center gap-1.5 cursor-pointer"
-                    >
-                      {copiedKey === 'copy_booking_url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>Copy URL</span>
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 bg-zinc-950 border border-zinc-800 rounded-lg p-3">
-                    <div className="min-w-0">
-                      <div className="text-[11px] text-zinc-500 font-semibold">Completion Screen Headline & Body</div>
-                      <div className="text-xs font-bold text-white">{preset.thankYouPage.title}</div>
-                      <div className="text-xs text-zinc-400 mt-0.5">{preset.thankYouPage.body}</div>
-                    </div>
-                    <button
-                      onClick={() =>
-                        handleCopy(`${preset.thankYouPage.title}\n\n${preset.thankYouPage.body}`, 'copy_thankyou')
-                      }
-                      className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-white shrink-0 flex items-center gap-1.5 cursor-pointer"
-                    >
-                      {copiedKey === 'copy_thankyou' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>Copy Text</span>
-                    </button>
-                  </div>
                 </div>
               </div>
             )}
@@ -907,7 +1607,7 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                         Automatic Lead Routing • 7-Tab Sheet + Jobber Draft Quote
                       </span>
                       <h3 className="text-sm font-bold text-white">
-                        Meta Leads Webhook URL & Field Mapping JSON
+                        Meta Leads Webhook URL &amp; Dynamic Field Mapping JSON
                       </h3>
                     </div>
 
@@ -937,46 +1637,6 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                       <span>{testLeadResult.message}</span>
                     </div>
                   )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                    <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="text-[10px] uppercase font-bold text-zinc-500">
-                          Direct Lead Intake Webhook URL
-                        </div>
-                        <div className="text-xs font-mono text-emerald-300 truncate">
-                          https://app.tidyupscleaning.com/api/webhooks/leads
-                        </div>
-                      </div>
-                      <button
-                        onClick={() =>
-                          handleCopy('https://app.tidyupscleaning.com/api/webhooks/leads', 'copy_webhook_1')
-                        }
-                        className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-white shrink-0 cursor-pointer"
-                      >
-                        {copiedKey === 'copy_webhook_1' ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-
-                    <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="text-[10px] uppercase font-bold text-zinc-500">
-                          Meta Graph Native Webhook URL
-                        </div>
-                        <div className="text-xs font-mono text-purple-300 truncate">
-                          https://app.tidyupscleaning.com/api/facebook/webhook
-                        </div>
-                      </div>
-                      <button
-                        onClick={() =>
-                          handleCopy('https://app.tidyupscleaning.com/api/facebook/webhook', 'copy_webhook_2')
-                        }
-                        className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-white shrink-0 cursor-pointer"
-                      >
-                        {copiedKey === 'copy_webhook_2' ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="relative rounded-xl bg-zinc-950 border border-zinc-800 overflow-hidden">
@@ -1014,7 +1674,7 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                 <div className="flex items-center gap-2">
                   <Smartphone className="w-4 h-4 text-emerald-400" />
                   <span className="text-xs font-bold uppercase tracking-wider text-zinc-300">
-                    Live Meta Ad Form Preview
+                    Live Phone Preview
                   </span>
                 </div>
                 <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-0.5 text-[11px]">
@@ -1042,16 +1702,18 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                     <div className="w-9 h-9 rounded-full bg-white/20 border border-white/30 flex items-center justify-center font-extrabold text-sm">
                       TU
                     </div>
-                    <div>
-                      <div className="text-xs font-bold leading-tight">TidyUps Cleaning Service Inc.</div>
-                      <div className="text-[10px] text-white/80 flex items-center gap-1">
-                        <span>Sponsored • Instant Quote Form</span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold leading-tight truncate">
+                        TidyUps Cleaning Service Inc.
                       </div>
+                      <div className="text-[10px] text-white/80 truncate">{preset.formName}</div>
                     </div>
                   </div>
                   <div className="mt-3 pt-2.5 border-t border-white/20 flex items-center justify-between text-[11px]">
                     <span className="font-semibold">🎁 $10 Off Promo + 2 Pro Cleaners</span>
-                    <span className="px-2 py-0.5 rounded bg-black/25 font-mono text-[10px]">60s Quote</span>
+                    <span className="px-2 py-0.5 rounded bg-black/25 font-mono text-[10px]">
+                      {preset.customQuestions.length} Questions
+                    </span>
                   </div>
                 </div>
 
@@ -1072,21 +1734,24 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                       <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300 space-y-1">
                         <div className="font-bold">Included in Your Instant Quote:</div>
                         <div>• Service Package (2 Pro Cleaners)</div>
-                        <div>• Fuel Surcharge ($20.00) & -$10.00 Ad Promo</div>
-                        <div>• Federal Tax & Supplies (12.5%)</div>
+                        <div>• Fuel Surcharge ($20.00) &amp; -$10.00 Ad Promo</div>
+                        <div>• Federal Tax &amp; Supplies (12.5%)</div>
                       </div>
                     </div>
                   )}
 
                   {previewStep === 'questions' && (
                     <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
-                      {preset.customQuestions.map((q) => (
-                        <div key={q.key} className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-3 space-y-2">
+                      {preset.customQuestions.map((q, qIdx) => (
+                        <div
+                          key={`${qIdx}_${q.key}`}
+                          className="bg-zinc-900/90 border border-zinc-800 rounded-xl p-3 space-y-2"
+                        >
                           <div className="text-xs font-bold text-white">{q.label}</div>
                           <div className="space-y-1.5">
                             {q.options.map((opt, idx) => (
                               <div
-                                key={opt.key}
+                                key={`${opt.key}_${idx}`}
                                 className={`px-2.5 py-1.5 rounded-lg border text-[11px] flex items-center justify-between ${
                                   idx === 0
                                     ? `${preset.accentBg} ${preset.accentBorder} text-white font-semibold`
@@ -1095,11 +1760,15 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                               >
                                 <span>{opt.value}</span>
                                 <div
-                                  className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center ${
-                                    idx === 0 ? 'border-emerald-400 bg-emerald-500' : 'border-zinc-600'
+                                  className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ml-2 ${
+                                    idx === 0
+                                      ? 'border-emerald-400 bg-emerald-500'
+                                      : 'border-zinc-600'
                                   }`}
                                 >
-                                  {idx === 0 && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                  {idx === 0 && (
+                                    <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                                  )}
                                 </div>
                               </div>
                             ))}
@@ -1113,21 +1782,23 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                     <div className="space-y-2.5">
                       <div className="flex items-center gap-1.5 text-xs font-bold text-white">
                         <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                        <span>Auto-Filled by Meta (Contact Info)</span>
+                        <span>
+                          Auto-Filled by Meta ({preset.standardQuestions.length} Contact Fields)
+                        </span>
                       </div>
                       <p className="text-[11px] text-zinc-400">
-                        Meta automatically pre-fills these fields from the customer&apos;s profile so they can submit in one tap:
+                        Meta automatically pre-fills these fields from the customer&apos;s profile:
                       </p>
                       <div className="space-y-2">
-                        {[
-                          { label: 'Full Name', sample: preset.sampleTestLead.customerName, key: 'full_name' },
-                          { label: 'Phone Number', sample: preset.sampleTestLead.phone, key: 'phone_number' },
-                          { label: 'Email Address', sample: preset.sampleTestLead.email, key: 'email' },
-                          { label: 'Street Address', sample: preset.sampleTestLead.address, key: 'street_address' }
-                        ].map((field) => (
-                          <div key={field.key} className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2">
-                            <div className="text-[10px] text-zinc-500 font-semibold">{field.label}</div>
-                            <div className="text-xs text-white font-medium">{field.sample}</div>
+                        {preset.standardQuestions.map((field) => (
+                          <div
+                            key={field.type}
+                            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 flex items-center justify-between"
+                          >
+                            <div className="text-xs text-white font-semibold">{field.type}</div>
+                            <div className="text-[10px] font-mono text-emerald-400">
+                              key: {field.key}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1139,10 +1810,16 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                       <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center mx-auto text-emerald-400">
                         <CheckCircle2 className="w-6 h-6" />
                       </div>
-                      <div className="text-sm font-bold text-white">{preset.thankYouPage.title}</div>
-                      <p className="text-xs text-zinc-400 leading-relaxed">{preset.thankYouPage.body}</p>
+                      <div className="text-sm font-bold text-white">
+                        {preset.thankYouPage.title}
+                      </div>
+                      <p className="text-xs text-zinc-400 leading-relaxed">
+                        {preset.thankYouPage.body}
+                      </p>
                       <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-left text-[11px] text-zinc-300 space-y-1">
-                        <div className="font-bold text-emerald-400">Behind the Scenes (Instant):</div>
+                        <div className="font-bold text-emerald-400">
+                          Behind the Scenes (Instant):
+                        </div>
                         <div>✓ Added to 7-Tab Clean Leads Sheet</div>
                         <div>✓ Created Client + Draft Quote in Jobber</div>
                         <div>✓ Redirects to Color-Coded Booking Page</div>
@@ -1172,7 +1849,7 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                       </button>
                     ) : (
                       <a
-                        href="https://app.tidyupscleaning.com/booking"
+                        href={preset.thankYouPage.website_url}
                         target="_blank"
                         rel="noreferrer"
                         className={`w-full py-2.5 rounded-xl ${preset.buttonBg} text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg transition`}
