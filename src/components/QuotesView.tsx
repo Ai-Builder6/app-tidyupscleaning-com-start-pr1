@@ -762,12 +762,15 @@ export const QuotesView: React.FC<QuotesViewProps> = ({
         onClose={() => setSelectedQuote(null)}
         projectId={projectId}
         onConvertToJob={(quoteToConvert, scheduleOpts) => handleConvertToJob(quoteToConvert, scheduleOpts)}
-        onQuoteUpdated={(updated, allQuotes) => {
+        onQuoteUpdated={(updated, allQuotes, fullResponse) => {
           setSelectedQuote(updated);
           if (allQuotes && onQuotesUpdated) {
             onQuotesUpdated(allQuotes);
           } else if (onQuotesUpdated) {
             onQuotesUpdated(quotes.map((item) => (item.id === updated.id ? updated : item)));
+          }
+          if (fullResponse?.newVisit && onVisitCreated) {
+            onVisitCreated(fullResponse.newVisit);
           }
         }}
       />

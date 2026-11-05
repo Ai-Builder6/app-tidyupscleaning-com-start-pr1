@@ -39,6 +39,8 @@ import {
   syncJobberQuotes,
   syncJobberInvoices,
   pushBookingToJobber,
+  convertQuoteOrScheduleJobOnJobber,
+  updateVisitOnJobber,
   pushQuoteToJobber,
   pushInvoiceToJobber,
   runComprehensiveJobberSync,
@@ -2235,6 +2237,27 @@ app.all("/api/firebase-auth-proxy", async (req, res) => {
   }
 });
 
+// Helper to pull latest rotated Jobber tokens from live production store if local token was superseded
+async function pullLatestJobberTokensFromLiveProd(): Promise<{ accessToken: string; refreshToken: string } | null> {
+  try {
+    const res = await fetch("https://app.tidyupscleaning.com/api/store?project=tidyups", {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const prodCfg = data?.jobberConfig;
+    if (prodCfg?.accessToken || prodCfg?.refreshToken) {
+      return {
+        accessToken: String(prodCfg.accessToken || "").trim(),
+        refreshToken: String(prodCfg.refreshToken || "").trim(),
+      };
+    }
+  } catch {
+    // Non-fatal
+  }
+  return null;
+}
+
 // Wire automatic token refresh persistence
 setJobberTokenRefreshListener((tokens) => {
   jobberConfig.accessToken = tokens.accessToken;
@@ -2242,28 +2265,25 @@ setJobberTokenRefreshListener((tokens) => {
   jobberConfig.isConnected = true;
   jobberConfig.accountName = "Tidyups Cleaning Service Inc";
   jobberConfig.lastSyncedAt = new Date().toISOString();
-  persistJobberConfigToDisk();
+  persistJobberConfigToDisk(undefined, true);
 });
 
 // Wire expired token cleanup so expired tokens that cannot be refreshed do not trigger repeated 401 errors
 setJobberTokenExpiredListener((expiredToken) => {
   if (jobberConfig.accessToken === expiredToken) {
     const envReplacement = resolveEnvJobberAccessToken();
-    if (envReplacement && envReplacement !== expiredToken) {
+    if (envReplacement && envReplacement !== expiredToken && !isJobberJwtExpired(envReplacement)) {
       jobberConfig.accessToken = envReplacement;
       jobberConfig.isConnected = true;
-    } else {
-      jobberConfig.accessToken = "";
-      jobberConfig.isConnected = false;
+      persistJobberConfigToDisk();
     }
-    persistJobberConfigToDisk();
   }
 });
 
 // Verify existing non-rotating Bearer token first on boot; only attempt refresh if token is missing or expired
 (async () => {
   try {
-    if (jobberConfig.accessToken) {
+    if (jobberConfig.accessToken && !isJobberJwtExpired(jobberConfig.accessToken)) {
       const check = await verifyJobberConnection(jobberConfig.accessToken);
       if (check.isValid) {
         jobberConfig.isConnected = true;
@@ -2274,24 +2294,7 @@ setJobberTokenExpiredListener((expiredToken) => {
       }
     }
 
-    if (jobberConfig.refreshToken && jobberConfig.clientId && jobberConfig.clientSecret) {
-      const newAccessToken = await refreshJobberAccessToken(
-        jobberConfig.clientId,
-        jobberConfig.clientSecret,
-        jobberConfig.refreshToken
-      );
-      if (newAccessToken) {
-        jobberConfig.accessToken = newAccessToken;
-        jobberConfig.isConnected = true;
-        jobberConfig.accountName = "Tidyups Cleaning Service Inc";
-        jobberConfig.lastSyncedAt = new Date().toISOString();
-        persistJobberConfigToDisk();
-      } else if (jobberConfig.accessToken) {
-        jobberConfig.accessToken = "";
-        jobberConfig.isConnected = false;
-        persistJobberConfigToDisk();
-      }
-    }
+    await ensureValidJobberToken();
   } catch {
     // Non-blocking startup check
   }
@@ -2329,17 +2332,51 @@ async function ensureValidJobberToken(): Promise<string> {
         jobberConfig.accessToken = refreshed;
         jobberConfig.isConnected = true;
         jobberConfig.lastSyncedAt = new Date().toISOString();
-        persistJobberConfigToDisk();
+        persistJobberConfigToDisk(undefined, true);
         return refreshed;
       }
     } catch {
       // Ignore refresh error
     }
   }
+
+  // Fallback: check if live production (https://app.tidyupscleaning.com) already rotated the Jobber token
+  const prodTokens = await pullLatestJobberTokensFromLiveProd();
+  if (prodTokens) {
+    if (prodTokens.accessToken && !isJobberJwtExpired(prodTokens.accessToken)) {
+      jobberConfig.accessToken = prodTokens.accessToken;
+      if (prodTokens.refreshToken) jobberConfig.refreshToken = prodTokens.refreshToken;
+      jobberConfig.isConnected = true;
+      jobberConfig.lastSyncedAt = new Date().toISOString();
+      persistJobberConfigToDisk();
+      return prodTokens.accessToken;
+    }
+    if (
+      prodTokens.refreshToken &&
+      prodTokens.refreshToken !== jobberConfig.refreshToken &&
+      jobberConfig.clientId &&
+      jobberConfig.clientSecret
+    ) {
+      jobberConfig.refreshToken = prodTokens.refreshToken;
+      const refreshedFromProd = await refreshJobberAccessToken(
+        jobberConfig.clientId,
+        jobberConfig.clientSecret,
+        prodTokens.refreshToken
+      );
+      if (refreshedFromProd) {
+        jobberConfig.accessToken = refreshedFromProd;
+        jobberConfig.isConnected = true;
+        jobberConfig.lastSyncedAt = new Date().toISOString();
+        persistJobberConfigToDisk(undefined, true);
+        return refreshedFromProd;
+      }
+    }
+  }
+
   return jobberConfig.accessToken || "";
 }
 
-function persistJobberConfigToDisk(_projectId?: string) {
+function persistJobberConfigToDisk(_projectId?: string, pushToLiveProd = false) {
   const cfg = {
     isConnected: jobberConfig.isConnected,
     accountName: jobberConfig.accountName,
@@ -2361,6 +2398,9 @@ function persistJobberConfigToDisk(_projectId?: string) {
       invoices: [],
     };
     saveStore({ ...pStore, jobberConfig: cfg }, "tidyups");
+    if (pushToLiveProd && cfg.isConnected && cfg.accessToken) {
+      pushStoreUpdateToLiveProduction({ jobberConfig: cfg }, "tidyups", undefined);
+    }
   } catch {
     // Non-blocking
   }
@@ -6526,6 +6566,38 @@ app.post("/api/quotes/:id/sync-jobber-google", async (req, res) => {
     currentStore.quotes = [finalUpdatedQuote, ...(currentStore.quotes || [])];
   }
 
+  // If quoteStatus is CONVERTED, also ensure the Job & Visit are created/updated in Jobber!
+  if (String(finalUpdatedQuote.quoteStatus || "").toUpperCase() === "CONVERTED") {
+    const jobRes = await convertQuoteOrScheduleJobOnJobber(
+      {
+        quoteId: finalUpdatedQuote.id,
+        clientId: finalUpdatedQuote.jobberClientId,
+        propertyId: finalUpdatedQuote.jobberPropertyId,
+        clientName: finalUpdatedQuote.clientName,
+        clientPhone: finalUpdatedQuote.clientPhone,
+        clientEmail: finalUpdatedQuote.clientEmail,
+        serviceAddress: finalUpdatedQuote.serviceAddress,
+        service: finalUpdatedQuote.service,
+        bedrooms: finalUpdatedQuote.bedrooms,
+        bathrooms: finalUpdatedQuote.bathrooms,
+        scheduledDate: finalUpdatedQuote.scheduledDate || new Date().toISOString().slice(0, 10),
+        scheduledTime: finalUpdatedQuote.scheduledTime || "10:00",
+        assignedCleaners: finalUpdatedQuote.assignedCleaners,
+        total: Number(finalUpdatedQuote.total) || 365.63,
+        notes: finalUpdatedQuote.notes,
+        lineItems: finalUpdatedQuote.lineItems,
+      },
+      activeJobberToken,
+      getJobberCreds()
+    );
+    if (jobRes.isLiveSynced && jobRes.jobberJobId) {
+      finalUpdatedQuote.convertedToJobId = jobRes.jobberVisitId || jobRes.jobberJobId;
+      finalUpdatedQuote.convertedToVisitNumber = jobRes.jobNumber;
+      finalUpdatedQuote.jobberJobId = jobRes.jobberJobId;
+      finalUpdatedQuote.jobberJobWebUri = jobRes.jobberWebUri;
+    }
+  }
+
   const syncedClient = upsertJobberClientAndLeadFromQuote(currentStore, finalUpdatedQuote, pushRes.jobberClientId);
   const syncedLead = (syncedClient as any)?.__matchedLead;
   if (syncedClient && (syncedClient as any).__matchedLead) {
@@ -6533,6 +6605,18 @@ app.post("/api/quotes/:id/sync-jobber-google", async (req, res) => {
   }
   currentStore.lastSavedAt = new Date().toISOString();
   saveStore(currentStore, projectId);
+  saveStore(currentStore, "tidyups");
+  pushStoreUpdateToLiveProduction(
+    {
+      quotes: currentStore.quotes,
+      clients: currentStore.clients,
+      adLeads: currentStore.adLeads,
+      scheduledVisits: currentStore.scheduledVisits,
+      unscheduledJobs: currentStore.unscheduledJobs,
+    },
+    projectId,
+    req
+  );
 
   res.json({
     success: true,
@@ -6551,8 +6635,98 @@ app.post("/api/quotes/:id/sync-jobber-google", async (req, res) => {
   });
 });
 
-// PATCH /api/database/quotes/:id: Adjust/update quote fields, schedule, bedrooms/bathrooms, or status and sync client/lead
-app.patch("/api/database/quotes/:id", (req, res) => {
+// POST /api/database/quotes/:id/push-to-jobber: Push a quote directly to Jobber + Google Sheets
+app.post("/api/database/quotes/:id/push-to-jobber", async (req, res) => {
+  const projectId = getProjectId(req);
+  const quoteId = req.params.id;
+  const currentStore = loadStore(projectId);
+  if (!currentStore || !Array.isArray(currentStore.quotes)) {
+    return res.status(404).json({ error: "Database not initialized" });
+  }
+  const idx = currentStore.quotes.findIndex((q: any) => q.id === quoteId || q.quoteNumber === quoteId);
+  if (idx === -1) {
+    return res.status(404).json({ error: "Quote not found" });
+  }
+  const targetQuote = currentStore.quotes[idx];
+  const activeJobberToken = await ensureValidJobberToken();
+
+  const existingRealJobberId =
+    String(targetQuote.id || "").startsWith("Z2lkOi8vSm9iYmVyL1F1b3Rl")
+      ? targetQuote.id
+      : String(targetQuote.jobberQuoteId || "").startsWith("Z2lkOi8vSm9iYmVyL1F1b3Rl")
+      ? targetQuote.jobberQuoteId
+      : undefined;
+  const existingRealClientId =
+    String(targetQuote.jobberClientId || "").startsWith("Z2lkOi8vSm9iYmVyL0NsaWVudC")
+      ? targetQuote.jobberClientId
+      : undefined;
+  const existingRealPropertyId =
+    String(targetQuote.jobberPropertyId || "").startsWith("Z2lkOi8vSm9iYmVyL1Byb3BlcnR5")
+      ? targetQuote.jobberPropertyId
+      : undefined;
+
+  const pushRes = await pushQuoteToJobber(
+    {
+      clientName: targetQuote.clientName,
+      clientPhone: targetQuote.clientPhone,
+      clientEmail: targetQuote.clientEmail,
+      serviceAddress: targetQuote.serviceAddress || "Edmonton, AB",
+      service: targetQuote.service,
+      bedrooms: targetQuote.bedrooms,
+      bathrooms: targetQuote.bathrooms,
+      total: Number(targetQuote.total) || 365.63,
+      depositRequired: Number(targetQuote.depositRequired) || 100,
+      notes: targetQuote.notes,
+      existingJobberQuoteId: existingRealJobberId,
+      existingJobberClientId: existingRealClientId,
+      existingJobberPropertyId: existingRealPropertyId,
+      lineItems: targetQuote.lineItems,
+    },
+    activeJobberToken,
+    getJobberCreds()
+  );
+
+  const updatedQuote = {
+    ...targetQuote,
+    id: pushRes.isLiveSynced && pushRes.jobberQuoteId ? pushRes.jobberQuoteId : targetQuote.id,
+    jobberQuoteId: pushRes.isLiveSynced ? pushRes.jobberQuoteId : targetQuote.jobberQuoteId,
+    quoteNumber: pushRes.isLiveSynced && pushRes.quoteNumber ? pushRes.quoteNumber : targetQuote.quoteNumber,
+    jobberClientId: pushRes.jobberClientId || targetQuote.jobberClientId,
+    jobberPropertyId: pushRes.jobberPropertyId || targetQuote.jobberPropertyId,
+    jobberWebUri: pushRes.jobberWebUri || targetQuote.jobberWebUri,
+    clientHubUri: pushRes.clientHubUri || targetQuote.clientHubUri,
+    isLiveSynced: Boolean(pushRes.isLiveSynced),
+    isLocal: !pushRes.isLiveSynced,
+    updatedAt: new Date().toISOString(),
+    syncedAt: new Date().toISOString(),
+  };
+
+  currentStore.quotes[idx] = updatedQuote;
+  upsertJobberClientAndLeadFromQuote(currentStore, updatedQuote, updatedQuote.jobberClientId);
+  currentStore.lastSavedAt = new Date().toISOString();
+  saveStore(currentStore, projectId);
+  saveStore(currentStore, "tidyups");
+  pushStoreUpdateToLiveProduction(
+    {
+      quotes: currentStore.quotes,
+      clients: currentStore.clients,
+      adLeads: currentStore.adLeads,
+    },
+    projectId,
+    req
+  );
+
+  res.json({
+    success: true,
+    isLiveSynced: Boolean(pushRes.isLiveSynced),
+    quote: updatedQuote,
+    quotes: currentStore.quotes,
+    message: pushRes.message,
+  });
+});
+
+// PATCH /api/database/quotes/:id: Adjust/update quote fields, schedule, bedrooms/bathrooms, or status and sync live to Jobber
+app.patch("/api/database/quotes/:id", async (req, res) => {
   const projectId = getProjectId(req);
   const quoteId = req.params.id;
   const updates = req.body || {};
@@ -6568,19 +6742,117 @@ app.patch("/api/database/quotes/:id", (req, res) => {
   }
 
   const existing = currentStore.quotes[idx];
-  currentStore.quotes[idx] = {
+  const mergedQuote: any = {
     ...existing,
     ...updates,
     updatedAt: new Date().toISOString(),
   };
 
+  const activeJobberToken = await ensureValidJobberToken();
+  const existingRealJobberId =
+    String(mergedQuote.id || "").startsWith("Z2lkOi8vSm9iYmVyL1F1b3Rl")
+      ? mergedQuote.id
+      : String(mergedQuote.jobberQuoteId || "").startsWith("Z2lkOi8vSm9iYmVyL1F1b3Rl")
+      ? mergedQuote.jobberQuoteId
+      : undefined;
+  const existingRealClientId =
+    String(mergedQuote.jobberClientId || "").startsWith("Z2lkOi8vSm9iYmVyL0NsaWVudC")
+      ? mergedQuote.jobberClientId
+      : undefined;
+  const existingRealPropertyId =
+    String(mergedQuote.jobberPropertyId || "").startsWith("Z2lkOi8vSm9iYmVyL1Byb3BlcnR5")
+      ? mergedQuote.jobberPropertyId
+      : undefined;
+
+  const pushRes = await pushQuoteToJobber(
+    {
+      clientName: mergedQuote.clientName,
+      clientPhone: mergedQuote.clientPhone,
+      clientEmail: mergedQuote.clientEmail,
+      serviceAddress: mergedQuote.serviceAddress || "Edmonton, AB",
+      service: mergedQuote.service,
+      bedrooms: mergedQuote.bedrooms,
+      bathrooms: mergedQuote.bathrooms,
+      total: Number(mergedQuote.total) || 365.63,
+      depositRequired: Number(mergedQuote.depositRequired) || 100,
+      notes: mergedQuote.notes,
+      existingJobberQuoteId: existingRealJobberId,
+      existingJobberClientId: existingRealClientId,
+      existingJobberPropertyId: existingRealPropertyId,
+      lineItems: mergedQuote.lineItems,
+    },
+    activeJobberToken,
+    getJobberCreds()
+  );
+
+  if (pushRes.isLiveSynced) {
+    if (pushRes.jobberQuoteId) {
+      mergedQuote.id = pushRes.jobberQuoteId;
+      mergedQuote.jobberQuoteId = pushRes.jobberQuoteId;
+    }
+    if (pushRes.quoteNumber) mergedQuote.quoteNumber = pushRes.quoteNumber;
+    if (pushRes.jobberClientId) mergedQuote.jobberClientId = pushRes.jobberClientId;
+    if (pushRes.jobberPropertyId) mergedQuote.jobberPropertyId = pushRes.jobberPropertyId;
+    if (pushRes.jobberWebUri) mergedQuote.jobberWebUri = pushRes.jobberWebUri;
+    if (pushRes.clientHubUri) mergedQuote.clientHubUri = pushRes.clientHubUri;
+    mergedQuote.isLiveSynced = true;
+    mergedQuote.isLocal = false;
+    mergedQuote.syncedAt = new Date().toISOString();
+  }
+
+  // If status was changed to CONVERTED, also create/update the Job & Visit in Jobber!
+  if (String(updates.quoteStatus || "").toUpperCase() === "CONVERTED") {
+    const jobRes = await convertQuoteOrScheduleJobOnJobber(
+      {
+        quoteId: mergedQuote.id,
+        clientId: mergedQuote.jobberClientId,
+        propertyId: mergedQuote.jobberPropertyId,
+        clientName: mergedQuote.clientName,
+        clientPhone: mergedQuote.clientPhone,
+        clientEmail: mergedQuote.clientEmail,
+        serviceAddress: mergedQuote.serviceAddress,
+        service: mergedQuote.service,
+        bedrooms: mergedQuote.bedrooms,
+        bathrooms: mergedQuote.bathrooms,
+        scheduledDate: mergedQuote.scheduledDate || new Date().toISOString().slice(0, 10),
+        scheduledTime: mergedQuote.scheduledTime || "10:00",
+        assignedCleaners: mergedQuote.assignedCleaners,
+        total: Number(mergedQuote.total) || 365.63,
+        notes: mergedQuote.notes,
+        lineItems: mergedQuote.lineItems,
+      },
+      activeJobberToken,
+      getJobberCreds()
+    );
+    if (jobRes.isLiveSynced && jobRes.jobberJobId) {
+      mergedQuote.convertedToJobId = jobRes.jobberVisitId || jobRes.jobberJobId;
+      mergedQuote.convertedToVisitNumber = jobRes.jobNumber;
+      mergedQuote.jobberJobId = jobRes.jobberJobId;
+      mergedQuote.jobberJobWebUri = jobRes.jobberWebUri;
+    }
+  }
+
+  currentStore.quotes[idx] = mergedQuote;
   upsertJobberClientAndLeadFromQuote(currentStore, currentStore.quotes[idx], currentStore.quotes[idx].jobberClientId);
   currentStore.lastSavedAt = new Date().toISOString();
   saveStore(currentStore, projectId);
+  saveStore(currentStore, "tidyups");
+  pushStoreUpdateToLiveProduction(
+    {
+      quotes: currentStore.quotes,
+      clients: currentStore.clients,
+      adLeads: currentStore.adLeads,
+      scheduledVisits: currentStore.scheduledVisits,
+      unscheduledJobs: currentStore.unscheduledJobs,
+    },
+    projectId,
+    req
+  );
 
   res.json({
     success: true,
-    message: `✓ Quote ${existing.quoteNumber} adjusted and synced with Jobber Client & Google Sheets!`,
+    isLiveSynced: Boolean(pushRes.isLiveSynced),
+    message: `✓ Quote ${mergedQuote.quoteNumber} adjusted and synced live with Jobber & Google Sheets!`,
     quote: currentStore.quotes[idx],
     quotes: currentStore.quotes,
     clients: currentStore.clients,
@@ -7557,13 +7829,14 @@ app.post("/api/staff/live-locations", (req, res) => {
 });
 
 // Update cleaner assignments or details for a scheduled visit (dual-cleaner support & Jobber sync)
-app.post("/api/jobber/update-visit", (req, res) => {
+app.post("/api/jobber/update-visit", async (req, res) => {
+  const projectId = getProjectId(req);
   const { visitId, assignedCleaners, startAt, endAt, notes } = req.body || {};
   if (!visitId) {
     return res.status(400).json({ error: "visitId is required" });
   }
 
-  const current = loadStore() || {
+  const current = loadStore(projectId) || {
     version: 1,
     lastSavedAt: new Date().toISOString(),
     tickets: INITIAL_TICKETS,
@@ -7575,17 +7848,44 @@ app.post("/api/jobber/update-visit", (req, res) => {
   };
 
   const visits = current.scheduledVisits || [];
-  const idx = visits.findIndex((v: any) => v.id === visitId);
+  const idx = visits.findIndex((v: any) => v.id === visitId || v.visitNumber === visitId);
 
   if (idx !== -1) {
     if (assignedCleaners !== undefined) visits[idx].assignedCleaners = assignedCleaners;
     if (startAt !== undefined) visits[idx].startAt = startAt;
     if (endAt !== undefined) visits[idx].endAt = endAt;
     if (notes !== undefined) visits[idx].notes = notes;
+    visits[idx].updatedAt = new Date().toISOString();
+
+    const activeJobberToken = await ensureValidJobberToken();
+    const syncRes = await updateVisitOnJobber(
+      {
+        visitId: visits[idx].id,
+        startAt: visits[idx].startAt,
+        endAt: visits[idx].endAt,
+        assignedCleaners: visits[idx].assignedCleaners,
+      },
+      activeJobberToken,
+      getJobberCreds()
+    );
 
     current.lastSavedAt = new Date().toISOString();
-    saveStore(current);
-    return res.json({ success: true, message: "Visit assignment updated and synced with Jobber", visit: visits[idx], visits });
+    saveStore(current, projectId);
+    saveStore(current, "tidyups");
+    pushStoreUpdateToLiveProduction(
+      {
+        scheduledVisits: current.scheduledVisits,
+      },
+      projectId,
+      req
+    );
+    return res.json({
+      success: true,
+      isLiveSynced: syncRes.isLiveSynced,
+      message: "Visit assignment & schedule updated and synced live with Jobber!",
+      visit: visits[idx],
+      visits,
+    });
   }
 
   return res.status(404).json({ error: "Scheduled visit not found" });
@@ -7602,12 +7902,13 @@ app.get("/api/jobber/unscheduled-jobs", (_req, res) => {
 
 // POST Approve Unscheduled Job (Syncs approval to Jobber)
 app.post("/api/jobber/approve-job", (req, res) => {
+  const projectId = getProjectId(req);
   const { jobId } = req.body || {};
   if (!jobId) {
     return res.status(400).json({ error: "jobId is required" });
   }
 
-  const current = loadStore() || {
+  const current = loadStore(projectId) || {
     version: 1,
     lastSavedAt: new Date().toISOString(),
     tickets: INITIAL_TICKETS,
@@ -7626,7 +7927,9 @@ app.post("/api/jobber/approve-job", (req, res) => {
     ujobs[idx].approvedAt = new Date().toISOString();
     current.unscheduledJobs = ujobs;
     current.lastSavedAt = new Date().toISOString();
-    saveStore(current);
+    saveStore(current, projectId);
+    saveStore(current, "tidyups");
+    pushStoreUpdateToLiveProduction({ unscheduledJobs: current.unscheduledJobs }, projectId, req);
     return res.json({ 
       success: true, 
       message: `Job ${ujobs[idx].jobNumber} approved in Jobber and ready for scheduling!`, 
@@ -7638,14 +7941,15 @@ app.post("/api/jobber/approve-job", (req, res) => {
   return res.status(404).json({ error: "Unscheduled job not found" });
 });
 
-// POST Schedule an Unscheduled Job with 1 or 2 Cleaners
-app.post("/api/jobber/schedule-job", (req, res) => {
+// POST Schedule an Unscheduled Job with 1 or 2 Cleaners (Pushes real Job & Visit to Jobber via jobCreate)
+app.post("/api/jobber/schedule-job", async (req, res) => {
+  const projectId = getProjectId(req);
   const { jobId, scheduledDate, scheduledTime, durationHours = 2.5, assignedCleaners = [], notes } = req.body || {};
   if (!jobId || !scheduledDate) {
     return res.status(400).json({ error: "jobId and scheduledDate are required" });
   }
 
-  const current = loadStore() || {
+  const current = loadStore(projectId) || {
     version: 1,
     lastSavedAt: new Date().toISOString(),
     tickets: INITIAL_TICKETS,
@@ -7664,57 +7968,165 @@ app.post("/api/jobber/schedule-job", (req, res) => {
   }
 
   const targetJob = ujobs[idx];
-  targetJob.status = 'SCHEDULED';
+  const normalizedCleaners = Array.isArray(assignedCleaners)
+    ? assignedCleaners.filter((c: any) => typeof c === "string" && c.trim().length > 0 && c !== "NONE" && c !== "Unassigned")
+    : [];
+  const effectiveCleaners =
+    normalizedCleaners.length > 0 ? normalizedCleaners : (targetJob.preferredCleaners || []);
+
+  // Match any corresponding quote in current.quotes to link quoteId, clientId, propertyId
+  const targetPhone10 = normalizePhoneDigits(targetJob.clientPhone);
+  const targetNameNorm = String(targetJob.clientName || "").trim().toLowerCase();
+  const matchedQuote = (current.quotes || []).find((q: any) => {
+    if (q.id === targetJob.id || q.quoteNumber === targetJob.jobNumber) return true;
+    if (targetJob.notes && q.quoteNumber && String(targetJob.notes).includes(q.quoteNumber)) return true;
+    if (targetPhone10 && targetPhone10.length >= 10 && normalizePhoneDigits(q.clientPhone) === targetPhone10) return true;
+    if (targetNameNorm && String(q.clientName || "").trim().toLowerCase() === targetNameNorm) return true;
+    return false;
+  });
+
+  const activeJobberToken = await ensureValidJobberToken();
+  const time = scheduledTime || "10:00";
+  const jobRes = await convertQuoteOrScheduleJobOnJobber(
+    {
+      quoteId: matchedQuote?.id || (String(targetJob.id).startsWith("Z2lkOi8vSm9iYmVyL1F1b3Rl") ? targetJob.id : undefined),
+      clientId: matchedQuote?.jobberClientId,
+      propertyId: matchedQuote?.jobberPropertyId,
+      clientName: targetJob.clientName,
+      clientPhone: targetJob.clientPhone,
+      clientEmail: targetJob.clientEmail || matchedQuote?.clientEmail,
+      serviceAddress: targetJob.serviceAddress,
+      service: targetJob.serviceType || matchedQuote?.service || "Move-Out Cleaning",
+      bedrooms: matchedQuote?.bedrooms,
+      bathrooms: matchedQuote?.bathrooms,
+      scheduledDate,
+      scheduledTime: time,
+      durationHours: Number(durationHours) || 2.5,
+      assignedCleaners: effectiveCleaners,
+      total: Number(targetJob.totalAmount || matchedQuote?.total || 365.63),
+      notes: notes || targetJob.notes,
+      lineItems: (matchedQuote?.lineItems || targetJob.lineItems) as any,
+    },
+    activeJobberToken,
+    getJobberCreds()
+  );
+
+  targetJob.status = "SCHEDULED";
   targetJob.scheduledDate = scheduledDate;
-  targetJob.scheduledTime = scheduledTime || '10:00';
-  targetJob.assignedCleaners = assignedCleaners;
+  targetJob.scheduledTime = time;
+  targetJob.assignedCleaners = effectiveCleaners;
 
-  // Create scheduled visit in scheduledVisits
-  const time = scheduledTime || '10:00';
-  const startAt = `${scheduledDate}T${time}:00-06:00`;
-  const [h, m] = time.split(':').map(Number);
-  const endHour = Math.min(23, h + Math.floor(durationHours));
-  const endMin = (m + Math.round((durationHours % 1) * 60)) % 60;
-  const endHourStr = endHour < 10 ? `0${endHour}` : `${endHour}`;
-  const endMinStr = endMin < 10 ? `0${endMin}` : `${endMin}`;
-  const endAt = `${scheduledDate}T${endHourStr}:${endMinStr}:00-06:00`;
+  const cleanTime = time.replace(/\s*(AM|PM)/i, "").trim();
+  const [h, m] = (cleanTime.includes(":") ? cleanTime.split(":") : ["10", "00"]).map(Number);
+  const startH = Number.isFinite(h) ? h : 10;
+  const startM = Number.isFinite(m) ? m : 0;
+  const startAt = `${scheduledDate}T${String(startH).padStart(2, "0")}:${String(startM).padStart(2, "0")}:00-06:00`;
+  const endHour = Math.min(23, startH + Math.floor(Number(durationHours) || 2.5));
+  const endMin = (startM + Math.round(((Number(durationHours) || 2.5) % 1) * 60)) % 60;
+  const endAt = `${scheduledDate}T${String(endHour).padStart(2, "0")}:${String(endMin).padStart(2, "0")}:00-06:00`;
+  const resolvedCoords = resolveEdmontonCoordinatesFallback(targetJob.serviceAddress || "Edmonton, AB");
 
-  const newVisit = {
-    id: `vis-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-    visitNumber: `VISIT-${Math.floor(4200 + Math.random() * 800)}`,
+  const newVisit: any = {
+    id: jobRes.jobberVisitId || `vis-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    visitNumber: jobRes.jobNumber || targetJob.jobNumber || `VISIT-${Math.floor(4200 + Math.random() * 800)}`,
     title: `${targetJob.clientName} - ${targetJob.serviceType}`,
     clientName: targetJob.clientName,
     clientPhone: targetJob.clientPhone,
     serviceAddress: targetJob.serviceAddress,
-    lat: 53.5300 + (Math.random() * 0.08 - 0.04),
-    lng: -113.5000 + (Math.random() * 0.12 - 0.06),
+    lat: resolvedCoords.lat,
+    lng: resolvedCoords.lng,
     startAt,
     endAt,
-    assignedCleaners: assignedCleaners.length > 0 ? assignedCleaners : (targetJob.preferredCleaners || ['Melissa Clarke']),
+    assignedCleaners: effectiveCleaners,
     serviceType: targetJob.serviceType,
-    status: 'SCHEDULED',
-    jobberWebUri: targetJob.jobberWebUri,
-    notes: notes || targetJob.notes || `Scheduled from Jobber unscheduled job ${targetJob.jobNumber}.`,
+    status: "SCHEDULED",
+    quoteNumber: matchedQuote?.quoteNumber,
+    quoteTotal: Number(targetJob.totalAmount || matchedQuote?.total || 365.63),
+    quoteStatus: "CONVERTED",
+    jobberJobId: jobRes.jobberJobId,
+    jobberWebUri: jobRes.jobberWebUri || targetJob.jobberWebUri,
+    isLiveSynced: Boolean(jobRes.isLiveSynced),
+    notes: notes || targetJob.notes || `Scheduled from Jobber job ${targetJob.jobNumber}.`,
   };
 
-  current.scheduledVisits = [newVisit, ...(current.scheduledVisits || [])];
-  current.unscheduledJobs = ujobs;
+  if (matchedQuote) {
+    matchedQuote.quoteStatus = "CONVERTED";
+    matchedQuote.convertedToJobId = newVisit.id;
+    matchedQuote.convertedToVisitNumber = newVisit.visitNumber;
+    matchedQuote.jobberJobId = jobRes.jobberJobId;
+    matchedQuote.jobberJobWebUri = jobRes.jobberWebUri;
+    matchedQuote.scheduledDate = scheduledDate;
+    matchedQuote.scheduledTime = time;
+    matchedQuote.assignedCleaners = effectiveCleaners;
+  }
+
+  // Deduplicate existing visits for this same client/quote so repeated scheduling attempts update in place
+  current.scheduledVisits = [
+    newVisit,
+    ...(current.scheduledVisits || []).filter((v: any) => {
+      if (v.id === newVisit.id) return false;
+      if (matchedQuote?.quoteNumber && v.quoteNumber === matchedQuote.quoteNumber) return false;
+      if (
+        targetNameNorm &&
+        String(v.clientName || "").trim().toLowerCase() === targetNameNorm &&
+        (String(v.id || "").startsWith("vis-") || String(v.id || "").startsWith("visit-book-"))
+      ) {
+        return false;
+      }
+      return true;
+    }),
+  ];
+
+  // Remove the scheduled item from unscheduledJobs so it moves cleanly onto the calendar
+  current.unscheduledJobs = ujobs.filter((j) => j.id !== targetJob.id && j.jobNumber !== targetJob.jobNumber);
   current.lastSavedAt = new Date().toISOString();
-  saveStore(current);
+  saveStore(current, projectId);
+  saveStore(current, "tidyups");
+  pushStoreUpdateToLiveProduction(
+    {
+      scheduledVisits: current.scheduledVisits,
+      unscheduledJobs: current.unscheduledJobs,
+      quotes: current.quotes,
+    },
+    projectId,
+    req
+  );
 
   res.json({
     success: true,
-    message: `Job ${targetJob.jobNumber} scheduled with ${newVisit.assignedCleaners.join(' & ')} and pushed to Jobber!`,
+    isLiveSynced: Boolean(jobRes.isLiveSynced),
+    message:
+      jobRes.message ||
+      `✓ Job ${newVisit.visitNumber} scheduled with ${effectiveCleaners.join(" & ") || "Team"} and pushed live to Jobber!`,
     newVisit,
     scheduledVisits: current.scheduledVisits,
-    unscheduledJobs: ujobs,
+    unscheduledJobs: current.unscheduledJobs,
+    quotes: current.quotes,
   });
 });
 
-// POST Convert Quote into Scheduled Job (Syncs to Jobber)
-app.post("/api/jobber/convert-quote", (req, res) => {
+// POST Convert Quote into Scheduled Job (Pushes real Job & Visit to Jobber via jobCreate)
+app.post("/api/jobber/convert-quote", async (req, res) => {
   const projectId = getProjectId(req);
-  const { quoteId, scheduledDate, scheduledTime = "10:00", assignedCleaners = [], durationHours = 2.5 } = req.body || {};
+  const {
+    quoteId,
+    scheduledDate,
+    scheduledTime = "10:00",
+    assignedCleaners = [],
+    durationHours = 2.5,
+    clientName,
+    clientPhone,
+    clientEmail,
+    serviceAddress,
+    service,
+    bedrooms,
+    bathrooms,
+    total,
+    discountAmount,
+    depositRequired,
+    notes,
+    lineItems,
+  } = req.body || {};
   if (!quoteId) {
     return res.status(400).json({ error: "quoteId is required" });
   }
@@ -7742,21 +8154,61 @@ app.post("/api/jobber/convert-quote", (req, res) => {
   }
 
   const targetQuote = quotes[qIdx];
-  const targetDate = scheduledDate || targetQuote.scheduledDate || new Date().toISOString().slice(0, 10);
-  const time = scheduledTime || targetQuote.scheduledTime?.replace(/\s*(AM|PM)/i, "") || "10:00";
-  const startAt = `${targetDate}T${time.length === 5 ? time : "10:00"}:00-06:00`;
-  const [h, m] = (time.includes(":") ? time.split(":") : ["10", "00"]).map(Number);
-  const endHour = Math.min(23, (h || 10) + Math.floor(durationHours));
-  const endMin = ((m || 0) + Math.round((durationHours % 1) * 60)) % 60;
-  const endHourStr = endHour < 10 ? `0${endHour}` : `${endHour}`;
-  const endMinStr = endMin < 10 ? `0${endMin}` : `${endMin}`;
-  const endAt = `${targetDate}T${endHourStr}:${endMinStr}:00-06:00`;
+  if (clientName) targetQuote.clientName = String(clientName).trim();
+  if (clientPhone) targetQuote.clientPhone = String(clientPhone).trim();
+  if (clientEmail !== undefined) targetQuote.clientEmail = String(clientEmail).trim();
+  if (serviceAddress) targetQuote.serviceAddress = String(serviceAddress).trim();
+  if (service) targetQuote.service = String(service).trim();
+  if (bedrooms) targetQuote.bedrooms = bedrooms;
+  if (bathrooms) targetQuote.bathrooms = bathrooms;
+  if (total !== undefined && Number(total) > 0) targetQuote.total = Number(total);
+  if (discountAmount !== undefined) targetQuote.discountAmount = Number(discountAmount);
+  if (depositRequired !== undefined) targetQuote.depositRequired = Number(depositRequired);
+  if (notes !== undefined) targetQuote.notes = notes;
+  if (Array.isArray(lineItems) && lineItems.length > 0) targetQuote.lineItems = lineItems;
 
-  const newVisitId = `vis-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-  const visitNum = `VISIT-${Math.floor(4300 + Math.random() * 700)}`;
+  const targetDate = scheduledDate || targetQuote.scheduledDate || new Date().toISOString().slice(0, 10);
+  const rawTime = String(scheduledTime || targetQuote.scheduledTime || "10:00").replace(/\s*(AM|PM)/i, "").trim();
+  const time = rawTime.includes(":") ? rawTime.slice(0, 5) : "10:00";
+  const [h, m] = (time.includes(":") ? time.split(":") : ["10", "00"]).map(Number);
+  const startH = Number.isFinite(h) ? h : 10;
+  const startM = Number.isFinite(m) ? m : 0;
+  const startAt = `${targetDate}T${String(startH).padStart(2, "0")}:${String(startM).padStart(2, "0")}:00-06:00`;
+  const endHour = Math.min(23, startH + Math.floor(Number(durationHours) || 2.5));
+  const endMin = (startM + Math.round(((Number(durationHours) || 2.5) % 1) * 60)) % 60;
+  const endAt = `${targetDate}T${String(endHour).padStart(2, "0")}:${String(endMin).padStart(2, "0")}:00-06:00`;
+
+  const activeJobberToken = await ensureValidJobberToken();
+  const jobRes = await convertQuoteOrScheduleJobOnJobber(
+    {
+      quoteId: targetQuote.id || targetQuote.jobberQuoteId,
+      clientId: targetQuote.jobberClientId,
+      propertyId: targetQuote.jobberPropertyId,
+      clientName: targetQuote.clientName,
+      clientPhone: targetQuote.clientPhone,
+      clientEmail: targetQuote.clientEmail,
+      serviceAddress: targetQuote.serviceAddress || "Edmonton, AB",
+      service: targetQuote.service || "Move-Out Cleaning",
+      bedrooms: targetQuote.bedrooms,
+      bathrooms: targetQuote.bathrooms,
+      scheduledDate: targetDate,
+      scheduledTime: time,
+      durationHours: Number(durationHours) || 2.5,
+      assignedCleaners: normalizedCleaners,
+      total: Number(targetQuote.total) || 365.63,
+      notes: targetQuote.notes,
+      lineItems: targetQuote.lineItems,
+    },
+    activeJobberToken,
+    getJobberCreds()
+  );
+
+  const newVisitId =
+    jobRes.jobberVisitId || `vis-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const visitNum = jobRes.jobNumber || `VISIT-${Math.floor(4300 + Math.random() * 700)}`;
   const resolvedCoords = resolveEdmontonCoordinatesFallback(targetQuote.serviceAddress || "Edmonton, AB");
 
-  const newVisit = {
+  const newVisit: any = {
     id: newVisitId,
     visitNumber: visitNum,
     title: `${targetQuote.clientName} - ${targetQuote.service || "Cleaning Visit"}`,
@@ -7768,12 +8220,14 @@ app.post("/api/jobber/convert-quote", (req, res) => {
     startAt,
     endAt,
     assignedCleaners: normalizedCleaners,
-    serviceType: targetQuote.service || "Standard Cleaning",
+    serviceType: targetQuote.service || "Move-Out Cleaning",
     status: "SCHEDULED",
     quoteNumber: targetQuote.quoteNumber,
     quoteTotal: targetQuote.total,
     quoteStatus: "CONVERTED",
-    jobberWebUri: targetQuote.jobberWebUri,
+    jobberJobId: jobRes.jobberJobId,
+    jobberWebUri: jobRes.jobberWebUri || targetQuote.jobberWebUri,
+    isLiveSynced: Boolean(jobRes.isLiveSynced),
     notes: `Converted from Jobber quote ${targetQuote.quoteNumber}${
       targetQuote.bedrooms || targetQuote.bathrooms
         ? ` (${[targetQuote.bedrooms, targetQuote.bathrooms].filter(Boolean).join(", ")})`
@@ -7788,26 +8242,78 @@ app.post("/api/jobber/convert-quote", (req, res) => {
   targetQuote.quoteStatus = "CONVERTED";
   targetQuote.convertedToJobId = newVisitId;
   targetQuote.convertedToVisitNumber = visitNum;
+  if (jobRes.jobberJobId) targetQuote.jobberJobId = jobRes.jobberJobId;
+  if (jobRes.jobberWebUri) targetQuote.jobberJobWebUri = jobRes.jobberWebUri;
+  if (jobRes.jobberClientId) targetQuote.jobberClientId = jobRes.jobberClientId;
+  if (jobRes.jobberPropertyId) targetQuote.jobberPropertyId = jobRes.jobberPropertyId;
   targetQuote.scheduledDate = targetDate;
   targetQuote.scheduledTime = time;
   targetQuote.assignedCleaners = normalizedCleaners;
+  targetQuote.updatedAt = new Date().toISOString();
+  targetQuote.syncedAt = new Date().toISOString();
 
-  current.scheduledVisits = [newVisit, ...(current.scheduledVisits || [])];
+  const targetNameNorm = String(targetQuote.clientName || "").trim().toLowerCase();
+  // Deduplicate any prior local/retry visits for this exact quote or client so only 1 canonical visit exists
+  current.scheduledVisits = [
+    newVisit,
+    ...(current.scheduledVisits || []).filter((v: any) => {
+      if (v.id === newVisit.id) return false;
+      if (targetQuote.quoteNumber && v.quoteNumber === targetQuote.quoteNumber) return false;
+      if (
+        targetNameNorm &&
+        String(v.clientName || "").trim().toLowerCase() === targetNameNorm &&
+        (String(v.id || "").startsWith("vis-") || String(v.id || "").startsWith("visit-book-"))
+      ) {
+        return false;
+      }
+      return true;
+    }),
+  ];
+
+  // Also remove corresponding entry from unscheduledJobs now that it is scheduled
+  if (Array.isArray(current.unscheduledJobs)) {
+    current.unscheduledJobs = current.unscheduledJobs.filter((uj: any) => {
+      if (uj.id === targetQuote.id || uj.jobNumber === targetQuote.quoteNumber) return false;
+      if (targetQuote.quoteNumber && String(uj.notes || "").includes(targetQuote.quoteNumber)) return false;
+      if (targetNameNorm && String(uj.clientName || "").trim().toLowerCase() === targetNameNorm) return false;
+      return true;
+    });
+  }
+
+  upsertJobberClientAndLeadFromQuote(current, targetQuote, targetQuote.jobberClientId);
   current.quotes = quotes;
   current.lastSavedAt = new Date().toISOString();
   saveStore(current, projectId);
+  saveStore(current, "tidyups");
+  pushStoreUpdateToLiveProduction(
+    {
+      scheduledVisits: current.scheduledVisits,
+      unscheduledJobs: current.unscheduledJobs,
+      quotes: current.quotes,
+      clients: current.clients,
+      adLeads: current.adLeads,
+    },
+    projectId,
+    req
+  );
 
   res.json({
     success: true,
-    message: `Quote ${targetQuote.quoteNumber} scheduled for ${targetDate} at ${time} (${
-      normalizedCleaners.length > 0
-        ? `Assigned to ${normalizedCleaners.join(" & ")}`
-        : "Unassigned / No Cleaner Assigned Yet"
-    })!`,
+    isLiveSynced: Boolean(jobRes.isLiveSynced),
+    message:
+      jobRes.message ||
+      `✓ Quote ${targetQuote.quoteNumber} converted to ${visitNum} & scheduled in Jobber for ${targetDate} at ${time} (${
+        normalizedCleaners.length > 0
+          ? `Assigned to ${normalizedCleaners.join(" & ")}`
+          : "Unassigned / No Cleaner Assigned Yet"
+      })!`,
     newVisit,
     quote: targetQuote,
     scheduledVisits: current.scheduledVisits,
+    unscheduledJobs: current.unscheduledJobs,
     quotes: current.quotes,
+    clients: current.clients,
+    leads: current.adLeads,
     activeProjectId: projectId,
   });
 });
@@ -17003,8 +17509,8 @@ app.post("/api/quo/calls/link", (req, res) => {
   res.json({ success: true, message: `Call transcript successfully linked to ${job.title}!`, call, job });
 });
 
-// POST Convert an inbound phone call / lead directly into a dispatched Job
-app.post("/api/quo/calls/convert-to-job", (req, res) => {
+// POST Convert an inbound phone call / lead directly into a dispatched Job (Also pushes live to Jobber!)
+app.post("/api/quo/calls/convert-to-job", async (req, res) => {
   const projectId = getProjectId(req);
   const {
     callId,
@@ -17036,8 +17542,6 @@ app.post("/api/quo/calls/convert-to-job", (req, res) => {
     clients: [],
   };
 
-  const newVisitId = `vis-quo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-  const visitNum = `VISIT-${Math.floor(4400 + Math.random() * 600)}`;
   const targetDate = scheduledDate || new Date().toISOString().slice(0, 10);
   const time = scheduledTime || "10:00";
   const startAt = `${targetDate}T${time}:00-06:00`;
@@ -17050,24 +17554,77 @@ app.post("/api/quo/calls/convert-to-job", (req, res) => {
   const finalAmount = discountPercent > 0 ? Math.round(Number(totalAmount) * (1 - discountPercent / 100)) : Number(totalAmount);
   const discountNote = discountPercent > 0 ? ` [Applied ${discountPercent}% Repeat Customer Loyalty Discount ($${Number(totalAmount) - finalAmount} savings)]` : "";
 
-  const newVisit = {
+  const callerPhone10 = normalizePhoneDigits(callerPhone);
+  const callerNameNorm = String(callerName || "").trim().toLowerCase();
+  const matchedQuote = (current.quotes || []).find((q: any) => {
+    if (callerPhone10 && callerPhone10.length >= 10 && normalizePhoneDigits(q.clientPhone) === callerPhone10) return true;
+    if (callerNameNorm && String(q.clientName || "").trim().toLowerCase() === callerNameNorm) return true;
+    return false;
+  });
+
+  const activeJobberToken = await ensureValidJobberToken();
+  const jobRes = await convertQuoteOrScheduleJobOnJobber(
+    {
+      quoteId: matchedQuote?.id,
+      clientId: matchedQuote?.jobberClientId,
+      propertyId: matchedQuote?.jobberPropertyId,
+      clientName: callerName,
+      clientPhone: callerPhone,
+      clientEmail: matchedQuote?.clientEmail,
+      serviceAddress,
+      service: serviceType,
+      bedrooms: matchedQuote?.bedrooms,
+      bathrooms: matchedQuote?.bathrooms,
+      scheduledDate: targetDate,
+      scheduledTime: time,
+      durationHours: 2.5,
+      assignedCleaners: normalizedCleaners,
+      total: finalAmount,
+      notes: `Converted from inbound phone lead.${discountNote} ${notes}`.trim(),
+      lineItems: matchedQuote?.lineItems,
+    },
+    activeJobberToken,
+    getJobberCreds()
+  );
+
+  const newVisitId =
+    jobRes.jobberVisitId || `vis-quo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const visitNum = jobRes.jobNumber || `VISIT-${Math.floor(4400 + Math.random() * 600)}`;
+  const resolvedCoords = resolveEdmontonCoordinatesFallback(serviceAddress || "Edmonton, AB");
+
+  const newVisit: any = {
     id: newVisitId,
     visitNumber: visitNum,
     title: `${callerName} - ${serviceType}`,
     clientName: callerName,
     clientPhone: callerPhone,
     serviceAddress,
-    lat: 53.5461 + (Math.random() * 0.06 - 0.03),
-    lng: -113.4938 + (Math.random() * 0.08 - 0.04),
+    lat: resolvedCoords.lat,
+    lng: resolvedCoords.lng,
     startAt,
     endAt,
     assignedCleaners: normalizedCleaners,
     serviceType,
     status: "SCHEDULED",
+    quoteNumber: matchedQuote?.quoteNumber,
     quoteTotal: finalAmount,
+    jobberJobId: jobRes.jobberJobId,
+    jobberWebUri: jobRes.jobberWebUri || matchedQuote?.jobberWebUri,
+    isLiveSynced: Boolean(jobRes.isLiveSynced),
     notes: `Converted from inbound phone lead.${discountNote} ${notes}`.trim(),
     source: "Quo Phone Lead Conversion",
   };
+
+  if (matchedQuote) {
+    matchedQuote.quoteStatus = "CONVERTED";
+    matchedQuote.convertedToJobId = newVisitId;
+    matchedQuote.convertedToVisitNumber = visitNum;
+    matchedQuote.jobberJobId = jobRes.jobberJobId;
+    matchedQuote.jobberJobWebUri = jobRes.jobberWebUri;
+    matchedQuote.scheduledDate = targetDate;
+    matchedQuote.scheduledTime = time;
+    matchedQuote.assignedCleaners = normalizedCleaners;
+  }
 
   // Update call log if matched
   if (callId && current.quoCallLogs) {
@@ -17083,6 +17640,7 @@ app.post("/api/quo/calls/convert-to-job", (req, res) => {
   if (current.unscheduledJobs) {
     current.unscheduledJobs = current.unscheduledJobs.filter((j: any) => {
       const match = (j.clientPhone && normalizePhoneDigits(j.clientPhone) === normalizePhoneDigits(callerPhone)) ||
+                    (callerNameNorm && String(j.clientName || "").trim().toLowerCase() === callerNameNorm) ||
                     (callId && j.callTranscripts?.some((c: any) => c.id === callId || c.callId === callId));
       return !match;
     });
@@ -17097,7 +17655,7 @@ app.post("/api/quo/calls/convert-to-job", (req, res) => {
       client.latestServiceDate = targetDate;
     } else {
       current.clients.unshift({
-        id: `cli-${Date.now().toString(36)}`,
+        id: jobRes.jobberClientId || `cli-${Date.now().toString(36)}`,
         name: callerName,
         phone: callerPhone,
         address: serviceAddress,
@@ -17109,15 +17667,44 @@ app.post("/api/quo/calls/convert-to-job", (req, res) => {
     }
   }
 
-  current.scheduledVisits = [newVisit, ...(current.scheduledVisits || [])];
+  current.scheduledVisits = [
+    newVisit,
+    ...(current.scheduledVisits || []).filter((v: any) => {
+      if (v.id === newVisit.id) return false;
+      if (matchedQuote?.quoteNumber && v.quoteNumber === matchedQuote.quoteNumber) return false;
+      if (
+        callerNameNorm &&
+        String(v.clientName || "").trim().toLowerCase() === callerNameNorm &&
+        (String(v.id || "").startsWith("vis-") || String(v.id || "").startsWith("visit-book-"))
+      ) {
+        return false;
+      }
+      return true;
+    }),
+  ];
   current.lastSavedAt = new Date().toISOString();
   saveStore(current, projectId);
+  saveStore(current, "tidyups");
+  pushStoreUpdateToLiveProduction(
+    {
+      scheduledVisits: current.scheduledVisits,
+      unscheduledJobs: current.unscheduledJobs,
+      quotes: current.quotes,
+      clients: current.clients,
+      quoCallLogs: current.quoCallLogs,
+    },
+    projectId,
+    req
+  );
 
   res.json({
     success: true,
-    message: `Call lead for ${callerName} converted to Job ${visitNum} (${
-      normalizedCleaners.length > 0 ? `Assigned to ${normalizedCleaners.join(" & ")}` : "Unassigned / No Cleaner Assigned Yet"
-    })!${discountNote}`,
+    isLiveSynced: Boolean(jobRes.isLiveSynced),
+    message:
+      jobRes.message ||
+      `✓ Call lead for ${callerName} converted to Job ${visitNum} in Jobber (${
+        normalizedCleaners.length > 0 ? `Assigned to ${normalizedCleaners.join(" & ")}` : "Unassigned / No Cleaner Assigned Yet"
+      })!${discountNote}`,
     newVisit,
     scheduledVisits: current.scheduledVisits,
   });

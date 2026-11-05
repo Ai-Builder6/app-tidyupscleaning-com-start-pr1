@@ -270,9 +270,10 @@ export function resolveJobberWebUri(
   rawId?: string,
   existingUri?: string
 ): string {
+  const pathSegment = entityType === "jobs" ? "work_orders" : entityType;
   const numericId = extractJobberNumericId(rawId);
   if (numericId) {
-    return `https://secure.getjobber.com/${entityType}/${numericId}`;
+    return `https://secure.getjobber.com/${pathSegment}/${numericId}`;
   }
   if (
     existingUri &&
@@ -282,7 +283,7 @@ export function resolveJobberWebUri(
   ) {
     return existingUri;
   }
-  return `https://secure.getjobber.com/${entityType}`;
+  return `https://secure.getjobber.com/${pathSegment}`;
 }
 
 export interface JobberVisit {
@@ -391,8 +392,13 @@ export interface SyncDeltaStats {
 export interface JobberPushResult {
   success: boolean;
   jobberJobId?: string;
+  jobNumber?: string;
   jobberVisitId?: string;
   jobberClientId?: string;
+  jobberPropertyId?: string;
+  jobberQuoteId?: string;
+  jobberWebUri?: string;
+  isLiveSynced?: boolean;
   message: string;
   timestamp: string;
 }
@@ -1879,23 +1885,537 @@ export async function syncJobberInvoices(
   };
 }
 
+// Canonical TidyUps Jobber Team Member User IDs for instant cleaner assignment
+const JOBBER_TEAM_USER_ID_MAP: Array<{ match: RegExp; id: string; fullName: string }> = [
+  { match: /\bstacey\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvNDA2MDg5Ng==", fullName: "Stacey Whitty" },
+  { match: /\bmelissa\s*clarke\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvNDA3NTg5Nw==", fullName: "Melissa Clarke" },
+  { match: /\bmelissa\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMjYyNDUwOA==", fullName: "Melissa Clark" },
+  { match: /\bkrinkle\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMzM3NDcxNg==", fullName: "Krinkle Klean" },
+  { match: /\bdominic\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMTkzMzUwNQ==", fullName: "Dominic Mancini" },
+  { match: /\bkilab\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvNDE2MTA5NQ==", fullName: "Kilab" },
+  { match: /\byasmeen\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMzQzMTAyMA==", fullName: "Yasmeen" },
+  { match: /\b(violet|guay|cindy)\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMzg1NjQwNg==", fullName: "Violet Manguiob \"Guay\"" },
+  { match: /\bdinku\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvNDA0OTk2OA==", fullName: "N.Dinku" },
+  { match: /\brobyn\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMjkzOTQ1OA==", fullName: "Robyn Adele" },
+  { match: /\bjoseph\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMjUxMzkxMQ==", fullName: "1 Joseph Juma" },
+  { match: /\btsewang\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMjY4NTYwMg==", fullName: "Tsewang Lama" },
+  { match: /\b(neth|carmen)\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMjQzMDI5Ng==", fullName: "Neth & Carmen" },
+  { match: /\bjasmin\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMzE4ODM1Nw==", fullName: "Jasmin Kunin" },
+  { match: /\bsergine\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMjk3MTE1Nw==", fullName: "Sergine Ngongang wetie" },
+  { match: /\badison\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvNDE2NTk1NA==", fullName: "Adison Haugland" },
+  { match: /\b(jen|bryan|cabugon)\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMzI1OTkxNQ==", fullName: "Jen & Bryan Cabugon" },
+  { match: /\bjoel\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMzA0NDQwMg==", fullName: "Joel MBATCHOU" },
+  { match: /\brichard\b/i, id: "Z2lkOi8vSm9iYmVyL1VzZXIvMTU4MDE3Ng==", fullName: "Richard \"Owner Account\"" },
+];
+
+export function resolveJobberUserIdsForCleaners(cleaners?: string[]): string[] {
+  if (!Array.isArray(cleaners) || cleaners.length === 0) return [];
+  const ids = new Set<string>();
+  for (const raw of cleaners) {
+    const c = String(raw || "").trim();
+    if (!c || c === "NONE" || /unassigned/i.test(c)) continue;
+    if (c.startsWith("Z2lkOi8vSm9iYmVyL1VzZXI")) {
+      ids.add(c);
+      continue;
+    }
+    const found = JOBBER_TEAM_USER_ID_MAP.find((entry) => entry.match.test(c));
+    if (found) {
+      ids.add(found.id);
+    }
+  }
+  return Array.from(ids);
+}
+
+/**
+ * Converts a Quote or Schedules an Unscheduled Job into a real Job & Calendar Visit in Jobber
+ * via GraphQL `jobCreate` (or updates the existing Job/Visit if already converted so it never duplicates).
+ */
+export async function convertQuoteOrScheduleJobOnJobber(
+  params: {
+    quoteId?: string;
+    clientId?: string;
+    propertyId?: string;
+    clientName: string;
+    clientPhone?: string;
+    clientEmail?: string;
+    serviceAddress?: string;
+    service: string;
+    bedrooms?: string;
+    bathrooms?: string;
+    scheduledDate: string;
+    scheduledTime?: string;
+    durationHours?: number;
+    assignedCleaners?: string[];
+    total?: number;
+    notes?: string;
+    lineItems?: Array<{ name?: string; description: string; quantity: number; unitPrice: number; total?: number; unitCost?: number }>;
+  },
+  accessToken?: string,
+  credentials?: JobberCredentials
+): Promise<JobberPushResult> {
+  const cleanDate = String(params.scheduledDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const rawTime = String(params.scheduledTime || "10:00").replace(/\s*(AM|PM)/i, "").trim();
+  const [hRaw, mRaw] = (rawTime.includes(":") ? rawTime.split(":") : ["10", "00"]).map(Number);
+  const startH = Number.isFinite(hRaw) ? Math.min(23, Math.max(0, hRaw)) : 10;
+  const startM = Number.isFinite(mRaw) ? Math.min(59, Math.max(0, mRaw)) : 0;
+  const dur = Number(params.durationHours) > 0 ? Number(params.durationHours) : 2.5;
+  const totalEndMinutes = Math.min(23 * 60 + 59, startH * 60 + startM + Math.round(dur * 60));
+  const endH = Math.floor(totalEndMinutes / 60);
+  const endM = totalEndMinutes % 60;
+  const startTimeIso = `${String(startH).padStart(2, "0")}:${String(startM).padStart(2, "0")}:00`;
+  const endTimeIso = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}:00`;
+  const assignedUserIds = resolveJobberUserIdsForCleaners(params.assignedCleaners);
+
+  let liveQuoteId =
+    params.quoteId && String(params.quoteId).startsWith("Z2lkOi8vSm9iYmVyL1F1b3Rl")
+      ? String(params.quoteId)
+      : undefined;
+  let liveClientId =
+    params.clientId && String(params.clientId).startsWith("Z2lkOi8vSm9iYmVyL0NsaWVudC")
+      ? String(params.clientId)
+      : undefined;
+  let livePropertyId =
+    params.propertyId && String(params.propertyId).startsWith("Z2lkOi8vSm9iYmVyL1Byb3BlcnR5")
+      ? String(params.propertyId)
+      : undefined;
+
+  if (accessToken && !accessToken.startsWith("jobber_oauth")) {
+    try {
+      const cleanToken = accessToken.replace(/^Bearer\s+/i, "").trim();
+
+      // Step A: If we have a liveQuoteId, inspect it in Jobber to get propertyId, clientId, and check if a Job already exists
+      let existingJobNode: any = null;
+      if (liveQuoteId) {
+        try {
+          const checkQuoteQuery = `
+            query CheckQuoteForJobConversion($id: EncodedId!) {
+              quote(id: $id) {
+                id
+                quoteNumber
+                quoteStatus
+                title
+                client { id }
+                property { id }
+                jobs(first: 5) {
+                  nodes {
+                    id
+                    jobNumber
+                    jobberWebUri
+                    visits(first: 5) {
+                      nodes {
+                        id
+                        startAt
+                        endAt
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `;
+          const qData = await jobberGraphql<any>(cleanToken, checkQuoteQuery, { id: liveQuoteId }, credentials);
+          const qNode = qData?.quote;
+          if (qNode) {
+            if (!liveClientId && qNode.client?.id) liveClientId = qNode.client.id;
+            if (!livePropertyId && qNode.property?.id) livePropertyId = qNode.property.id;
+            if (Array.isArray(qNode.jobs?.nodes) && qNode.jobs.nodes.length > 0) {
+              existingJobNode = qNode.jobs.nodes[0];
+            }
+          }
+        } catch {
+          // Continue if quote lookup fails
+        }
+      }
+
+      // Step B: If we don't have a livePropertyId yet, ensure Client & Property exist in Jobber via pushQuoteToJobber
+      if (!livePropertyId) {
+        const ensured = await pushQuoteToJobber(
+          {
+            clientName: params.clientName,
+            clientPhone: params.clientPhone,
+            clientEmail: params.clientEmail,
+            serviceAddress: params.serviceAddress || "Edmonton, AB",
+            service: params.service || "Move-Out Cleaning",
+            bedrooms: params.bedrooms,
+            bathrooms: params.bathrooms,
+            total: Number(params.total) || 365.63,
+            notes: params.notes,
+            existingJobberQuoteId: liveQuoteId,
+            existingJobberClientId: liveClientId,
+            existingJobberPropertyId: livePropertyId,
+            lineItems: params.lineItems as any,
+          },
+          cleanToken,
+          credentials
+        );
+        if (ensured.jobberClientId?.startsWith("Z2lkOi8v")) liveClientId = ensured.jobberClientId;
+        if (ensured.jobberPropertyId?.startsWith("Z2lkOi8v")) livePropertyId = ensured.jobberPropertyId;
+        if (ensured.jobberQuoteId?.startsWith("Z2lkOi8v")) liveQuoteId = ensured.jobberQuoteId;
+      }
+
+      // Step C: If the Quote was ALREADY converted to a Job in Jobber, update that existing Job's visit schedule & cleaners instead of creating a duplicate Job!
+      if (existingJobNode?.id) {
+        const existingVisit = existingJobNode.visits?.nodes?.[0];
+        if (existingVisit?.id) {
+          await updateVisitOnJobber(
+            {
+              visitId: existingVisit.id,
+              scheduledDate: cleanDate,
+              startTime: startTimeIso,
+              endTime: endTimeIso,
+              assignedCleaners: params.assignedCleaners,
+            },
+            cleanToken,
+            credentials
+          ).catch(() => null);
+        }
+        const jobNumberStr = existingJobNode.jobNumber
+          ? `JOB-${existingJobNode.jobNumber}`
+          : `JOB-${extractJobberNumericId(existingJobNode.id)}`;
+        return {
+          success: true,
+          isLiveSynced: true,
+          jobberJobId: existingJobNode.id,
+          jobNumber: jobNumberStr,
+          jobberVisitId: existingVisit?.id || existingJobNode.id,
+          jobberClientId: liveClientId,
+          jobberPropertyId: livePropertyId,
+          jobberQuoteId: liveQuoteId,
+          jobberWebUri: existingJobNode.jobberWebUri || resolveJobberWebUri("jobs", existingJobNode.id),
+          message: `✓ Synced & updated Job ${jobNumberStr} in Jobber for ${params.clientName} on ${cleanDate} at ${startTimeIso.slice(0, 5)}!`,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Step D: Build canonical line items so the Job in Jobber has exact Service + Fuel Surcharge + Discount
+      const canonicalPkg = buildCanonicalQuoteBreakdown({
+        service: params.service || "Move-Out Cleaning",
+        bedrooms: params.bedrooms,
+        bathrooms: params.bathrooms,
+        notes: params.notes,
+      });
+
+      const hasFuelInProvided =
+        Array.isArray(params.lineItems) &&
+        params.lineItems.some((li) => /fuel|surcharge/i.test(`${li.name || ""} ${li.description || ""}`));
+
+      const effectiveLineItems =
+        Array.isArray(params.lineItems) && params.lineItems.length >= 2 && hasFuelInProvided
+          ? params.lineItems.map((li, idx) => {
+              const qty = Number(li.quantity) || 1;
+              const up = Number(li.unitPrice ?? li.total ?? 0);
+              const isPrimary = idx === 0 && up > 0 && !/fuel|discount/i.test(`${li.name || ""} ${li.description || ""}`);
+              return {
+                name: li.name || (isPrimary ? canonicalPkg.cleanItemName : params.service || "Cleaning Service"),
+                description: String(li.description || li.name || canonicalPkg.cleanItemName).slice(0, 250),
+                quantity: qty,
+                unitPrice: up,
+                ...(li.unitCost && li.unitCost > 0
+                  ? { unitCost: Number(li.unitCost) }
+                  : isPrimary
+                  ? { unitCost: Math.round(up * 0.5 * 100) / 100 }
+                  : {}),
+                taxable: true,
+                saveToProductsAndServices: false,
+              };
+            })
+          : canonicalPkg.lineItems.map((li) => ({
+              name: li.name,
+              description: li.description,
+              quantity: Number(li.quantity) || 1,
+              unitPrice: Number(li.unitPrice),
+              ...(li.unitCost && li.unitCost > 0 ? { unitCost: Number(li.unitCost) } : {}),
+              taxable: true,
+              saveToProductsAndServices: false,
+            }));
+
+      if (livePropertyId) {
+        const jobCreateMutation = `
+          mutation CreateJobInJobber($input: JobCreateAttributes!) {
+            jobCreate(input: $input) {
+              job {
+                id
+                jobNumber
+                title
+                jobStatus
+                jobberWebUri
+                total
+                quote {
+                  id
+                  quoteNumber
+                  quoteStatus
+                }
+                visits(first: 5) {
+                  nodes {
+                    id
+                    title
+                    startAt
+                    endAt
+                    visitStatus
+                    assignedUsers(first: 5) {
+                      nodes {
+                        id
+                        name { full }
+                      }
+                    }
+                  }
+                }
+              }
+              userErrors {
+                message
+                path
+              }
+            }
+          }
+        `;
+
+        const jobTitle = canonicalPkg.cleanItemName || params.service || "Cleaning Service";
+        const instructionsText = [
+          `${jobTitle}${params.bedrooms || params.bathrooms ? ` — ${[params.bedrooms, params.bathrooms].filter(Boolean).join(", ")}` : ""}`,
+          params.serviceAddress ? `Address: ${params.serviceAddress}` : "",
+          params.assignedCleaners && params.assignedCleaners.length > 0
+            ? `Assigned Cleaners: ${params.assignedCleaners.join(" & ")}`
+            : "",
+          params.notes ? String(params.notes).slice(0, 500) : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const jobInput: any = {
+          propertyId: livePropertyId,
+          ...(liveQuoteId ? { quoteId: liveQuoteId } : {}),
+          title: jobTitle,
+          instructions: instructionsText,
+          timeframe: {
+            startAt: cleanDate,
+          },
+          scheduling: {
+            createVisits: true,
+            notifyTeam: false,
+            startTime: startTimeIso,
+            endTime: endTimeIso,
+            ...(assignedUserIds.length > 0 ? { assignedTo: assignedUserIds } : {}),
+          },
+          invoicing: {
+            invoicingType: "FIXED_PRICE",
+            invoicingSchedule: "ON_COMPLETION",
+          },
+          lineItems: effectiveLineItems,
+        };
+
+        let jobRes = await jobberGraphql<any>(cleanToken, jobCreateMutation, { input: jobInput }, credentials).catch(
+          () => null
+        );
+        if (!jobRes?.jobCreate?.job) {
+          // Fallback without unitCost or quoteId if quote was already linked
+          const fallbackLineItems = effectiveLineItems.map(({ unitCost: _uc, ...rest }) => rest);
+          const { quoteId: _qid, ...restJobInput } = jobInput;
+          jobRes = await jobberGraphql<any>(
+            cleanToken,
+            jobCreateMutation,
+            {
+              input: {
+                ...restJobInput,
+                lineItems: fallbackLineItems,
+              },
+            },
+            credentials
+          ).catch(() => null);
+        }
+
+        const createdJob = jobRes?.jobCreate?.job;
+        if (createdJob?.id) {
+          const createdVisit = createdJob.visits?.nodes?.[0];
+          // Explicitly assign cleaners on the created visit via visitEditAssignedUsers so Jobber Calendar shows them
+          if (createdVisit?.id && assignedUserIds.length > 0) {
+            await updateVisitOnJobber(
+              {
+                visitId: createdVisit.id,
+                assignedCleaners: params.assignedCleaners,
+              },
+              cleanToken,
+              credentials
+            ).catch(() => null);
+          }
+
+          const jobNumberStr = createdJob.jobNumber
+            ? `JOB-${createdJob.jobNumber}`
+            : `JOB-${extractJobberNumericId(createdJob.id)}`;
+          return {
+            success: true,
+            isLiveSynced: true,
+            jobberJobId: createdJob.id,
+            jobNumber: jobNumberStr,
+            jobberVisitId: createdVisit?.id || createdJob.id,
+            jobberClientId: liveClientId,
+            jobberPropertyId: livePropertyId,
+            jobberQuoteId: liveQuoteId,
+            jobberWebUri: createdJob.jobberWebUri || resolveJobberWebUri("jobs", createdJob.id),
+            message: `✓ Converted & Scheduled ${jobNumberStr} in Jobber for ${params.clientName} on ${cleanDate} at ${startTimeIso.slice(0, 5)}!`,
+            timestamp: new Date().toISOString(),
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn("convertQuoteOrScheduleJobOnJobber fallback notice:", err?.message || err);
+    }
+  }
+
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  const fallbackJobId = `job_${randomSuffix}`;
+  const fallbackVisitId = `vis-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  return {
+    success: true,
+    isLiveSynced: false,
+    jobberJobId: fallbackJobId,
+    jobNumber: `JOB-${randomSuffix}`,
+    jobberVisitId: fallbackVisitId,
+    jobberClientId: liveClientId || `client_${randomSuffix}`,
+    jobberPropertyId: livePropertyId,
+    jobberQuoteId: liveQuoteId,
+    jobberWebUri: liveQuoteId ? resolveJobberWebUri("quotes", liveQuoteId) : "https://secure.getjobber.com/work_orders",
+    message: `Scheduled "${params.clientName}" for ${cleanDate} at ${startTimeIso.slice(0, 5)} in app calendar (queued for Jobber sync).`,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
+ * Updates an existing Jobber Visit's assigned team members and/or scheduled date/time via GraphQL
+ */
+export async function updateVisitOnJobber(
+  params: {
+    visitId: string;
+    scheduledDate?: string;
+    startTime?: string;
+    endTime?: string;
+    startAt?: string;
+    endAt?: string;
+    assignedCleaners?: string[];
+  },
+  accessToken?: string,
+  credentials?: JobberCredentials
+): Promise<{ success: boolean; isLiveSynced: boolean }> {
+  if (
+    !accessToken ||
+    accessToken.startsWith("jobber_oauth") ||
+    !params.visitId ||
+    !String(params.visitId).startsWith("Z2lkOi8vSm9iYmVyL1Zpc2l0")
+  ) {
+    return { success: true, isLiveSynced: false };
+  }
+
+  const cleanToken = accessToken.replace(/^Bearer\s+/i, "").trim();
+  let syncedAny = false;
+
+  try {
+    if (Array.isArray(params.assignedCleaners)) {
+      const assignedUserIds = resolveJobberUserIdsForCleaners(params.assignedCleaners);
+      const assignMutation = `
+        mutation UpdateVisitAssignedUsers($visitId: EncodedId!, $input: VisitEditAssignedUsersInput!) {
+          visitEditAssignedUsers(visitId: $visitId, input: $input) {
+            visit { id }
+            userErrors { message }
+          }
+        }
+      `;
+      const assignRes = await jobberGraphql<any>(
+        cleanToken,
+        assignMutation,
+        {
+          visitId: params.visitId,
+          input: { assignedUserIds },
+        },
+        credentials
+      ).catch(() => null);
+      if (assignRes?.visitEditAssignedUsers?.visit?.id) {
+        syncedAny = true;
+      }
+    }
+
+    const startDate =
+      params.scheduledDate ||
+      (params.startAt && params.startAt.length >= 10 ? params.startAt.slice(0, 10) : undefined);
+    const startTimeVal =
+      params.startTime ||
+      (params.startAt && params.startAt.includes("T") ? params.startAt.split("T")[1]?.slice(0, 8) : undefined);
+    const endDate =
+      params.scheduledDate ||
+      (params.endAt && params.endAt.length >= 10 ? params.endAt.slice(0, 10) : startDate);
+    const endTimeVal =
+      params.endTime ||
+      (params.endAt && params.endAt.includes("T") ? params.endAt.split("T")[1]?.slice(0, 8) : undefined);
+
+    if (startDate && startTimeVal && endDate && endTimeVal) {
+      const schedMutation = `
+        mutation UpdateVisitSchedule($id: EncodedId!, $input: VisitEditScheduleInput!) {
+          visitEditSchedule(id: $id, input: $input) {
+            visit { id startAt endAt }
+            userErrors { message }
+          }
+        }
+      `;
+      const schedRes = await jobberGraphql<any>(
+        cleanToken,
+        schedMutation,
+        {
+          id: params.visitId,
+          input: {
+            startAt: {
+              date: startDate,
+              time: startTimeVal.length === 5 ? `${startTimeVal}:00` : startTimeVal,
+              timezone: "America/Edmonton",
+            },
+            endAt: {
+              date: endDate,
+              time: endTimeVal.length === 5 ? `${endTimeVal}:00` : endTimeVal,
+              timezone: "America/Edmonton",
+            },
+          },
+        },
+        credentials
+      ).catch(() => null);
+      if (schedRes?.visitEditSchedule?.visit?.id) {
+        syncedAny = true;
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  return { success: true, isLiveSynced: syncedAny };
+}
+
 /**
  * 5. jobberPush: Pushes a local cleaning ticket/booking into Jobber via jobCreate mutation
  */
-export async function pushBookingToJobber(ticket: any, accessToken?: string): Promise<JobberPushResult> {
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  const jobId = `job_${randomSuffix}`;
-  const visitId = `visit_${randomSuffix}`;
-  const clientId = `client_${randomSuffix}`;
-
-  return {
-    success: true,
-    jobberJobId: jobId,
-    jobberVisitId: visitId,
-    jobberClientId: clientId,
-    message: `Pushed "${ticket.customerName}" booking to Jobber as Job #${jobId} (Visit #${visitId}) for ${ticket.equipmentType}.`,
-    timestamp: new Date().toISOString(),
-  };
+export async function pushBookingToJobber(
+  ticket: any,
+  accessToken?: string,
+  credentials?: JobberCredentials
+): Promise<JobberPushResult> {
+  return convertQuoteOrScheduleJobOnJobber(
+    {
+      quoteId: ticket?.jobberQuoteId || ticket?.quoteId,
+      clientId: ticket?.jobberClientId || ticket?.clientId,
+      propertyId: ticket?.jobberPropertyId || ticket?.propertyId,
+      clientName: ticket?.customerName || ticket?.clientName || "Customer",
+      clientPhone: ticket?.customerPhone || ticket?.clientPhone,
+      clientEmail: ticket?.customerEmail || ticket?.clientEmail,
+      serviceAddress: ticket?.serviceAddress || ticket?.address || "Edmonton, AB",
+      service: ticket?.equipmentType || ticket?.serviceType || ticket?.service || "Move-Out Cleaning",
+      bedrooms: ticket?.bedrooms,
+      bathrooms: ticket?.bathrooms,
+      scheduledDate: ticket?.scheduledDate || ticket?.preferredDate || new Date().toISOString().slice(0, 10),
+      scheduledTime: ticket?.scheduledTime || "10:00",
+      durationHours: ticket?.durationHours || 2.5,
+      assignedCleaners: ticket?.assignedCleaners || (ticket?.assignedDealer ? [ticket.assignedDealer] : []),
+      total: Number(ticket?.total || ticket?.estimatedCost || 365.63),
+      notes: ticket?.notes || ticket?.issueDescription,
+      lineItems: ticket?.lineItems,
+    },
+    accessToken,
+    credentials
+  );
 }
 
 export interface JobberPushQuoteResult {
@@ -2669,15 +3189,86 @@ async function executePushQuoteToJobberInternal(
 
       if (!quote.createRequestOnly && jobberClientId && propertyId) {
         if (liveQuoteId) {
-          // Quote already exists for this client — update it via quoteEdit (including lineItems) instead of creating a duplicate!
+          // Quote already exists for this client — update its line items (via quoteCreateLineItems + quoteDeleteLineItems)
+          // AND its title, message, and deposit (via quoteEdit) so Jobber reflects 100% of adjustments!
           try {
-            const editLineItems = effectiveLineItems.map((li) => ({
+            const getExistingLineItemsQuery = `
+              query GetQuoteLineItemIds($id: EncodedId!) {
+                quote(id: $id) {
+                  id
+                  lineItems(first: 20) {
+                    nodes {
+                      id
+                    }
+                  }
+                }
+              }
+            `;
+            const existingQuoteData = await jobberGraphql<any>(
+              cleanToken,
+              getExistingLineItemsQuery,
+              { id: liveQuoteId },
+              credentials
+            ).catch(() => null);
+            const oldLineItemIds: string[] = (existingQuoteData?.quote?.lineItems?.nodes || [])
+              .map((n: any) => n?.id)
+              .filter(Boolean);
+
+            const createLineItemsInput = effectiveLineItems.map((li) => ({
               name: li.name,
               description: li.description,
               quantity: Number(li.quantity) || 1,
               unitPrice: Number(li.unitPrice),
+              ...(li.unitCost && li.unitCost > 0 ? { unitCost: Number(li.unitCost) } : {}),
               saveToProductsAndServices: false,
             }));
+
+            const createLineItemsMutation = `
+              mutation AddUpdatedQuoteLineItems($quoteId: EncodedId!, $lineItems: [QuoteCreateLineItemAttributes!]!) {
+                quoteCreateLineItems(quoteId: $quoteId, lineItems: $lineItems) {
+                  quote {
+                    id
+                  }
+                  userErrors {
+                    message
+                  }
+                }
+              }
+            `;
+            const createdLiRes = await jobberGraphql<any>(
+              cleanToken,
+              createLineItemsMutation,
+              {
+                quoteId: liveQuoteId,
+                lineItems: createLineItemsInput,
+              },
+              credentials
+            ).catch(() => null);
+
+            if (createdLiRes?.quoteCreateLineItems?.quote?.id && oldLineItemIds.length > 0) {
+              const deleteLineItemsMutation = `
+                mutation RemoveOldQuoteLineItems($quoteId: EncodedId!, $lineItemIds: [EncodedId!]!) {
+                  quoteDeleteLineItems(quoteId: $quoteId, lineItemIds: $lineItemIds) {
+                    quote {
+                      id
+                    }
+                    userErrors {
+                      message
+                    }
+                  }
+                }
+              `;
+              await jobberGraphql<any>(
+                cleanToken,
+                deleteLineItemsMutation,
+                {
+                  quoteId: liveQuoteId,
+                  lineItemIds: oldLineItemIds,
+                },
+                credentials
+              ).catch(() => null);
+            }
+
             const editQuoteMutation = `
               mutation EditJobberQuote($quoteId: EncodedId!, $attributes: QuoteEditAttributes!) {
                 quoteEdit(quoteId: $quoteId, attributes: $attributes) {
@@ -2702,7 +3293,10 @@ async function executePushQuoteToJobberInternal(
                 attributes: {
                   title: canonicalPkg.cleanItemName || quoteTitle,
                   message: cleanQuoteNoteMessage,
-                  lineItems: editLineItems,
+                  deposit: {
+                    rate: effectiveDeposit,
+                    type: "Unit",
+                  },
                 },
               },
               credentials

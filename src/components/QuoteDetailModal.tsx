@@ -299,29 +299,54 @@ export const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
     setIsSchedulingJob(true);
     setFeedbackBanner(null);
     try {
-      // First save any adjustments to the quote
-      await fetch(`/api/database/quotes/${encodeURIComponent(quote.id)}?project=${projectId}`, {
-        method: 'PATCH',
+      const targetDate = schedDate || new Date().toISOString().slice(0, 10);
+      const targetTime = schedTime || '10:00';
+      const updatedLineItems: any[] = canonicalBreakdown.lineItems;
+      const summaryNotes =
+        editNotes && /Cleaning Summary:/i.test(editNotes)
+          ? editNotes
+          : buildCleaningSummaryMessage(editService || quote.service, editNotes);
+
+      const res = await fetch(`/api/jobber/convert-quote?project=${projectId}`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-project-id': projectId },
         body: JSON.stringify({
+          quoteId: quote.id,
           clientName: editClientName.trim() || quote.clientName,
           clientPhone: editClientPhone.trim(),
           clientEmail: editClientEmail.trim(),
           serviceAddress: editServiceAddress.trim(),
-          service: editService.trim(),
+          service: editService.trim() || canonicalBreakdown.serviceName,
           bedrooms: editBedrooms,
           bathrooms: editBathrooms,
-          total: totalNum,
+          total: canonicalBreakdown.total || totalNum,
           discountAmount: discountNum,
-          depositRequired: depositNum,
-          scheduledDate: schedDate,
-          scheduledTime: schedTime,
+          depositRequired: depositNum || 100,
+          scheduledDate: targetDate,
+          scheduledTime: targetTime,
           assignedCleaners: schedCleaners,
-          notes: editNotes,
+          notes: summaryNotes,
+          lineItems: updatedLineItems,
         }),
       });
+      const data = await res.json();
 
-      if (onConvertToJob) {
+      if (data.success) {
+        setEditStatus('CONVERTED');
+        if (data.quote) {
+          saveQuoteToFirestore(data.quote).catch(() => {});
+        }
+        if (data.quote && onQuoteUpdated) {
+          onQuoteUpdated(data.quote, data.quotes, data);
+        }
+        setFeedbackTone('success');
+        setFeedbackBanner(
+          data.message ||
+            `✓ Converted & Scheduled Quote ${quote.quoteNumber} in Jobber for ${targetDate} at ${targetTime} (${
+              schedCleaners.length > 0 ? `Assigned: ${schedCleaners.join(' & ')}` : 'Unassigned / No One Assigned Yet'
+            })!`
+        );
+      } else if (onConvertToJob) {
         onConvertToJob(
           {
             ...quote,
@@ -334,24 +359,23 @@ export const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
             bathrooms: editBathrooms,
             total: totalNum,
             depositRequired: depositNum,
-            scheduledDate: schedDate,
-            scheduledTime: schedTime,
+            scheduledDate: targetDate,
+            scheduledTime: targetTime,
             assignedCleaners: schedCleaners,
             notes: editNotes,
           },
           {
-            scheduledDate: schedDate || new Date().toISOString().slice(0, 10),
-            scheduledTime: schedTime || '10:00',
+            scheduledDate: targetDate,
+            scheduledTime: targetTime,
             assignedCleaners: schedCleaners,
           }
         );
+      } else {
+        setFeedbackTone('warning');
+        setFeedbackBanner(data.error || 'Could not schedule quote.');
       }
-      setFeedbackBanner(
-        `✓ Scheduled Quote ${quote.quoteNumber} for ${schedDate} at ${schedTime} (${
-          schedCleaners.length > 0 ? `Assigned: ${schedCleaners.join(' & ')}` : 'Unassigned / No One Assigned Yet'
-        })!`
-      );
     } catch (err: any) {
+      setFeedbackTone('warning');
       setFeedbackBanner(`Schedule error: ${err.message}`);
     } finally {
       setIsSchedulingJob(false);

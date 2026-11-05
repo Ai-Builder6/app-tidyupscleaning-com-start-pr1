@@ -4681,6 +4681,14 @@ export function App() {
                 ])
               );
             }
+            if (Array.isArray(fullResponse?.scheduledVisits) && fullResponse.scheduledVisits.length > 0) {
+              setScheduledJobsList(fullResponse.scheduledVisits);
+            } else if (fullResponse?.newVisit) {
+              setScheduledJobsList((prev) => [
+                fullResponse.newVisit,
+                ...prev.filter((v) => v.id !== fullResponse.newVisit.id && v.quoteNumber !== updatedQuote.quoteNumber),
+              ]);
+            }
             if (Array.isArray(fullResponse?.leads) && fullResponse.leads.length > 0) {
               setLeadsList(fullResponse.leads);
             }
