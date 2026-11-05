@@ -415,16 +415,8 @@ export function isFakeOrSimulatedLead(lead: any): boolean {
     return true;
   }
 
-  // Block legacy "Voice & Quick Quotes" entries that were auto-created from base seed quotes without user action
-  const rawTab = String(lead.sourceTab || '').toLowerCase();
-  const rawSource = String(lead.source || '').toLowerCase();
-  if (
-    (rawTab.includes('voice') || rawSource.includes('voice') || rawSource.includes('quick quote')) &&
-    !lead.quoCallId &&
-    !lead.callTranscript &&
-    !lead.isManualVoiceQuote &&
-    (id.startsWith('lead-quote-') || id.startsWith('lead-clean-'))
-  ) {
+  // Only block legacy hardcoded "lead-quote-qt-2026-*" seed entries
+  if (id.startsWith('lead-quote-qt-2026-')) {
     return true;
   }
 

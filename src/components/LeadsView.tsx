@@ -753,11 +753,11 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     const currentlyCommunicated = hasLeadBeenCommunicatedWith(lead);
     const nextCommunicated = !currentlyCommunicated;
     const nowIso = nextCommunicated ? new Date().toISOString() : undefined;
-    const nextStatus: LeadStatus = nextCommunicated
+    const nextStatus = (nextCommunicated
       ? lead.status === 'New' || !lead.status
         ? 'Contacted'
         : lead.status
-      : 'New';
+      : 'New') as LeadStatus;
 
     const updated = leadsList.map((l) =>
       l.id === lead.id
@@ -2434,8 +2434,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         {(() => {
                           const rowBreakdown = buildCanonicalQuoteBreakdown({
                             serviceRequested: lead.serviceRequested,
-                            bedrooms: lead.bedrooms,
-                            bathrooms: lead.bathrooms,
+                            bedrooms: String(lead.bedrooms || '3 Bedrooms'),
+                            bathrooms: String(lead.bathrooms || '2 Bathrooms'),
                             sourceTab: rowTab,
                             quotedAmount: lead.quotedAmount,
                           });

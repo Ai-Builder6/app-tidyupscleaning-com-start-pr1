@@ -411,6 +411,7 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
           assignedCleaners,
           lineItems,
           notes: cleaningSummaryNotes,
+          selectedSource: (initialLead as any)?.sourceTab || initialLead?.source || 'Quo',
         }),
       });
       const data = await res.json();

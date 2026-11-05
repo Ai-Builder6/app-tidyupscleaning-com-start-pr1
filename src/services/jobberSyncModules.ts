@@ -979,7 +979,7 @@ export function isFakeOrPurgedJobberQuote(q: any): boolean {
   }
 
   const statusUpper = String(q.quoteStatus || "").trim().toUpperCase();
-  if (statusUpper === "DRAFT" || statusUpper === "ARCHIVED") {
+  if (statusUpper === "ARCHIVED") {
     return true;
   }
 
@@ -1072,19 +1072,30 @@ export async function purgeFakeAndDraftQuotesOnJobber(
     `;
     const data = await jobberGraphql<any>(accessToken, draftQuery, undefined, credentials);
     for (const q of data?.draftQuotes?.nodes || []) {
-      if (q?.id) candidateQuoteIds.add(q.id);
       const cName = String(q?.client?.name || "").toLowerCase();
+      const qNum = Number(q?.quoteNumber || 0);
+      const isFakeDraft =
+        cName.includes("sheralee") ||
+        cName.includes("donna noel") ||
+        cName.includes("tidyups cleaning") ||
+        cName.includes("blaze (phone lead)") ||
+        cName.includes("aniket deb (sonia ai") ||
+        cName.includes("new call [") ||
+        cName.includes("rahum") ||
+        PURGED_FAKE_JOBBER_QUOTE_IDS.has(q?.id) ||
+        PURGED_FAKE_QUOTE_NUMBERS.has(`QT-${qNum}`);
+      if (isFakeDraft && q?.id) {
+        candidateQuoteIds.add(q.id);
+      }
       if ((cName.includes("sheralee") || cName.includes("new call [") || cName.includes("tidyups cleaning")) && q?.client?.id) {
         candidateClientIds.add(q.client.id);
       }
     }
     for (const q of data?.recentQuotes?.nodes || []) {
       if (!q?.id) continue;
-      const rawSt = String(q.quoteStatus || "").toLowerCase();
       const cName = String(q.client?.name || "").toLowerCase();
       const qNum = Number(q.quoteNumber || 0);
       if (
-        rawSt.includes("draft") ||
         cName.includes("sheralee") ||
         cName.includes("donna noel") ||
         cName.includes("tidyups cleaning") ||
@@ -1469,9 +1480,8 @@ export async function syncJobberQuotes(
           status = "DRAFT";
         }
 
-        // Skip any fake, draft, archived, or purged quotes (including Sheralee Cave, Donna Noel, QT-7537, QT-7538, etc.)
+        // Skip any fake, archived, or purged quotes (including Sheralee Cave, Donna Noel, QT-7537, QT-7538, etc.)
         if (
-          status === "DRAFT" ||
           status === "ARCHIVED" ||
           rawQNum === 4418 ||
           (rawQNum >= 4425 && rawQNum <= 4575) ||
@@ -2616,8 +2626,15 @@ async function executePushQuoteToJobberInternal(
 
       if (!quote.createRequestOnly && jobberClientId && propertyId) {
         if (liveQuoteId) {
-          // Quote already exists for this client — update it via quoteEdit instead of creating a duplicate!
+          // Quote already exists for this client — update it via quoteEdit (including lineItems) instead of creating a duplicate!
           try {
+            const editLineItems = effectiveLineItems.map((li) => ({
+              name: li.name,
+              description: li.description,
+              quantity: Number(li.quantity) || 1,
+              unitPrice: Number(li.unitPrice),
+              saveToProductsAndServices: false,
+            }));
             const editQuoteMutation = `
               mutation EditJobberQuote($quoteId: EncodedId!, $attributes: QuoteEditAttributes!) {
                 quoteEdit(quoteId: $quoteId, attributes: $attributes) {
@@ -2634,16 +2651,35 @@ async function executePushQuoteToJobberInternal(
                 }
               }
             `;
-            const editAttrs: any = {
-              title: canonicalPkg.cleanItemName || quoteTitle,
-              message: cleanQuoteNoteMessage,
-            };
-            const editRes = await jobberGraphql<any>(
+            let editRes = await jobberGraphql<any>(
               cleanToken,
               editQuoteMutation,
-              { quoteId: liveQuoteId, attributes: editAttrs },
+              {
+                quoteId: liveQuoteId,
+                attributes: {
+                  title: canonicalPkg.cleanItemName || quoteTitle,
+                  message: cleanQuoteNoteMessage,
+                  lineItems: editLineItems,
+                },
+              },
               credentials
-            );
+            ).catch(() => null);
+
+            if (!editRes?.quoteEdit?.quote) {
+              editRes = await jobberGraphql<any>(
+                cleanToken,
+                editQuoteMutation,
+                {
+                  quoteId: liveQuoteId,
+                  attributes: {
+                    title: canonicalPkg.cleanItemName || quoteTitle,
+                    message: cleanQuoteNoteMessage,
+                  },
+                },
+                credentials
+              ).catch(() => null);
+            }
+
             const editedQuote = editRes?.quoteEdit?.quote;
             if (editedQuote?.id) {
               liveQuoteId = editedQuote.id;

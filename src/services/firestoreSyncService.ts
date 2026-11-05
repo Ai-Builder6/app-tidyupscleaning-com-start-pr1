@@ -775,7 +775,7 @@ export async function fetchLeadsFromFirestore(): Promise<any[]> {
     snap.forEach((d) => {
       const data = d.data();
       if (data && data.customerName) {
-        const candidate = {
+        const candidate: any = {
           ...data,
           id: data.id || d.id,
         };

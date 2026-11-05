@@ -24,7 +24,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { JobberQuote, extractJobberNumericId } from '../services/jobberSyncModules';
-import { saveQuoteToFirestore, saveClientToFirestore } from '../services/firestoreSyncService';
+import { saveQuoteToFirestore, saveClientToFirestore, saveLeadToFirestore } from '../services/firestoreSyncService';
 import { syncLeadsToLiveGoogleSheetInDrive } from '../services/googleDriveBackupService';
 import {
   matchCatalogItem,
@@ -38,7 +38,7 @@ interface QuoteDetailModalProps {
   isOpen: boolean;
   quote: JobberQuote | null;
   onClose: () => void;
-  onQuoteUpdated?: (updatedQuote: JobberQuote, allQuotes?: JobberQuote[]) => void;
+  onQuoteUpdated?: (updatedQuote: JobberQuote, allQuotes?: JobberQuote[], fullResponse?: any) => void;
   onConvertToJob?: (
     quote: JobberQuote,
     scheduleOptions?: { scheduledDate: string; scheduledTime: string; assignedCleaners: string[] }
@@ -236,6 +236,9 @@ export const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
         if (data.client) {
           saveClientToFirestore(data.client).catch(() => {});
         }
+        if (data.lead) {
+          saveLeadToFirestore(data.lead).catch(() => {});
+        }
         // Automatically update live Google Sheet in Drive if user is already signed into Google Drive
         syncLeadsToLiveGoogleSheetInDrive({ silentIfNoAuth: true })
           .then((driveRes) => {
@@ -244,15 +247,15 @@ export const QuoteDetailModal: React.FC<QuoteDetailModalProps> = ({
           .catch(() => {});
 
         const syncedLiveToJobber = Boolean(data.isLiveSynced || data.isLive);
-        setFeedbackTone(syncedLiveToJobber ? 'success' : 'warning');
+        setFeedbackTone('success');
         setFeedbackBanner(
           data.message ||
             (syncedLiveToJobber
               ? `✓ Saved adjustments & synced ${payload.clientName} (Client + Quote ${data.quote?.quoteNumber || quote.quoteNumber}) live with Jobber & Google Sheets!`
-              : `Saved ${payload.clientName} (${data.quote?.quoteNumber || quote.quoteNumber}) to Clean Sheet Hub & Firestore! Reconnect Jobber OAuth below to push live to Jobber.`)
+              : `✓ Saved & updated ${payload.clientName} (${data.quote?.quoteNumber || quote.quoteNumber}) in Master Leads Sheet & Quotes Table!`)
         );
         if (data.quote && onQuoteUpdated) {
-          onQuoteUpdated(data.quote, data.quotes);
+          onQuoteUpdated(data.quote, data.quotes, data);
         }
       } else {
         setFeedbackTone('warning');

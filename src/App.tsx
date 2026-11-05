@@ -2098,7 +2098,7 @@ export function App() {
               if (!cloudMap || Object.keys(cloudMap).length === 0) return;
               setTechnicians((prev) =>
                 prev.map((t) => {
-                  const cloud = cloudMap[t.id];
+                  const cloud = cloudMap[t.id] as any;
                   if (!cloud) return t;
                   const hasValidVan = cloud.vanNumber && !/^unit\s+\d+$/i.test(String(cloud.vanNumber).trim());
                   return {
@@ -3635,7 +3635,6 @@ export function App() {
               setMasterHubFocusBlock('MASTER_TABLE');
               setActiveTopView('MASTER_HUB');
             }}
-            onNavigateToQuotes={() => setActiveTopView('QUOTES')}
           />
         ) : activeTopView === 'INTAKES' ? (
           <IntakesView
@@ -4596,8 +4595,15 @@ export function App() {
             setScheduledJobsList((prev) => [newVisit, ...prev]);
           }}
           onCreateJobberQuote={(newQuote, fullResponse) => {
-            setQuotesList((prev) => dedupeQuotesList([newQuote, ...prev]));
-            if (fullResponse?.client) {
+            if (Array.isArray(fullResponse?.quotes) && fullResponse.quotes.length > 0) {
+              setQuotesList(dedupeQuotesList(fullResponse.quotes));
+            } else {
+              setQuotesList((prev) => dedupeQuotesList([newQuote, ...prev]));
+            }
+            saveQuoteToFirestore(newQuote).catch(() => {});
+            if (Array.isArray(fullResponse?.clients) && fullResponse.clients.length > 0) {
+              setClientsList(fullResponse.clients);
+            } else if (fullResponse?.client) {
               setClientsList((prev) => {
                 const exists = prev.some((c) => c.id === fullResponse.client.id);
                 return exists
@@ -4605,8 +4611,21 @@ export function App() {
                   : [fullResponse.client, ...prev];
               });
             }
+            if (fullResponse?.client) {
+              saveClientToFirestore(fullResponse.client).catch(() => {});
+            }
+            if (Array.isArray(fullResponse?.leads) && fullResponse.leads.length > 0) {
+              setLeadsList(fullResponse.leads);
+            } else if (fullResponse?.lead) {
+              setLeadsList((prev) => {
+                const exists = prev.some((l) => l.id === fullResponse.lead.id);
+                return exists
+                  ? prev.map((l) => (l.id === fullResponse.lead.id ? fullResponse.lead : l))
+                  : [fullResponse.lead, ...prev];
+              });
+            }
             if (fullResponse?.lead) {
-              setLeadsList((prev) => prev.map((l) => (l.id === fullResponse.lead.id ? fullResponse.lead : l)));
+              saveLeadToFirestore(fullResponse.lead).catch(() => {});
             }
             setIsQuickQuoteModalOpen(false);
             setActiveQuoteDetailModalItem(newQuote);
@@ -4623,9 +4642,24 @@ export function App() {
           onClose={() => setActiveQuoteDetailModalItem(null)}
           quote={activeQuoteDetailModalItem}
           projectId={activeProjectId}
-          onQuoteUpdated={(updatedQuote) => {
+          onQuoteUpdated={(updatedQuote, allQuotes, fullResponse) => {
             setActiveQuoteDetailModalItem(updatedQuote);
-            setQuotesList((prev) => dedupeQuotesList(prev.map((q) => (q.id === updatedQuote.id ? updatedQuote : q))));
+            if (Array.isArray(allQuotes) && allQuotes.length > 0) {
+              setQuotesList(dedupeQuotesList(allQuotes));
+            } else {
+              setQuotesList((prev) =>
+                dedupeQuotesList([
+                  updatedQuote,
+                  ...prev.filter((q) => q.id !== updatedQuote.id && q.quoteNumber !== updatedQuote.quoteNumber),
+                ])
+              );
+            }
+            if (Array.isArray(fullResponse?.leads) && fullResponse.leads.length > 0) {
+              setLeadsList(fullResponse.leads);
+            }
+            if (Array.isArray(fullResponse?.clients) && fullResponse.clients.length > 0) {
+              setClientsList(fullResponse.clients);
+            }
           }}
         />
 
