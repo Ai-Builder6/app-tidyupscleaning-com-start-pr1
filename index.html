@@ -64,7 +64,7 @@
       };
     </script>
 
-    <!-- Event snippet for Google Ads Lead Conversion (/thank-you, /booking/thank-you, /book/thank-you) -->
+    <!-- Event snippet for Google Ads Lead Conversion (Fires ONLY on /thank-you after form submission) -->
     <script>
       (function() {
         var path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
@@ -74,12 +74,7 @@
           path === '/thankyou' ||
           path === '/booking/thank-you' ||
           path === '/book/thank-you' ||
-          path === '/booking' ||
-          path.indexOf('/booking/') === 0 ||
-          path === '/book' ||
-          path.indexOf('/book/') === 0 ||
-          search.indexOf('page=thank-you') !== -1 ||
-          search.indexOf('booking=1') !== -1
+          search.indexOf('page=thank-you') !== -1
         ) {
           gtag('event', 'conversion', {
             'send_to': 'AW-18539302675',
@@ -154,27 +149,36 @@
         } catch (_) {}
       })();
 
-      // 1. Detect dedicated Customer-Only Booking Page (/book, /customer-booking, ?booking=1, or book.* domain) before React mounts
+      // 1. Detect dedicated Customer-Only Booking & Thank-You Pages (/thank-you, /book, /booking, ads.* or book.* domain) before React mounts
       (function() {
         try {
           var host = (window.location.hostname || '').toLowerCase();
-          var path = (window.location.pathname || '').toLowerCase();
+          var path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
           var search = (window.location.search || '').toLowerCase();
           if (
             path === '/thank-you' ||
             path === '/thankyou' ||
             path.indexOf('/thank-you/') === 0 ||
+            path === '/booking/thank-you' ||
+            path === '/book/thank-you' ||
+            search.indexOf('page=thank-you') !== -1
+          ) {
+            window.__FORCE_THANK_YOU_PAGE__ = true;
+            window.__FORCE_CUSTOMER_BOOKING_ONLY__ = true;
+            document.title = 'Thank You — Booking & Quote Confirmed | TidyUps Cleaning Service Inc.';
+          } else if (
             path === '/book' ||
             path.indexOf('/book/') === 0 ||
             path === '/booking' ||
             path.indexOf('/booking/') === 0 ||
             path === '/customer-booking' ||
             path.indexOf('/customer-booking/') === 0 ||
-            search.indexOf('page=thank-you') !== -1 ||
             search.indexOf('mode=customer') !== -1 ||
             search.indexOf('booking=1') !== -1 ||
             host.indexOf('book.') === 0 ||
-            host.indexOf('book.tidyupscleaning') !== -1
+            host.indexOf('book.tidyupscleaning') !== -1 ||
+            host.indexOf('ads.') === 0 ||
+            host.indexOf('ads.tidyupscleaning') !== -1
           ) {
             window.__FORCE_CUSTOMER_BOOKING_ONLY__ = true;
             document.title = '833 TidyUps Cleaning Service — Online Customer Booking';

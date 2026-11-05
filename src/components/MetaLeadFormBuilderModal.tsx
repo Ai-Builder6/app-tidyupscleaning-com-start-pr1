@@ -1345,7 +1345,7 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
-                      Follow-Up Website / Online Booking URL
+                      Follow-Up Website / Thank-You Conversion URL
                     </label>
                     <input
                       type="text"
@@ -1358,6 +1358,68 @@ export const MetaLeadFormBuilderModal: React.FC<MetaLeadFormBuilderModalProps> =
                       }
                       className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 focus:border-emerald-500 text-xs font-mono text-emerald-300 outline-none"
                     />
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mr-1">
+                        Quick Set URL:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateCurrentPreset((curr) => ({
+                            ...curr,
+                            thankYouPage: {
+                              ...curr.thankYouPage,
+                              website_url: 'https://ads.tidyupscleaning.com/thank-you'
+                            }
+                          }))
+                        }
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition cursor-pointer ${
+                          preset.thankYouPage.website_url === 'https://ads.tidyupscleaning.com/thank-you'
+                            ? 'bg-purple-500/20 border-purple-500/50 text-purple-200'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        ads.tidyupscleaning.com/thank-you
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateCurrentPreset((curr) => ({
+                            ...curr,
+                            thankYouPage: {
+                              ...curr.thankYouPage,
+                              website_url: 'https://app.tidyupscleaning.com/thank-you'
+                            }
+                          }))
+                        }
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition cursor-pointer ${
+                          preset.thankYouPage.website_url === 'https://app.tidyupscleaning.com/thank-you'
+                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        app.tidyupscleaning.com/thank-you
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateCurrentPreset((curr) => ({
+                            ...curr,
+                            thankYouPage: {
+                              ...curr.thankYouPage,
+                              website_url: 'https://app.tidyupscleaning.com/booking'
+                            }
+                          }))
+                        }
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition cursor-pointer ${
+                          preset.thankYouPage.website_url === 'https://app.tidyupscleaning.com/booking'
+                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-200'
+                            : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        app.tidyupscleaning.com/booking
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

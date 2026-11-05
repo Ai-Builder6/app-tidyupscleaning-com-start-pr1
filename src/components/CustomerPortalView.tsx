@@ -42,6 +42,7 @@ import {
 } from '../data/serviceCatalogData';
 import { PublicBookingModal } from './PublicBookingModal';
 import { TidyUpsBunnyLogo } from './TidyUpsBunnyLogo';
+import { ThankYouConversionPage } from './ThankYouConversionPage';
 
 export interface CustomerBookingSubmissionPayload {
   ticket: ServiceTicket;
@@ -396,7 +397,19 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [calendarMonthDate, setCalendarMonthDate] = useState<Date>(() => new Date());
 
   // Submission & Feedback State
-  const [formSubmitted, setFormSubmitted] = useState<boolean>(false);
+  const [formSubmitted, setFormSubmitted] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const p = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+    const s = window.location.search.toLowerCase();
+    return (
+      p === '/thank-you' ||
+      p === '/thankyou' ||
+      p === '/booking/thank-you' ||
+      p === '/book/thank-you' ||
+      s.includes('page=thank-you')
+    );
+  });
+  const [previewThankYouPage, setPreviewThankYouPage] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [confirmedBookingId, setConfirmedBookingId] = useState<string>('');
   const [confirmedQuoteNumber, setConfirmedQuoteNumber] = useState<string>('');
@@ -1227,6 +1240,46 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
   const showStaffPreviewBanner = !isStandaloneCustomerSite && Boolean(onToggleCustomerLockPreview);
 
+  if (formSubmitted || previewThankYouPage) {
+    return (
+      <div className="flex-1 h-full w-full overflow-y-auto overflow-x-hidden bg-slate-950">
+        <ThankYouConversionPage
+          isOwnerPreview={previewThankYouPage || showStaffPreviewBanner}
+          bookingReceipt={
+            firstName || customerPhone
+              ? {
+                  customerName: fullNameCombined,
+                  firstName: firstName.trim(),
+                  lastName: lastName.trim(),
+                  customerPhone: customerPhone.trim(),
+                  customerEmail: customerEmail.trim(),
+                  serviceType: activeServiceData.name,
+                  packageName: priceCalculation.matchedItemName,
+                  hoursLabel: priceCalculation.hoursLabel,
+                  address: address.trim(),
+                  city,
+                  bedrooms,
+                  bathrooms,
+                  preferredDateLabel: formattedPreferredDateLabel,
+                  preferredTime,
+                  totalAmount: priceCalculation.total,
+                  bookingId: confirmedBookingId,
+                  quoteNumber: confirmedQuoteNumber
+                }
+              : undefined
+          }
+          onBookAnother={() => {
+            setFormSubmitted(false);
+            setPreviewThankYouPage(false);
+            try {
+              window.history.pushState({}, '', '/booking');
+            } catch {}
+          }}
+        />
+      </div>
+    );
+  }
+
   if (bookingRouteVariant === 'SIMPLE_3_OPTION') {
     return (
       <div className="flex-1 h-full w-full overflow-y-auto overflow-x-hidden bg-black">
@@ -1235,6 +1288,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           mode="STANDALONE_PAGE"
           isOwnerViewing={showStaffPreviewBanner && !isCustomerLockPreview}
           onSwitchToCalculatorMode={() => handleSwitchRouteVariant('CALCULATOR')}
+          onPreviewThankYouPage={() => setPreviewThankYouPage(true)}
           onOpenStaffLogin={onOpenStaffLogin}
           onBookingCreated={(ticket, fullData) => {
             if (onBookingSubmitted && ticket) {
@@ -1298,10 +1352,30 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 type="button"
                 onClick={() => handleCopyBookingLink('thankyou', 'https://app.tidyupscleaning.com/thank-you')}
                 className="px-3 py-1.5 rounded-xl bg-emerald-950 hover:bg-emerald-900 border border-emerald-400 text-emerald-300 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
-                title="Copy Google Ads Conversion Page URL (https://app.tidyupscleaning.com/thank-you)"
+                title="Copy Primary Thank-You Page URL (https://app.tidyupscleaning.com/thank-you)"
               >
                 {copiedLinkKey === 'thankyou' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedLinkKey === 'thankyou' ? 'Copied /thank-you!' : 'Copy /thank-you Ads Link'}</span>
+                <span>{copiedLinkKey === 'thankyou' ? 'Copied app.../thank-you!' : 'Copy app.../thank-you'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCopyBookingLink('ads_thankyou', 'https://ads.tidyupscleaning.com/thank-you')}
+                className="px-3 py-1.5 rounded-xl bg-sky-950 hover:bg-sky-900 border border-sky-400 text-sky-300 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                title="Copy Ads Thank-You Page URL (https://ads.tidyupscleaning.com/thank-you)"
+              >
+                {copiedLinkKey === 'ads_thankyou' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedLinkKey === 'ads_thankyou' ? 'Copied ads.../thank-you!' : 'Copy ads.../thank-you'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPreviewThankYouPage(true)}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                title="Open & Preview the Dedicated /thank-you Confirmation Page"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Preview /thank-you Page</span>
               </button>
 
               <button

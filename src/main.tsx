@@ -3,12 +3,28 @@ import { createRoot } from 'react-dom/client';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import App from './App.tsx';
 import { CustomerPortalView } from './components/CustomerPortalView';
+import { ThankYouConversionPage } from './components/ThankYouConversionPage';
 import {
   saveClientToFirestore,
   saveQuoteToFirestore,
   saveScheduledVisitToFirestore,
 } from './services/firestoreSyncService';
 import './index.css';
+
+function isDedicatedThankYouRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  const path = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
+  const search = (window.location.search || '').toLowerCase();
+  return (
+    Boolean((window as any).__FORCE_THANK_YOU_PAGE__) ||
+    path === '/thank-you' ||
+    path === '/thankyou' ||
+    path.startsWith('/thank-you/') ||
+    path === '/booking/thank-you' ||
+    path === '/book/thank-you' ||
+    search.includes('page=thank-you')
+  );
+}
 
 function isDedicatedCustomerBookingRoute(): boolean {
   if (typeof window === 'undefined') return false;
@@ -26,7 +42,9 @@ function isDedicatedCustomerBookingRoute(): boolean {
     search.includes('mode=customer') ||
     search.includes('booking=1') ||
     host.startsWith('book.') ||
-    host.includes('book.tidyupscleaning')
+    host.includes('book.tidyupscleaning') ||
+    host.startsWith('ads.') ||
+    host.includes('ads.tidyupscleaning')
   ) {
     return true;
   }
@@ -35,6 +53,16 @@ function isDedicatedCustomerBookingRoute(): boolean {
 
 const StandaloneCustomerBookingPage: React.FC = () => {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+  if (isDedicatedThankYouRoute()) {
+    return (
+      <ThankYouConversionPage
+        onBookAnother={() => {
+          (window as any).__FORCE_THANK_YOU_PAGE__ = false;
+          window.location.href = '/booking';
+        }}
+      />
+    );
+  }
   return (
     <APIProvider
       apiKey={apiKey}

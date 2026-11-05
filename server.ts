@@ -217,11 +217,71 @@ app.get("/api/cloud-sync/status", (req, res) => {
     activeSiteId: "tidyups",
     mirroredSites: [
       { id: "tidyups", name: "TidyUps Cleaning (Primary)", domain: "app.tidyupscleaning.com", cloudRunService: "tidyups-cleaning", synced: true },
+      { id: "tidyups-ads", name: "TidyUps Ads & Conversion Tracking", domain: "ads.tidyupscleaning.com", cloudRunService: "tidyups-cleaning", synced: true },
     ],
     lastSyncedAt: store?.lastSavedAt || new Date().toISOString(),
     twilioProtectedLinesCount: Object.keys(store?.spamShieldConfig?.lineMappings || {}).length,
     quoLinesCount: store?.quoConfig?.phoneNumbers?.length || 5,
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dedicated /thank-you Conversion Tracking & Submission Verification Endpoints
+// Supports https://app.tidyupscleaning.com/thank-you and https://ads.tidyupscleaning.com/thank-you
+// ─────────────────────────────────────────────────────────────────────────────
+app.post("/api/public/thank-you-conversion", (req, res) => {
+  try {
+    const store = loadStore() as any;
+    if (!Array.isArray(store.thankYouConversions)) {
+      store.thankYouConversions = [];
+    }
+    const body = req.body || {};
+    const record = {
+      id: `ty-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: body.timestamp || new Date().toISOString(),
+      hostname: String(body.hostname || req.headers["x-forwarded-host"] || req.headers.host || "app.tidyupscleaning.com"),
+      pathname: String(body.pathname || "/thank-you"),
+      customerName: String(body.customerName || "Website Visitor"),
+      phone: String(body.phone || ""),
+      email: String(body.email || ""),
+      serviceType: String(body.serviceType || "Cleaning Service"),
+      quoteNumber: String(body.quoteNumber || ""),
+      bookingId: String(body.bookingId || ""),
+      totalAmount: Number(body.totalAmount || 0),
+      source: String(body.source || "Direct /thank-you Page"),
+      gclid: String(body.gclid || ""),
+      fbclid: String(body.fbclid || ""),
+      utmSource: String(body.utmSource || ""),
+      utmMedium: String(body.utmMedium || ""),
+      utmCampaign: String(body.utmCampaign || ""),
+    };
+    store.thankYouConversions.unshift(record);
+    if (store.thankYouConversions.length > 100) {
+      store.thankYouConversions = store.thankYouConversions.slice(0, 100);
+    }
+    saveStore(store);
+    res.json({
+      success: true,
+      conversion: record,
+      recentConversions: store.thankYouConversions.slice(0, 15),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to log thank-you conversion" });
+  }
+});
+
+app.get("/api/public/thank-you-conversions", (_req, res) => {
+  try {
+    const store = loadStore() as any;
+    const list = Array.isArray(store.thankYouConversions) ? store.thankYouConversions : [];
+    res.json({
+      success: true,
+      totalCount: list.length,
+      recentConversions: list.slice(0, 25),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to load thank-you conversions" });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

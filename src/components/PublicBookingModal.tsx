@@ -26,6 +26,7 @@ import {
 import { ServiceTicket } from '../types/dispatch';
 import { AddressAutocompleteInput } from './AddressAutocompleteInput';
 import { TidyUpsBunnyLogo } from './TidyUpsBunnyLogo';
+import { ThankYouConversionPage } from './ThankYouConversionPage';
 
 export interface PublicBookingModalProps {
   isOpen: boolean;
@@ -33,6 +34,7 @@ export interface PublicBookingModalProps {
   onBookingCreated?: (ticket: ServiceTicket, fullPayload?: any) => void;
   mode?: 'MODAL' | 'STANDALONE_PAGE';
   onSwitchToCalculatorMode?: () => void;
+  onPreviewThankYouPage?: () => void;
   onOpenStaffLogin?: () => void;
   isOwnerViewing?: boolean;
 }
@@ -121,6 +123,7 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
   onBookingCreated,
   mode = 'MODAL',
   onSwitchToCalculatorMode,
+  onPreviewThankYouPage,
   onOpenStaffLogin,
   isOwnerViewing = false,
 }) => {
@@ -1768,6 +1771,38 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
     </div>
   );
 
+  if (mode === 'STANDALONE_PAGE' && step === 'SUCCESS') {
+    return (
+      <ThankYouConversionPage
+        isOwnerPreview={isOwnerViewing}
+        bookingReceipt={{
+          customerName: `${firstName} ${lastName}`.trim(),
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          customerPhone: phone.trim(),
+          customerEmail: email.trim(),
+          serviceType: serviceType || 'Residential Cleaning',
+          hoursLabel: crewRuleDetails.badgeText,
+          address: address.trim(),
+          city,
+          bedrooms,
+          bathrooms,
+          preferredDateLabel: preferredDate,
+          preferredTime,
+          totalAmount: createdSummary?.quote?.total || undefined,
+          bookingId: createdSummary?.jobberJobId || '',
+          quoteNumber: createdSummary?.quoteNumber || ''
+        }}
+        onBookAnother={() => {
+          handleReset();
+          try {
+            window.history.pushState({}, '', '/booking');
+          } catch {}
+        }}
+      />
+    );
+  }
+
   if (mode === 'STANDALONE_PAGE') {
     return (
       <div className="min-h-screen w-full bg-gradient-to-br from-slate-950 via-[#091224] to-indigo-950 py-6 sm:py-10 px-4 text-white">
@@ -1811,20 +1846,50 @@ export const PublicBookingModal: React.FC<PublicBookingModalProps> = ({
                     handleCopyBookingUrl('https://app.tidyupscleaning.com/thank-you', 'thankyou')
                   }
                   className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer"
-                  title="Copy Google Ads Conversion Page Link (https://app.tidyupscleaning.com/thank-you)"
+                  title="Copy Primary Thank-You Page Link (https://app.tidyupscleaning.com/thank-you)"
                 >
                   {copiedUrl === 'thankyou' ? (
                     <>
                       <Check className="w-3.5 h-3.5" />
-                      <span>Copied /thank-you!</span>
+                      <span>Copied app.../thank-you!</span>
                     </>
                   ) : (
                     <>
                       <Copy className="w-3.5 h-3.5" />
-                      <span>Copy /thank-you Ads Link</span>
+                      <span>Copy app.../thank-you</span>
                     </>
                   )}
                 </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopyBookingUrl('https://ads.tidyupscleaning.com/thank-you', 'ads_thankyou')
+                  }
+                  className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer"
+                  title="Copy Ads Thank-You Page Link (https://ads.tidyupscleaning.com/thank-you)"
+                >
+                  {copiedUrl === 'ads_thankyou' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Copied ads.../thank-you!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy ads.../thank-you</span>
+                    </>
+                  )}
+                </button>
+                {onPreviewThankYouPage && (
+                  <button
+                    type="button"
+                    onClick={onPreviewThankYouPage}
+                    className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Preview /thank-you Page</span>
+                  </button>
+                )}
                 {onSwitchToCalculatorMode && (
                   <button
                     type="button"
