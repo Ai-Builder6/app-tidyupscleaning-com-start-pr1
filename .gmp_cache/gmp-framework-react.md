@@ -3,7 +3,7 @@ name: gmp-framework-react
 description: This guide serves as the mandatory entry point and architectural router for building Google Maps Platform applications using the **React** framework, specifically leveraging the official `@vis.gl/react-google-maps` SDK and modern API features. The content is rigorously curated to enforce the **Absolute Universal Zero-Legacy Mandate**, ensuring all generated solutions utilize current, future-proof, cost-optimized, and performant APIs. Developers are proactively guided toward modern replacements like `AdvancedMarkerElement`, the `Place` class (Places API New), and the `Route` class (Routes API), strictly forbidding any reliance on deprecated or disabled callback-based services. This router ensures comprehensive coverage of React patterns, from basic initialization to complex data visualization and clustering techniques.
 license: Apache-2.0
 metadata:
-  version: 1.0.69
+  version: 1.0.70
 ---
 
 > [!IMPORTANT] **Core Dependency:** This skill requires active context from
@@ -78,10 +78,9 @@ Topic                           | Description                                   
 
 ### IV. Specialized and Advanced Features
 
-| Topic                | Description          | Reference Link               |
-| :------------------- | :------------------- | :--------------------------- |
-| **Core Integration & | Overarching patterns | [React Google Maps Platform  |
-:                      :                      : Core Patterns and Modern API :
+Topic                | Description          | Reference Link
+:------------------- | :------------------- | :-------------
+**Core Integration & | Overarching patterns | [React Google Maps Platform Core Patterns and Modern API
 
 \: Logic** : combining Maps, :
 Integration](https://www.gstatic.com/googlemapsplatform-agent-skills/gmp-framework-react/references/example_core.md) : : :
@@ -125,6 +124,14 @@ rules to prevent hallucinations:
     component, or service, you MUST look up the provided reference files to see
     how it is imported and used. Do not rely on your pre-trained knowledge for
     API contracts, imports, or component usage.
+5.  **Avoid Global `Map` Identifier Shadowing**: When importing `{ Map }` from
+    `@vis.gl/react-google-maps`, the imported component shadows JavaScript's
+    built-in `Map` constructor in that file scope. Do NOT use `new Map()` or
+    `Map<K, V>` for lookup tables or data stores in files importing the `Map`
+    component; use TypeScript `Record<K, V>` or plain object dictionaries `{}`
+    to avoid `TypeError: Map is not a constructor`. If a native Map is strictly
+    required, alias the import (`import { Map as GoogleMap }`) or call
+    `new window.Map()`.
 
 ## Best Practices (Zero-Legacy Mandates & Critical Failures)
 
@@ -146,6 +153,11 @@ Client-side `fetch()` to Maps REST APIs  | **Official SDK Wrappers or Server-Sid
 
 *   **Required SDK (CF5):** All solutions **MUST** use the official React
     wrapper: `@vis.gl/react-google-maps`.
+*   **Prevent `Map` Variable Shadowing:** In components and hooks that import
+    `{ Map }` from `@vis.gl/react-google-maps`, always use `Record<string, T>` /
+    `Record<number, T>` or plain object literals `{}` for lookup tables and
+    dictionary caches rather than `new Map()` to prevent identifier collision
+    with JavaScript's global `Map` constructor.
 *   **Web Component Imperativity (CF8):** When working with GMP Web Components
     (like `<gmp-place-autocomplete>`), use `useRef` and `useEffect` to set
     object properties on the underlying DOM element directly. Do not pass

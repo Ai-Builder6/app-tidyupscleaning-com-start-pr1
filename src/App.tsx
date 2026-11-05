@@ -293,9 +293,11 @@ function dedupeQuotesList(rawQuotes: any[]): JobberQuote[] {
 
 export function App() {
   const [apiKey, setApiKey] = useState<string>(
-    import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyC4kxdVgVTNm5ppd8IuK7rqq-Rz_EV31Ns'
+    import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
   );
-  const [mapsAuthError, setMapsAuthError] = useState<boolean>(false);
+  const [mapsAuthError, setMapsAuthError] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? Boolean((window as any).__GOOGLE_MAPS_AUTH_FAILED__) : false
+  );
   const [refererErrorUrl, setRefererErrorUrl] = useState<string | null>(null);
   const [quotaExceeded, setQuotaExceeded] = useState<boolean>(false);
   // Read locally cached dispatch data immediately so user entries never vanish on refresh
@@ -2448,7 +2450,13 @@ export function App() {
 
     window.addEventListener('google-maps-auth-failure', handleAuthFailure);
     window.addEventListener('google-maps-referer-error', handleRefererError);
-    (window as any).gm_authFailure = handleAuthFailure;
+    (window as any).gm_authFailure = () => {
+      (window as any).__GOOGLE_MAPS_AUTH_FAILED__ = true;
+      handleAuthFailure();
+    };
+    if ((window as any).__GOOGLE_MAPS_AUTH_FAILED__) {
+      setMapsAuthError(true);
+    }
 
     return () => {
       window.removeEventListener('google-maps-auth-failure', handleAuthFailure);

@@ -1,17 +1,17 @@
 [
   {
     "name": "address-validation-api-web-api",
-    "description": "Use this skill when developing an application that needs to verify the deliverability and accuracy of a postal address, standardize input addresses, obtain precise geolocation, or retrieve postal-specific metadata like CASS certification and delivery point details.",
+    "description": "Use this skill when the user wants to validate, standardize, or geocode postal addresses using the Google Maps Platform Address Validation API via HTTP REST requests. This skill helps developers verify partial or complete addresses, retrieve latitude/longitude coordinates, Place IDs, and Plus Codes, determine address types (business, residential, or PO box), obtain English-language equivalents, and access USPS CASS-certified validation and delivery metadata.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/address-validation-api-web-api/SKILL.md"
   },
   {
     "name": "aerial-view-api-web-api",
-    "description": "Use this skill when developers need to retrieve a URL for a pre-rendered, photorealistic 3D flyover video of a specified location, or when they require metadata about available aerial views, using the Aerial View API for Google Maps Platform.",
+    "description": "Use this skill when retrieving pre-rendered, photorealistic 3D flyover videos and associated metadata for specific physical addresses or locations using the Google Maps Platform Aerial View HTTP REST API. It applies when users want to look up existing aerial videos, fetch video URLs in various formats and resolutions, or request video metadata via web API endpoints.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/aerial-view-api-web-api/SKILL.md"
   },
   {
     "name": "air-quality-api-web-api",
-    "description": "Use this skill when the developer needs to retrieve current, historical (30-day), or forecasted (4-day) air quality data, including the Air Quality Index (AQI), pollutant concentrations, health recommendations, and corresponding visual heatmap tiles for any geographic location via the Google Maps Platform Air Quality API.",
+    "description": "Use this skill when the user wants to retrieve air quality data using the Google Maps Platform Air Quality REST API. Apply this skill to fetch current air quality conditions, 4-day forecasts, or 30-day historical data for a specific geographic location, including Air Quality Indexes (AQI), condition descriptions, pollutant concentrations, pollutant sources and effects, and health recommendations, as well as to request air quality heatmap image tiles.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/air-quality-api-web-api/SKILL.md"
   },
   {
@@ -21,52 +21,42 @@
   },
   {
     "name": "consumer-sdk-for-android-android",
-    "description": "Use this skill when a developer needs to integrate a real-time, customizable map into their Android application to track a trip managed by Fleet Engine, allowing them to display the vehicle location, route polyline, and customize map features and styles for a consumer-facing experience.",
+    "description": "Use this skill when integrating the Google Maps Platform Consumer SDK for Android to build real-time trip tracking and journey sharing experiences in Android mobile apps. This skill covers embedding interactive maps that track Fleet Engine trips, rendering and updating route polylines, customizing vehicle and waypoint markers, and applying custom map styles (including zoom-level styling, feature visibility, place density, and styling for roads, buildings, landmarks, icons, and labels).",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/consumer-sdk-for-android-android/SKILL.md"
   },
   {
     "name": "consumer-sdk-for-ios-ios",
-    "description": "Use this skill when building native iOS applications that require real-time, customizable trip progress tracking for consumers using Fleet Engine data, including vehicle location, route visualization, and dynamic map styling customizations.",
+    "description": "Use this skill when building iOS applications with the Google Maps Platform Consumer SDK for iOS. Trigger this skill to embed customizable, interactive maps that track Fleet Engine trip progress, render and update real-time route polylines, customize trip markers and polylines, and apply custom map styling (including adjusting roads, polygons, icons, text labels, zoom-level styles, place density, buildings, landmarks, and feature visibility).",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/consumer-sdk-for-ios-ios/SKILL.md"
   },
   {
-    "name": "directions-api-web-api",
-    "description": "Use this skill when developers need to calculate routes, distance, travel time, and turn-by-turn instructions between two or more geographic points using the Directions API. It supports various travel modes (driving, walking, transit) and optional constraints like avoidance features and optimizing waypoints.",
-    "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/directions-api-web-api/SKILL.md"
-  },
-  {
-    "name": "distance-matrix-api-web-api",
-    "description": "Use this skill when calculating travel distance and time between multiple origins and destinations simultaneously. This capability is fulfilled by the modern Routes API, which replaces the deprecated Distance Matrix API. Users can request a matrix of routes and specify travel modes like driving, transit, or walking.",
-    "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/distance-matrix-api-web-api/SKILL.md"
-  },
-  {
     "name": "driver-sdk-for-android-android",
-    "description": "Use this skill when implementing a driver application on Android that needs to report real-time vehicle location, route updates, estimated time of arrival (ETA), remaining distance, and waypoint status to the Fleet Engine backend service for efficient fleet management.",
+    "description": "Use this skill when developing Android applications with the Google Maps Platform Driver SDK for Android. Apply this skill to report real-time vehicle positions, active routes, trip waypoint coordinates, remaining distances, and estimated times of arrival (ETAs) from the Navigation SDK to the Fleet Engine service, as well as to retrieve vehicle trip information.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/driver-sdk-for-android-android/SKILL.md"
   },
   {
     "name": "driver-sdk-for-ios-ios",
-    "description": "Use this skill when developing iOS driver applications that need to communicate real-time vehicle location, route, ETA, and trip progress updates to the Fleet Engine backend service for efficient fleet management and consumer visibility.",
+    "description": "Use this skill when developing iOS mobility, ridesharing, or delivery driver applications using the Google Maps Platform Driver SDK for iOS. Apply this skill to integrate the Navigation SDK with the Fleet Engine service, report real-time vehicle positions, transmit active routes and waypoint coordinates, update remaining distance and estimated time of arrival (ETA) to the next waypoint, and retrieve vehicle trip information.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/driver-sdk-for-ios-ios/SKILL.md"
   },
   {
     "name": "elevation-api-web-api",
-    "description": "Use this skill to retrieve the precise ground elevation (in meters) for specific latitude/longitude coordinates, or to sample elevation data along a defined path for topographical analysis and terrain visualization.",
+    "description": "Use this skill when retrieving elevation data for specific geographic locations or calculating elevation profiles along paths using the Google Maps Platform Elevation API.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/elevation-api-web-api/SKILL.md"
   },
   {
     "name": "fleet-engine-service-web-api",
-    "description": "Use this skill when integrating the Fleet Engine Service via the Web API to manage the entire lifecycle of on-demand transportation vehicles and trips, including provisioning new vehicles, updating vehicle attributes, creating and tracking trip progress, and reporting billable usage metrics.",
+    "description": "Use this skill when building or integrating with the Google Maps Platform Fleet Engine Service web API for on-demand rideshare and deliveries. Apply this skill to create, retrieve, search, list, and update vehicles and trips, update vehicle attributes, and report billable trip usage via HTTP REST endpoints.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/fleet-engine-service-web-api/SKILL.md"
   },
   {
     "name": "geocoding-api-web-api",
-    "description": "Use this skill when a developer needs to convert addresses into geographic coordinates (geocoding) or convert coordinates back into human-readable addresses (reverse geocoding). It provides precise location data, supports restricting results by region or type, and returns details about building entrances, outlines, and landmark proximity.",
+    "description": "Use this skill when converting addresses into geographic coordinates (geocoding), translating latitude/longitude coordinates into human-readable addresses (reverse geocoding), or retrieving addresses from Google Place IDs using the Google Maps Platform Geocoding HTTP REST API. It should also be used to restrict requests by viewport, region, country, postal code, or address type, as well as to retrieve building outlines, building entrances, and proximity information to landmarks and areas.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/geocoding-api-web-api/SKILL.md"
   },
   {
     "name": "geolocation-api-web-api",
-    "description": "Use this skill when needing to determine the physical location (latitude and longitude) of a client device based on surrounding cell tower and Wi-Fi access point data, often serving as a reliable fallback when GPS or HTML5 geolocation is unavailable or slow.",
+    "description": "Use this skill when estimating the geographic location (latitude and longitude coordinates and accuracy radius) of a device without native GPS using the Google Maps Platform Geolocation API via HTTPS POST requests based on cell tower, WiFi access point, or IP address data.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/geolocation-api-web-api/SKILL.md"
   },
   {
@@ -96,127 +86,127 @@
   },
   {
     "name": "javascript-consumer-sdk-javascript",
-    "description": "Use this skill when integrating the Fleet Engine trip tracking experience into a JavaScript web application, allowing the user to display real-time route updates, customize map styling (polylines, markers, features), and visualize vehicle or shipment progress accurately for the end consumer.",
+    "description": "Use this skill when building or customizing web-based trip tracking and order progress experiences using the Google Maps Platform JavaScript Consumer SDK with Fleet Engine. Apply this skill when the user wants to render route polylines, update live trip progress, customize markers or route polylines, or adjust map styles (including roads, buildings, landmarks, labels, place density, and zoom-level styling) for on-demand rides and deliveries.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/javascript-consumer-sdk-javascript/SKILL.md"
   },
   {
     "name": "map-tiles-api-web-api",
-    "description": "Accesses the Map Tiles API for low-level image retrieval. Use this skill to fetch 2D raster tiles (roadmap, satellite, terrain) using XYZ coordinates, retrieve URIs for photorealistic 3D tiles (OGC format), and obtain Street View metadata. Always trigger for queries requiring direct tile access, custom map rendering in third-party engines, XYZ coordinates, or applying custom map styling using a Map ID.",
+    "description": "Use this skill when the user wants to fetch 2D map tiles (roadmap, satellite, terrain), customize 2D roadmap styles and features, render photorealistic 3D tiles using OGC format or CesiumJS, or retrieve Google Street View tiles, thumbnails, and metadata via the Map Tiles API.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/map-tiles-api-web-api/SKILL.md"
   },
   {
     "name": "maps-3d-sdk-for-android-android",
-    "description": "Use this skill when developing native Android applications that require highly immersive and interactive photorealistic 3D map experiences. Developers can integrate advanced features like custom 3D markers, complex 3D models, polylines, and polygons, along with fine-grained control over camera movements, animations, and user interactions within the 3D environment.",
+    "description": "Use this skill when building Android applications with the Maps 3D SDK for Android to display interactive, photorealistic 3D maps. Trigger this skill when users need to initialize a 3D map view, add and customize 3D markers, render 3D models, draw 3D polylines and polygons, handle map click and camera events, customize UI controls, or manage camera paths, animations, and restrictions on Android.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/maps-3d-sdk-for-android-android/SKILL.md"
   },
   {
     "name": "maps-3d-sdk-for-ios-ios",
-    "description": "Use this skill to integrate interactive, photorealistic 3D maps into an iOS application using the Maps 3D SDK. Developers can add custom 3D models, markers, polylines, and polygons, and precisely control the camera movement and available user controls for creating immersive geographic experiences.",
+    "description": "Use this skill when building iOS applications with the Google Maps Platform Maps 3D SDK for iOS. Apply this skill to add interactive, photorealistic 3D maps, place and customize 3D markers, render 3D models, draw 3D polylines and polygons, handle user interactions and map events, customize UI controls, and manage camera paths, animations, and restrictions.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/maps-3d-sdk-for-ios-ios/SKILL.md"
   },
   {
     "name": "maps-datasets-api-web-api",
-    "description": "Use this skill when managing custom geospatial datasets for visualization and styling on Google Maps Platform. Developers can create new datasets, upload data in CSV, GeoJSON, or KML formats, and retrieve metadata or content for existing datasets using the Maps Datasets API.",
+    "description": "Use this skill when the user wants to create, manage, or query custom geospatial datasets using the Google Maps Datasets REST API. This includes creating datasets for map styling and visualizations, uploading geospatial data from CSV, GeoJSON, or KML sources, listing all custom datasets, retrieving dataset metadata, and downloading or returning data from a custom dataset.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/maps-datasets-api-web-api/SKILL.md"
   },
   {
     "name": "maps-embed-api-javascript",
-    "description": "Uses the Maps Embed API to display interactive maps, street view panoramas, directions, or place searches directly on a web page using simple HTML <iframe> tags and URL parameters. This approach requires minimal coding and is ideal for quick, static embedding.",
+    "description": "Use this skill when embedding interactive Google Maps, Street View panoramas, place search results, or directions into a web page using an HTML iframe and JavaScript with the Google Maps Embed API.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/maps-embed-api-javascript/SKILL.md"
   },
   {
     "name": "maps-javascript-api-javascript",
-    "description": "Developers use the Maps JavaScript API skill to embed customizable, interactive 2D and photorealistic 3D maps into web applications. This enables advanced location intelligence features, including real-time route calculation, dynamic geospatial data visualization (GeoJSON, KML), Address Validation, and comprehensive search capabilities powered by the Places API and Street View service.",
+    "description": "Use this skill when building interactive 2D or photorealistic 3D maps, integrating Street View, rendering custom markers, overlays, and geospatial datasets, or implementing client-side location services in JavaScript. This skill covers the Google Maps JavaScript API, including cloud-based map styling, Places searches and UI widgets, autocomplete, directions, route matrices, geocoding, address validation, elevation queries, and Fleet Engine tracking.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/maps-javascript-api-javascript/SKILL.md"
   },
   {
     "name": "maps-sdk-for-android-android",
-    "description": "Use this skill when building mobile applications for Android that require interactive maps, custom styling, location data visualization using markers, heatmaps, or overlays, and integration of Google Street View experiences. It guides the developer in configuring map components, handling gestures, managing the map camera, and responding to user interactions with map features using the native Maps SDK for Android.",
+    "description": "Use this skill when building Android or Wear OS applications using the Google Maps SDK for Android. Trigger this skill when the user wants to embed interactive maps or Google Street View, configure map controls, gestures, and camera animations, or add markers, info windows, shapes, polylines, polygons, ground overlays, and tile overlays. Also use it for data visualization and custom styling, including cloud-based map styling, Map IDs, KML, GeoJSON, heatmaps, choropleth maps, boundary styling, and custom geospatial datasets.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/maps-sdk-for-android-android/SKILL.md"
   },
   {
     "name": "maps-sdk-for-ios-ios",
-    "description": "Use this skill when developing native iOS applications in Swift or Objective-C to embed interactive maps, customize visual appearance using cloud styling, manage map elements like markers and layers, and integrate advanced features like Street View and reverse geocoding.",
+    "description": "Use this skill when building iOS applications with the Google Maps SDK for iOS. It should be invoked whenever a user needs to display interactive vector maps or Street View panoramas, customize map styles and features, manage camera movements, gestures, and UI controls, draw overlays (markers, info windows, polylines, polygons, ground overlays, tiles, heatmaps), integrate geospatial data (KML, GeoJSON, custom datasets, boundaries, quadtrees), or perform reverse geocoding on iOS using Swift or Objective-C.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/maps-sdk-for-ios-ios/SKILL.md"
   },
   {
     "name": "maps-static-api-web-api",
-    "description": "Use this skill when the developer needs to generate and embed a high-resolution, non-interactive map image into a web page, email, or print document using a simple URL request. It allows for the customization of map location, zoom, map type, markers, paths, and cloud-based styling via a `mapId`.",
+    "description": "Use this skill when the user wants to generate or embed a non-interactive, static Google Map image into a web page or application using the Maps Static API via HTTP URL requests. Apply this skill to configure static map parameters including image size, scale, format, map type, markers, paths, polygons, and custom cloud-based or inline map styling.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/maps-static-api-web-api/SKILL.md"
   },
   {
     "name": "navigation-sdk-for-android-android",
-    "description": "Use this skill to integrate interactive, turn-by-turn navigation and rich map experiences into a native Android application. It covers map display customization, marker management, route modification, real-time navigation updates (location, speed, time), UI control, and adding support for Android Auto navigation.",
+    "description": "Use this skill when building or enhancing Android applications with the Google Maps Platform Navigation SDK for Android. Use it to implement interactive turn-by-turn navigation, customize map views, configure routing and travel modes, handle real-time navigation events (location, arrival, route changes, speed), display and report route disruptions, and integrate with Android Auto or Wear OS.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/navigation-sdk-for-android-android/SKILL.md"
   },
   {
     "name": "navigation-sdk-for-ios-ios",
-    "description": "Use this skill when building feature-rich, real-time, turn-by-turn navigation experiences for iOS applications, including CarPlay support. Developers can customize routing preferences, manage location and route updates, configure the navigation UI, and implement in-app traffic incident reporting and handling.",
+    "description": "Use this skill when building iOS applications with the Google Maps Platform Navigation SDK for iOS. Apply this skill to integrate interactive turn-by-turn navigation, configure routing and arrival preferences, track real-time session updates (location, ETA, speed, route changes), customize navigation UI and camera behaviors, implement CarPlay support, and manage real-time route disruption alerts and user reporting.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/navigation-sdk-for-ios-ios/SKILL.md"
   },
   {
     "name": "places-aggregate-api-web-api",
-    "description": "Use this skill when defining SQL queries to analyze Google Maps Platform Places Aggregate data in BigQuery. It enables users to efficiently calculate the number of places or retrieve their identifiers within a defined geographic area, filtering the results by criteria such as place type, operating status, price level, and user ratings.",
+    "description": "Use this skill when querying the Google Maps Platform Places Aggregate HTTP REST API to retrieve the count or Google place identifiers of places within a specified geographic area, filtered by criteria such as place types, operating status, price levels, and user ratings.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/places-aggregate-api-web-api/SKILL.md"
   },
   {
     "name": "places-api-web-api",
-    "description": "Use this skill when a user needs to integrate location search, retrieve place details, offer autocomplete suggestions, fetch photos, and utilize advanced features like AI-powered summaries or route-based searching for points of interest via the Google Maps Platform Places API (New).",
+    "description": "Use this skill when the user wants to search for places, retrieve place details, fetch place photos, get autocomplete suggestions, generate Google Maps action URIs, calculate routing distances and travel times to search results, or retrieve AI-powered place, review, and area summaries using the Google Maps Platform Places API (Web API / REST).",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/places-api-web-api/SKILL.md"
   },
   {
     "name": "places-insights-api-web-api",
-    "description": "Use this skill when defining SQL queries against the Google Maps Platform BigQuery datasets to retrieve aggregated place counts, perform geographic analysis using H3 indexing, and filter place analytics by brand identifiers and type categories.",
+    "description": "Use this skill when the user wants to analyze aggregated place metrics, perform geospatial data analysis, or write SQL queries against the Google Maps Platform Places Insights BigQuery dataset. Trigger this skill for tasks involving configuring BigQuery access for Places Insights, querying place counts directly from tables or using built-in SQL functions, aggregating places by type or H3 spatial grid cells, filtering analytics by commercial brand identifiers or geographic boundaries, and understanding core and country-specific table schemas.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/places-insights-api-web-api/SKILL.md"
   },
   {
     "name": "places-sdk-for-android-android",
-    "description": "Use this skill when developing native Android applications that require modern place-based functionality, including searching for places, fetching detailed information, retrieving photos, implementing the Autocomplete widget, and displaying AI-powered place summaries using the Places SDK for Android (New).",
+    "description": "Use this skill when building location-aware Android applications using the Google Maps Platform Places SDK for Android. Trigger this skill when the user wants to search for places by text query, find nearby places, locate places along a route, retrieve detailed place information (including ratings, reviews, and Google Maps URIs), fetch and resize place photos, determine the device's current place, implement place autocomplete (programmatically or via UI widgets), generate AI-powered place, area, EV charging, or review summaries, calculate routing distances and travel times to search results, or integrate customizable Places UI Kit components into an Android app.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/places-sdk-for-android-android/SKILL.md"
   },
   {
     "name": "places-sdk-for-ios-ios",
-    "description": "Use this skill when implementing native iOS features for finding places, providing real-time autocomplete suggestions, fetching detailed information (including photos, ratings, and AI summaries) for specific locations, or determining the user's current place.",
+    "description": "Use this skill when building iOS applications with the Google Maps Platform Places SDK for iOS. Invoke this skill whenever the user wants to search for places by text or proximity, implement place autocomplete (programmatically or via UI widgets), fetch detailed place data, photos, ratings, reviews, or AI-powered summaries (place overviews, area summaries, review summaries, EV charging amenities), detect the device's current place, search along routes, calculate travel distances and times to places, or integrate and customize pre-built Place UI elements in Swift or Objective-C.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/places-sdk-for-ios-ios/SKILL.md"
   },
   {
     "name": "pollen-api-web-api",
-    "description": "Use this skill when a user seeks detailed environmental information regarding pollen across five-day forecasts. The skill provides access to Pollen Index data, specific plant sources, health recommendations, textual descriptions of pollen conditions, cross-reaction details, and visual heatmap tiles for specific geographic locations. Developers utilize the Pollen API endpoints to integrate this data into environmental or health applications.",
+    "description": "Use this skill when retrieving localized pollen data, five-day pollen forecasts, plant allergen information, health recommendations, or pollen condition heatmap tiles via the Google Maps Platform Pollen HTTP REST API.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/pollen-api-web-api/SKILL.md"
   },
   {
     "name": "roads-api-web-api",
-    "description": "Use this skill when a developer needs to accurately align GPS data to road networks (Snap to Roads), find the closest road segment to a location (Nearest Road), or retrieve the speed limit for specific road segments using latitude/longitude coordinates or Google Place IDs.",
+    "description": "Use this skill when working with the Google Maps Platform Roads API via HTTP REST requests. Activate this skill to snap GPS coordinates to the most likely road path, find the nearest road segments to specified coordinates, retrieve Google Place IDs for road segments, or query posted speed limits along a path or for specific road Place IDs.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/roads-api-web-api/SKILL.md"
   },
   {
     "name": "route-optimization-api-web-api",
-    "description": "Use this skill to solve complex Vehicle Routing Problems (VRP) by optimizing multi-stop delivery plans. It computes efficient routes considering dynamic constraints like time windows, vehicle capacities, costs, real-time traffic, and specialized objectives, returning detailed itineraries, costs, and navigation tokens. Authentication requires Application Default Credentials (ADC).",
+    "description": "Use this skill when generating and optimizing multi-stop delivery plans, fleet routes, and logistics schedules using the Google Maps Platform Route Optimization API via HTTP REST requests. This skill helps configure shipment pickup and delivery time windows, vehicle load limits, cost models, parking buffers, live traffic consideration, and routing constraints like avoiding U-turns, as well as retrieving route polylines, navigation tokens, stop durations, and batch optimization results written to Google Cloud Storage.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/route-optimization-api-web-api/SKILL.md"
   },
   {
     "name": "routes-api-web-api",
-    "description": "Use this skill when a user needs to compute efficient routes, retrieve travel distances and times, and specify detailed parameters like eco-friendly options, intermediate stops, and features to avoid (e.g., tolls or highways) for single or matrix route requests.",
+    "description": "Use this skill when generating directions, calculating travel distances and times, or computing route matrices between multiple origins and destinations using the Google Maps Platform Routes API (HTTP REST). Apply this skill to requests involving route polylines, step-by-step maneuvers, toll calculations, waypoint optimization, traffic-aware routing, eco-friendly routes, or specific travel modes (drive, transit, walk, two-wheeled).",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/routes-api-web-api/SKILL.md"
   },
   {
     "name": "solar-api-web-api",
-    "description": "Use this skill to calculate the solar potential and estimated financial benefits for a specified building location. It provides details like optimal panel placement, annual sunshine hours, and carbon offset, along with access to detailed geospatial data including roof geometry and GeoTIFFs for aerial imagery, elevation, and solar irradiance flux.",
+    "description": "Use this skill when the user wants to evaluate solar potential, roof geometry, or sunlight exposure for buildings at a specific location using the Google Maps Platform Solar API. This skill should be triggered to estimate solar panel capacity, annual sunshine hours, carbon offset potential, and financial benefits of solar installations via HTTP REST endpoints, or to retrieve GeoTIFF data layers including RGB aerial imagery, Digital Surface Models (DSM), building rooftop masks, annual or monthly solar flux, and hourly shade.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/solar-api-web-api/SKILL.md"
   },
   {
     "name": "street-view-static-api-web-api",
-    "description": "Use this skill when a developer needs to generate a URL that returns a high-quality, non-interactive static image of a Street View panorama, controlling parameters like location, size, and camera orientation (heading, pitch, and field of view).",
+    "description": "Use this skill when generating URLs for static, non-interactive Google Street View images or querying Street View panorama metadata via HTTP requests. It covers specifying locations or panorama IDs, customizing camera point of view (heading, pitch, field of view), and securing requests with API keys and digital signatures.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/street-view-static-api-web-api/SKILL.md"
   },
   {
     "name": "time-zone-api-web-api",
-    "description": "Use this skill when a developer needs to retrieve the accurate time zone and associated UTC and Daylight Savings offsets for a specific geographic coordinate and moment in time using the Time Zone API.",
+    "description": "Use this skill when a user needs to retrieve time zone data for specific latitude and longitude coordinates using the Google Maps Platform Time Zone API. Invoke this skill to calculate local times, determine UTC and daylight saving time (DST) offsets, retrieve Unicode CLDR time zone IDs, or localize time zone names via HTTP REST requests.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/time-zone-api-web-api/SKILL.md"
   },
   {
     "name": "weather-api-web-api",
-    "description": "Always invoke this skill when requesting current, forecasted, or historical meteorological data. This skill facilitates retrieval of precise weather information\u2014including temperature, cloud cover, precipitation, severe weather alerts, and 24-hour historical conditions\u2014for any given latitude and longitude coordinates via the Google Maps Platform Weather API. Use whenever a request mentions global atmospheric data, weather conditions, or local forecasts.",
+    "description": "Use this skill when a user needs to retrieve meteorological data for specific latitude and longitude coordinates using the Google Maps Platform Weather API. Invoke this skill to fetch current weather conditions, generate daily or hourly weather forecasts, retrieve up to 24 hours of historical hourly weather data, or check real-time severe weather alerts via HTTP REST endpoints.",
     "entrypoint": "https://www.gstatic.com/googlemapsplatform-agent-skills/weather-api-web-api/SKILL.md"
   }
 ]

@@ -3,7 +3,7 @@ name: compliance-review
 description: Use this skill to review implementation plans or code that uses Google Maps Platform in order to identify revisions that need to be made based on Google Maps Platform Terms of Service, Acceptable Use Policy, EEA terms, AI terms, and deprecation policies. Use this skill each time there is a significant revision to an implementation plan or code such as a change in the Google Maps Platform products selected or the handling of responses from Google Maps Platform.
 license: Apache-2.0
 metadata:
-  version: 1.1.0
+  version: 1.1.1
 ---
 
 # Google Maps Platform: Terms of Service Check Methodology
@@ -155,8 +155,16 @@ the architecture.
     *   *Reference:*
         [Google Open Source Library Breaking Change Policy](https://opensource.google/documentation/reference/releasing/versioning?utm_campaign=gmp_git_agentskills_v1)
 
-## Technical Support Guidelines
+## Scope of Technical Support vs. Legal Compliance
 
-*   Refer to the
-    [Technical Support Services Guidelines (TSSG)](https://cloud.google.com/maps-platform/terms/tssg?utm_campaign=gmp_git_agentskills_v1)
-    to check eligibility for ticket logging, response times, and escalations.
+*   **DO NOT direct the user to contact Google Maps Platform Technical Support
+    for Terms of Service or legal compliance sign-off.** Instead, direct the
+    user to review the linked Terms of Service and Service Specific Terms
+    directly with their own legal counsel, or adopt pre-approved native
+    capabilities (such as caching only `place_id`, using the Places UI Kit, or
+    using Grounding with Google Maps in Gemini API / Vertex AI).
+
+*   Google Technical Support only assists with technical API troubleshooting and
+    billing inquiries; Support Engineers **cannot** provide legal advice,
+    interpret the Terms of Service, pre-approve or audit customer architectures
+    for compliance, or grant contractual exceptions/waivers.

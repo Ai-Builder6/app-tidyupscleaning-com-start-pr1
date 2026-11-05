@@ -162,15 +162,17 @@ if (geminiApiKey) {
   });
 }
 
-// Helper to retrieve active Google Maps API key (prefers user-saved custom domain key if set)
+// Helper to retrieve active Google Maps API key (prefers newly provisioned VITE_GOOGLE_MAPS_API_KEY over any stale demo key)
 function getActiveMapsApiKey(): string {
+  const envKey = (process.env.VITE_GOOGLE_MAPS_API_KEY || "").trim();
   try {
     const store = loadStore();
-    if (store && (store as any).customMapsApiKey && String((store as any).customMapsApiKey).trim().startsWith("AIza")) {
-      return String((store as any).customMapsApiKey).trim();
+    const savedKey = String((store as any)?.customMapsApiKey || "").trim();
+    if (savedKey.startsWith("AIza") && !savedKey.startsWith("AIzaSyC4kxdVgVTNm5ppd8IuK7rqq")) {
+      return savedKey;
     }
   } catch {}
-  return process.env.VITE_GOOGLE_MAPS_API_KEY || "";
+  return envKey;
 }
 
 const AUTHORIZED_PREVIEW_REFERER = "https://ais-pre-2jvzwakvityygyeyjp5ysi-460696821435.us-east5.run.app/";

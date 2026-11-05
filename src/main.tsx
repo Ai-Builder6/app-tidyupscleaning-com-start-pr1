@@ -34,8 +34,7 @@ function isDedicatedCustomerBookingRoute(): boolean {
 }
 
 const StandaloneCustomerBookingPage: React.FC = () => {
-  const apiKey =
-    import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyC4kxdVgVTNm5ppd8IuK7rqq-Rz_EV31Ns';
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
   return (
     <APIProvider
       apiKey={apiKey}
@@ -125,10 +124,10 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-// Early interceptor for Google Maps JavaScript API authentication & target blocked errors, plus quota and referrer limits
+// Early interceptor for Google Maps JavaScript API authentication, billing, quota & referrer limits
 if (typeof window !== 'undefined') {
   (window as any).gm_authFailure = () => {
-    console.warn('Google Maps API Auth Notice (gm_authFailure). Enabling interactive fallback territory map.');
+    (window as any).__GOOGLE_MAPS_AUTH_FAILED__ = true;
     window.dispatchEvent(new CustomEvent('google-maps-auth-failure'));
   };
 
@@ -151,17 +150,19 @@ if (typeof window !== 'undefined') {
       msg.includes('RefererNotAllowedMapError') ||
       msg.includes('ApiTargetBlockedMapError') ||
       msg.includes('ApiProjectMapError') ||
-      msg.includes('InvalidKeyMapError')
+      msg.includes('InvalidKeyMapError') ||
+      msg.includes('BillingNotEnabledMapError') ||
+      msg.includes('OverQuotaMapError') ||
+      msg.includes('QuotaExceededError') ||
+      msg.includes('API_KEY_HTTP_REFERRER_BLOCKED') ||
+      msg.includes('requests-from-referer')
     ) {
+      (window as any).__GOOGLE_MAPS_AUTH_FAILED__ = true;
       window.dispatchEvent(new CustomEvent('google-maps-auth-failure'));
       return;
     }
 
     if (
-      msg.includes('OverQuotaMapError') ||
-      msg.includes('QuotaExceededError') ||
-      msg.includes('API_KEY_HTTP_REFERRER_BLOCKED') ||
-      msg.includes('requests-from-referer') ||
       msg.includes('auth/unauthorized-domain') ||
       msg.includes('type.googleapis.com/google.rpc.ErrorInfo') ||
       msg.includes('ErrorInfo')

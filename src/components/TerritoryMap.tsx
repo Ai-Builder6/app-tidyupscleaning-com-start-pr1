@@ -873,7 +873,38 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     }
   }, [selectedScheduledJobId, scheduledJobs]);
 
-  const isMapFallbackActive = isMapsAuthError || localMapError;
+  const [preferCleanHdMap, setPreferCleanHdMap] = useState<boolean>(false);
+  const isMapFallbackActive = isMapsAuthError || localMapError || preferCleanHdMap;
+  const mapHostRef = useRef<HTMLDivElement>(null);
+
+  // Automatically detect if Google Maps injects "For development purposes only" or "This page can't load Google Maps correctly"
+  // (e.g., before HTTP referrers or billing finish propagating on a custom domain) and switch to the watermark-free HD Edmonton Map
+  useEffect(() => {
+    if (isMapFallbackActive || typeof window === 'undefined') return;
+    const checkWatermark = () => {
+      const rootEl = mapHostRef.current || document.body;
+      if (!rootEl) return;
+      const dismissBtn = rootEl.querySelector('.dismissButton');
+      const text = rootEl.innerText || '';
+      if (
+        dismissBtn ||
+        text.includes('For development purposes only') ||
+        text.includes("This page can't load Google Maps correctly")
+      ) {
+        setLocalMapError(true);
+      }
+    };
+    const timer = setInterval(checkWatermark, 900);
+    let observer: MutationObserver | null = null;
+    if (mapHostRef.current && typeof MutationObserver !== 'undefined') {
+      observer = new MutationObserver(checkWatermark);
+      observer.observe(mapHostRef.current, { childList: true, subtree: true });
+    }
+    return () => {
+      clearInterval(timer);
+      if (observer) observer.disconnect();
+    };
+  }, [isMapFallbackActive]);
 
   // Fallback vector map pan/zoom state
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -1359,6 +1390,29 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               >
                 <Layers className={`w-3.5 h-3.5 ${mapType === 'hybrid' ? 'text-emerald-600' : mapType === 'terrain' ? 'text-purple-600' : 'text-slate-600'}`} aria-hidden="true" />
                 <span className="hidden sm:inline capitalize">{mapType === 'roadmap' ? 'Streets' : mapType}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (isMapFallbackActive) {
+                    setPreferCleanHdMap(false);
+                    setLocalMapError(false);
+                  } else {
+                    setPreferCleanHdMap(true);
+                  }
+                }}
+                className={`min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer border ${
+                  isMapFallbackActive
+                    ? 'bg-teal-600 text-white border-teal-700 shadow-2xs'
+                    : 'bg-teal-50 text-teal-900 border-teal-200 hover:bg-teal-100'
+                }`}
+                title="Switch between Clean HD Edmonton Street/Satellite Map (Zero Watermarks) and Google Map"
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {isMapFallbackActive ? 'Clean HD Map ✓' : 'Use Clean HD Map'}
+                </span>
               </button>
 
               {/* Toggle Date & Pin Toolbar independently */}
@@ -2357,7 +2411,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
       </div>
 
       {/* Map Rendering Container */}
-      <div className="w-full h-full relative overflow-hidden">
+      <div ref={mapHostRef} className="w-full h-full relative overflow-hidden">
         {!isMapFallbackActive ? (
           /* Official Google Maps Platform SDK Canvas */
           <MapErrorBoundary
