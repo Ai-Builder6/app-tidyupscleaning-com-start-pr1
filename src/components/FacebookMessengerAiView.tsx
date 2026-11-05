@@ -31,8 +31,10 @@ import {
   MicOff,
   Search,
   X,
+  FileJson,
 } from 'lucide-react';
 import { AddressAutocompleteInput } from './AddressAutocompleteInput';
+import { MetaLeadFormBuilderModal } from './MetaLeadFormBuilderModal';
 
 export interface FbPageConfig {
   id: string;
@@ -238,6 +240,7 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
   }, [loadMessengerState, projectId]);
 
   const activeThread = threads.find((t) => t.id === selectedThreadId) || threads[0] || null;
+  const [showMetaLeadFormModal, setShowMetaLeadFormModal] = useState(false);
 
   const filteredThreads = threads.filter((t) => {
     const q = searchQuery.trim().toLowerCase();
@@ -802,6 +805,16 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
               <span>FB Leads Sheet</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setShowMetaLeadFormModal(true)}
+            className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md cursor-pointer"
+            title="Open Meta Ads Lead Form API JSON & Copy-Paste Kit"
+          >
+            <FileJson className="w-3.5 h-3.5" />
+            <span>Meta Lead Form JSON</span>
+          </button>
 
           {/* Small, subtle popup links for Tweak AI Bot & Page Setup */}
           <button
@@ -2025,6 +2038,11 @@ export const FacebookMessengerAiView: React.FC<FacebookMessengerAiViewProps> = (
           </div>
         </div>
       )}
+
+      <MetaLeadFormBuilderModal
+        isOpen={showMetaLeadFormModal}
+        onClose={() => setShowMetaLeadFormModal(false)}
+      />
     </div>
   );
 };

@@ -30,11 +30,13 @@ import {
   CloudUpload,
   Globe,
   AlertTriangle,
+  FileJson,
 } from 'lucide-react';
 import { AdLeadItem, LeadStatus, LeadVerdict, CleanSheetTabName, CLEAN_SHEET_TABS } from '../types/lead';
 import { JobberQuote, extractJobberNumericId } from '../services/jobberSyncModules';
 import { buildCanonicalQuoteBreakdown } from '../data/serviceCatalogData';
 import { QuoteDetailModal } from './QuoteDetailModal';
+import { MetaLeadFormBuilderModal } from './MetaLeadFormBuilderModal';
 import {
   LEADS_SPREADSHEET_ID,
   SECONDARY_LEADS_SPREADSHEET_ID,
@@ -463,6 +465,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     () => parseRawPasteIntoLeads(pasteText, targetSheetTab),
     [pasteText, targetSheetTab]
   );
+  const [showMetaLeadFormModal, setShowMetaLeadFormModal] = useState(false);
 
   const tabCounts = useMemo(() => {
     const counts: Record<CleanSheetTab, number> = {
@@ -1026,6 +1029,16 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               <span>Jobber Credentials &amp; Secrets ({jobberAuthStatus.isConnected ? 'Approved ✓' : 'Check Status'})</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setShowMetaLeadFormModal(true)}
+            className="px-3.5 py-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+            title="Copy & Paste Meta Ads Instant Lead Form API JSON or Ads Manager Fields"
+          >
+            <FileJson className="w-3.5 h-3.5" />
+            <span>Meta Lead Form JSON</span>
+          </button>
 
           <button
             type="button"
@@ -2640,6 +2653,12 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             onQuotesUpdated(quotes.map((item) => (item.id === updated.id ? updated : item)));
           }
         }}
+      />
+
+      {/* Meta Ads Instant Lead Form JSON & Copy-Paste Studio */}
+      <MetaLeadFormBuilderModal
+        isOpen={showMetaLeadFormModal}
+        onClose={() => setShowMetaLeadFormModal(false)}
       />
     </div>
   );
