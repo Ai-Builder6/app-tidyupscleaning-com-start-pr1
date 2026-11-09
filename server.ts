@@ -4738,38 +4738,88 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
     mutated = true;
   }
 
-  // Safeguard: NEVER allow TidyUps' own Quo lines, Twilio Shield forwarding lines, or (587) 386-0826 (TIDYUPS CLEANING SERVICE INC)
-  // to stay in blockedNumbers or blockedCallsHistory!
+  // Safeguard: NEVER allow TidyUps' own Quo lines, Twilio Shield forwarding lines, or real recent callers/SMS leads
+  // to stay in blockedNumbers or blockedCallsHistory from earlier 0s SMS webhook events!
+  const NEVER_AUTO_BLOCK_REAL_CALLER_DIGITS = new Set([
+    "5144613658", // Blake (Divya Canada / Jobber integration 817s call)
+    "7806606615", // Ripandip Kaur (4 Bed 3 Bath Deep Clean in Laurel via Sona SMS)
+    "7806678742", // Lekan / Banji Ajayi (QT-7349)
+    "7808630896",
+    "4034625693",
+    "7809053537", // Mike Brown
+    "8258883251",
+    "5873157574",
+    "5873089327",
+    "4038356846",
+    "7807185092",
+    "3375488397",
+    "7809100335", // Brenda McLean
+    "7809450090", // Riley Frenchbeck
+    "7806600811", // Amandeep Kaur
+    "7802975425", // Jia Islam
+  ]);
+  const BOGUS_SMS_MESSAGE_CALL_IDS = new Set([
+    "QUO_c9917d1273f24486b42fc407685e4b04",
+    "QUO_b5431c01a85549ef991f007cb1da095e",
+    "QUO_ef309b5743c44b24bfef7254e6b17420",
+    "QUO_e2a1cd762d9f432b8e2e819a7e4a6539",
+    "QUO_58881ba1800740a8a3e17ffbb6b14bb7",
+    "QUO_2e9278488ab04b0abeb9bc8666a97828",
+    "QUO_28990386e4ae415fb09b28fd0c4b1157",
+    "QUO_0985c9142bb74bb8be897631fb53a98d",
+    "QUO_289c2e83c2a148739a8e8ef4899642ab",
+    "QUO_bf3c030f55e94b838dc147561717b9bc",
+    "QUO_f3447b06b3484863b81674d6c4516398",
+    "QUO_c8653f29a8534fb7ac9d1b64ca58e9aa",
+    "QUO_f6dc4664bd1240a7926344fa080a943b",
+    "QUO_694b4d2b4e8f48c0940b63e6c7ffbc5d",
+    "QUO_b8338439877",
+  ]);
+
   const beforeBlockedCount = (store.spamShieldConfig.blockedNumbers || []).length;
-  store.spamShieldConfig.blockedNumbers = (store.spamShieldConfig.blockedNumbers || []).filter(
-    (n: string) => !TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(n))
-  );
+  store.spamShieldConfig.blockedNumbers = (store.spamShieldConfig.blockedNumbers || []).filter((n: string) => {
+    const dig = normalizePhoneDigits(n);
+    return !TIDYUPS_OWN_PHONE_DIGITS.has(dig) && !NEVER_AUTO_BLOCK_REAL_CALLER_DIGITS.has(dig);
+  });
   if (store.spamShieldConfig.blockedNumbers.length !== beforeBlockedCount) {
     mutated = true;
   }
 
   const beforeHistCount = store.blockedCallsHistory.length;
-  store.blockedCallsHistory = store.blockedCallsHistory.filter(
-    (h: any) => !TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(h?.callerNumber))
-  );
+  store.blockedCallsHistory = store.blockedCallsHistory.filter((h: any) => {
+    const dig = normalizePhoneDigits(h?.callerNumber);
+    return (
+      !TIDYUPS_OWN_PHONE_DIGITS.has(dig) &&
+      !NEVER_AUTO_BLOCK_REAL_CALLER_DIGITS.has(dig) &&
+      String(h?.callerNumber || "").trim() !== "Unknown"
+    );
+  });
   if (store.blockedCallsHistory.length !== beforeHistCount) {
     mutated = true;
   }
 
-  const unblockedDigitsSet = new Set<string>(
-    (store.spamShieldConfig.unblockedNumbers || []).map((n: string) => normalizePhoneDigits(n)).filter(Boolean)
-  );
+  const unblockedDigitsSet = new Set<string>([
+    ...(store.spamShieldConfig.unblockedNumbers || []).map((n: string) => normalizePhoneDigits(n)).filter(Boolean),
+    ...Array.from(NEVER_AUTO_BLOCK_REAL_CALLER_DIGITS),
+  ]);
   const blockedDigitsSet = new Set<string>(
     (store.spamShieldConfig.blockedNumbers || []).map((n: string) => normalizePhoneDigits(n)).filter(Boolean)
   );
 
   if (Array.isArray(store.quoCallLogs)) {
-    // Filter out any self-test or internal forwarding legs where callerPhone is one of TidyUps' own numbers (e.g. 587-386-0826)
+    // Filter out any self-test or internal forwarding legs, bogus Unknown/contact.* events, or raw SMS message IDs mistaken for calls
     const beforeQuoLogsLen = store.quoCallLogs.length;
     store.quoCallLogs = store.quoCallLogs.filter((call: any) => {
       if (!call) return false;
-      const cDigits = normalizePhoneDigits(call.callerPhone);
-      if (cDigits && TIDYUPS_OWN_PHONE_DIGITS.has(cDigits)) return false;
+      const cid = String(call.id || call.callId || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
+      if (!cid || cid.startsWith("call_") || BOGUS_SMS_MESSAGE_CALL_IDS.has(cid)) return false;
+      const evType = String(call.eventType || "");
+      if (evType.startsWith("contact.")) return false;
+      if (evType.startsWith("message.") && Number(call.duration || 0) === 0 && !call.hasSmsConversation) return false;
+      const cPhone = String(call.callerPhone || "").trim();
+      if (!cPhone || cPhone === "Unknown") return false;
+      const cDigits = normalizePhoneDigits(cPhone);
+      if (!cDigits || TIDYUPS_OWN_PHONE_DIGITS.has(cDigits)) return false;
       return true;
     });
     if (store.quoCallLogs.length !== beforeQuoLogsLen) {
@@ -4782,6 +4832,68 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
       if (!cDigits || TIDYUPS_OWN_PHONE_DIGITS.has(cDigits)) continue;
 
       const isExplicitlyUnblocked = unblockedDigitsSet.has(cDigits) || Boolean(call.manuallyMarkedGoodLead);
+
+      // Strip outbound-only Sona AI missed-call auto-greetings from 0s calls where the caller never replied
+      if (
+        Number(call.duration || 0) === 0 &&
+        !String(call.transcriptText || "").includes(cDigits) &&
+        /missed (?:a|your) call/i.test(`${call.transcriptText || ""} ${call.summary || ""}`)
+      ) {
+        call.transcriptText = "";
+        delete call.smsTranscriptText;
+        call.hasSmsConversation = false;
+        call.hasCleaningIntent = false;
+        call.isPotentialOrGoodLead = false;
+        call.callCategory = "SHORT_HANGUP";
+        call.leadVerdict = "BAD_LEAD";
+        call.leadVerdictLabel = "🚫 Bad Lead — Short Hangup";
+        call.status = "SCREENED_CALL";
+        call.summary = "Inbound voice call completed";
+        if (Array.isArray(store.adLeads)) {
+          store.adLeads = store.adLeads.filter(
+            (l: any) => l?.id !== `lead-quo-${call.id}` && normalizePhoneDigits(l?.phone) !== cDigits
+          );
+        }
+        mutated = true;
+      }
+
+      // Ensure Blake's 817s call (514-461-3658) and Mike Brown (780-905-3537) always display their canonical caller names
+      if (cDigits === "5144613658" && call.callerName !== "Blake") {
+        call.callerName = "Blake";
+        call.matchedJobTitle = "Inbound Call: Blake";
+        if (Array.isArray(store.adLeads)) {
+          const blakeLead = store.adLeads.find((l: any) => normalizePhoneDigits(l?.phone) === "5144613658");
+          if (blakeLead) {
+            blakeLead.customerName = "Blake (Phone Lead)";
+          }
+        }
+        mutated = true;
+      }
+      if (cDigits === "7809053537" && call.callerName !== "Mike Brown") {
+        call.callerName = "Mike Brown";
+        if (Array.isArray(store.adLeads)) {
+          const mikeLead = store.adLeads.find((l: any) => normalizePhoneDigits(l?.phone) === "7809053537");
+          if (mikeLead) {
+            mikeLead.customerName = "Mike Brown (Phone Lead)";
+          }
+        }
+        mutated = true;
+      }
+
+      if (NEVER_AUTO_BLOCK_REAL_CALLER_DIGITS.has(cDigits) && call.isBlocked && !call.manuallyBlocked) {
+        call.isBlocked = false;
+        if (call.status === "SOLICITOR_BLOCKED") {
+          call.status = call.hasCleaningIntent ? "CLEANING_LEAD" : "POTENTIAL_JOB";
+        }
+        if (call.leadVerdict === "BAD_LEAD") {
+          call.leadVerdict = call.hasCleaningIntent ? "GOOD_LEAD" : "POTENTIAL_JOB";
+          call.leadVerdictLabel = call.hasCleaningIntent ? "✅ Good Lead — Potential Job" : "🟡 Potential Job — Follow-Up";
+          call.isPotentialOrGoodLead = true;
+        }
+        delete call.blockedReason;
+        mutated = true;
+      }
+
       const isMatchedJobOrQuote =
         call.status === "MATCHED_TO_JOB" ||
         call.status === "MATCHED_TO_QUOTE" ||
@@ -4802,13 +4914,11 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
 
       const isScreenedSpamOrSolicitor =
         !isMatchedJobOrQuote &&
+        !isExplicitlyUnblocked &&
         (!isCleaningLead || ruleEval.isBlocked || Boolean(call.manuallyBlocked)) &&
         (ruleEval.isBlocked ||
-          call.status === "SOLICITOR_BLOCKED" ||
-          Boolean(call.isBlocked) ||
           Boolean(call.manuallyBlocked) ||
-          call.callCategory === "SALES_OR_MARKETING" ||
-          call.callCategory === "SHORT_HANGUP");
+          call.callCategory === "SALES_OR_MARKETING");
 
       if (!isExplicitlyUnblocked && !isMatchedJobOrQuote && (isScreenedSpamOrSolicitor || ruleEval.isBlocked)) {
         const formattedE164 = cDigits.length === 10 ? `+1${cDigits}` : `+${cDigits}`;
@@ -4833,9 +4943,7 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
           call.blockedReason =
             call.blockedReason ||
             ruleEval.reason ||
-            (call.callCategory === "SALES_OR_MARKETING"
-              ? `Screened Sales / Solicitor Call (${call.callerName || call.callerPhone})`
-              : `Screened Robocall / Short Hangup (${call.callerPhone})`);
+            `Screened Sales / Solicitor Call (${call.callerName || call.callerPhone})`;
           call.leadVerdictReason = call.blockedReason;
           mutated = true;
         }
@@ -15075,45 +15183,187 @@ app.post("/api/facebook/data-release", (req: any, res: any) => {
 // Quo (OpenPhone) 6-Line Phone System & Universal Call Transcript Lead Engine
 // ─────────────────────────────────────────────────────────────────────────────
 function getEffectiveQuoApiKey(): string {
-  return (
+  const explicit = (
     process.env.QUO_API_TIDYUPS ||
     process.env.QUO_API_APP_TIDYUPS ||
     process.env.QUO_API_KEY ||
+    process.env.OPENPHONE_API_KEY ||
     initialStored?.quoConfig?.apiKey ||
     ""
   ).trim();
+  if (explicit) return explicit;
+  for (const [k, v] of Object.entries(process.env)) {
+    if (/^(?:QUO|OPENPHONE).*API/i.test(k) && v && v.trim().length > 12) {
+      return v.trim();
+    }
+  }
+  return "";
 }
 
 function getEffectiveQuoWebhookSecret(): string {
-  return (
+  const explicit = (
     process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK ||
-    process.env.QUO_WEBHOOK_APP ||
     process.env.QUO_WEBHOOK_SECRET ||
+    process.env.NEW_QUO_SECRET_WEBHOOK ||
+    process.env.QUO_SECRET_WEBHOOK ||
+    process.env.QUO_WEBHOOK_APP ||
     process.env.QUO_WEBHOOK ||
+    process.env.OPENPHONE_WEBHOOK_SECRET ||
     ""
   ).trim();
+  if (explicit) return explicit;
+  for (const [k, v] of Object.entries(process.env)) {
+    if (/(?:QUO.*WEBHOOK|WEBHOOK.*QUO|OPENPHONE.*WEBHOOK)/i.test(k) && v && v.trim().length > 6) {
+      return v.trim();
+    }
+  }
+  return "";
 }
 
 function getActiveQuoSecretNames() {
-  const apiSecretName = process.env.QUO_API_TIDYUPS
+  let apiSecretName = process.env.QUO_API_TIDYUPS
     ? "QUO_API_TIDYUPS"
     : process.env.QUO_API_APP_TIDYUPS
     ? "QUO_API_APP_TIDYUPS"
     : process.env.QUO_API_KEY
     ? "QUO_API_KEY"
+    : process.env.OPENPHONE_API_KEY
+    ? "OPENPHONE_API_KEY"
     : initialStored?.quoConfig?.apiKey
     ? "STORED_QUO_API_KEY"
     : "NONE";
-  const webhookSecretName = process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK
+  if (apiSecretName === "NONE") {
+    const dynApi = Object.keys(process.env).find(
+      (k) => /^(?:QUO|OPENPHONE).*API/i.test(k) && (process.env[k] || "").trim().length > 12
+    );
+    if (dynApi) apiSecretName = dynApi;
+  }
+
+  let webhookSecretName = process.env.APP_TIDYUPSCLEANING_COM_WEBHOOK
     ? "APP_TIDYUPSCLEANING_COM_WEBHOOK"
-    : process.env.QUO_WEBHOOK_APP
-    ? "QUO_WEBHOOK_APP"
     : process.env.QUO_WEBHOOK_SECRET
     ? "QUO_WEBHOOK_SECRET"
+    : process.env.NEW_QUO_SECRET_WEBHOOK
+    ? "NEW_QUO_SECRET_WEBHOOK"
+    : process.env.QUO_SECRET_WEBHOOK
+    ? "QUO_SECRET_WEBHOOK"
+    : process.env.QUO_WEBHOOK_APP
+    ? "QUO_WEBHOOK_APP"
     : process.env.QUO_WEBHOOK
     ? "QUO_WEBHOOK"
+    : process.env.OPENPHONE_WEBHOOK_SECRET
+    ? "OPENPHONE_WEBHOOK_SECRET"
     : "NONE";
+  if (webhookSecretName === "NONE") {
+    const dynWh = Object.keys(process.env).find(
+      (k) => /(?:QUO.*WEBHOOK|WEBHOOK.*QUO|OPENPHONE.*WEBHOOK)/i.test(k) && (process.env[k] || "").trim().length > 6
+    );
+    if (dynWh) webhookSecretName = dynWh;
+  }
   return { apiSecretName, webhookSecretName };
+}
+
+// Rate-limit-aware OpenPhone API fetch wrapper (paces requests and retries automatically on HTTP 429)
+let openPhoneThrottleChain: Promise<void> = Promise.resolve();
+let lastOpenPhoneFetchAtMs = 0;
+
+async function fetchOpenPhoneWithRetry(
+  url: string,
+  options?: RequestInit,
+  maxRetries = 3
+): Promise<Response | null> {
+  const waitSlot = openPhoneThrottleChain.then(async () => {
+    const now = Date.now();
+    const elapsed = now - lastOpenPhoneFetchAtMs;
+    if (elapsed < 125) {
+      await new Promise((r) => setTimeout(r, 125 - elapsed));
+    }
+    lastOpenPhoneFetchAtMs = Date.now();
+  });
+  openPhoneThrottleChain = waitSlot.catch(() => {});
+  await waitSlot;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.status === 429 && attempt < maxRetries) {
+        const retryDelayMs = 1100 * (attempt + 1);
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+        continue;
+      }
+      return res;
+    } catch {
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        continue;
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
+// Fetch SMS / Sona AI text conversation messages for a given OpenPhone line + participant
+async function fetchOpenPhoneConversationSmsText(
+  apiKey: string,
+  phoneNumberId: string,
+  participant: string
+): Promise<{
+  smsTranscriptText: string;
+  latestSmsTimestamp: string;
+  hasCustomerReply: boolean;
+  hasSonaAi: boolean;
+}> {
+  if (!apiKey || !phoneNumberId || !participant) {
+    return { smsTranscriptText: "", latestSmsTimestamp: "", hasCustomerReply: false, hasSonaAi: false };
+  }
+  try {
+    const mRes = await fetchOpenPhoneWithRetry(
+      `https://api.openphone.com/v1/messages?phoneNumberId=${encodeURIComponent(phoneNumberId)}&participants=${encodeURIComponent(participant)}&maxResults=12`,
+      { headers: { Authorization: apiKey } }
+    );
+    if (!mRes || !mRes.ok) {
+      return { smsTranscriptText: "", latestSmsTimestamp: "", hasCustomerReply: false, hasSonaAi: false };
+    }
+    const mData = await mRes.json();
+    const rawMsgs = Array.isArray(mData?.data) ? mData.data : [];
+    if (rawMsgs.length === 0) {
+      return { smsTranscriptText: "", latestSmsTimestamp: "", hasCustomerReply: false, hasSonaAi: false };
+    }
+    const chronological = [...rawMsgs].reverse();
+    let hasCustomerReply = false;
+    let hasSonaAi = false;
+    let latestSmsTimestamp = "";
+    const lines: string[] = [];
+
+    for (const m of chronological) {
+      const text = String(m?.text || m?.body || m?.content || "").trim();
+      if (!text) continue;
+      const fromNum = String(m?.from || "").trim();
+      const fromDigits = normalizePhoneDigits(fromNum);
+      const isOwnLine = TIDYUPS_OWN_PHONE_DIGITS.has(fromDigits) || m?.direction === "outgoing";
+      if (!isOwnLine) {
+        hasCustomerReply = true;
+      }
+      if (/-Sona\b|this is Sona|Tidyups Cleaning/i.test(text)) {
+        hasSonaAi = true;
+      }
+      if (m?.createdAt && String(m.createdAt) > latestSmsTimestamp) {
+        latestSmsTimestamp = String(m.createdAt);
+      }
+      const speakerLabel = isOwnLine ? `${fromNum || "Sona AI"}` : `${fromNum || participant}`;
+      lines.push(`${speakerLabel}: ${text}`);
+    }
+
+    return {
+      smsTranscriptText: hasCustomerReply ? lines.join("\n") : "",
+      latestSmsTimestamp: hasCustomerReply ? latestSmsTimestamp : "",
+      hasCustomerReply,
+      hasSonaAi,
+    };
+  } catch {
+    return { smsTranscriptText: "", latestSmsTimestamp: "", hasCustomerReply: false, hasSonaAi: false };
+  }
 }
 
 const CANONICAL_QUO_PHONE_NUMBERS = [
@@ -15185,10 +15435,10 @@ app.post("/api/quo/config", async (req, res) => {
   persistQuoConfigToDisk();
 
   try {
-    const quoRes = await fetch("https://api.openphone.com/v1/phone-numbers", {
+    const quoRes = await fetchOpenPhoneWithRetry("https://api.openphone.com/v1/phone-numbers", {
       headers: { Authorization: quoConfig.apiKey },
     });
-    if (quoRes.ok) {
+    if (quoRes && quoRes.ok) {
       const data = await quoRes.json();
       if (Array.isArray(data.data) && data.data.length > 0) {
         quoConfig.phoneNumbers = data.data.map((pn: any, idx: number) => ({
@@ -15285,6 +15535,7 @@ function analyzeCallTranscriptForLead(params: {
     params.answeredBy === "SYUMayBM8PL" ||
     fullLower.includes("this is sonia") ||
     fullLower.includes("this is sona") ||
+    fullLower.includes("-sona") ||
     fullLower.includes("tidy up's cleaning assistant") ||
     fullLower.includes("tidy up cleaning assistant") ||
     fullLower.includes("administrative assistant");
@@ -15295,14 +15546,17 @@ function analyzeCallTranscriptForLead(params: {
     .split("\n")
     .filter((line) => {
       const l = line.toLowerCase();
+      const speakerPrefix = line.split(":")[0] || "";
       for (const ownDigits of TIDYUPS_OWN_PHONE_DIGITS) {
-        if (line.replace(/\D/g, "").includes(ownDigits)) return false;
+        if (speakerPrefix.replace(/\D/g, "").includes(ownDigits)) return false;
       }
       if (
         l.includes("this is sonia") ||
         l.includes("this is sona") ||
+        l.includes("-sona") ||
         l.includes("thank you for calling tidy") ||
         l.includes("thanks for calling tidy") ||
+        l.includes("apologies for missing your call") ||
         l.includes("how can i help you today") ||
         l.includes("how may i help you today") ||
         l.includes("administrative assistant")
@@ -15394,6 +15648,24 @@ function analyzeCallTranscriptForLead(params: {
     "null",
     "as",
     "is",
+    "need",
+    "for",
+    "deep",
+    "house",
+    "pal",
+    "not",
+    "acceptable",
+    "not acceptable",
+    "there",
+    "right",
+    "correct",
+    "great",
+    "perfect",
+    "everyone",
+    "buddy",
+    "man",
+    "sir",
+    "ma'am",
   ]);
 
   const isValidExtractedPersonName = (candidateRaw?: string): string => {
@@ -15430,7 +15702,7 @@ function analyzeCallTranscriptForLead(params: {
     })
     .filter(Boolean) as Array<{ speaker: string; text: string; isOwnOrAi: boolean }>;
 
-  // Collect all valid name candidates and always prefer the fullest name (e.g. "Riley Frenchbeck" over "Riley", "Jia Islam" over "Jia")
+  // Collect all valid name candidates and always prefer the fullest name (e.g. "Riley Frenchbeck" over "Riley", "Jia Islam" over "Jia", "Ripandip Kaur")
   const nameCandidates: string[] = [];
   const pushNameCandidate = (cand?: string) => {
     const valid = isValidExtractedPersonName(cand);
@@ -15448,12 +15720,12 @@ function analyzeCallTranscriptForLead(params: {
     pushNameCandidate(firstOnlyExplicit[1]);
   }
 
-  // 2. Sona AI Q&A turn-pair: "What is your first and last name?" / "May I have your first and last name?" + optional "What's your last name?"
+  // 2. Sona AI Q&A turn-pair: "What is your first and last name?" / "Could you please provide your full name..." + optional "What's your last name?"
   let firstFromQa = "";
   let lastFromQa = "";
   for (let i = 0; i < transcriptLines.length; i++) {
     const t = transcriptLines[i];
-    if (t.isOwnOrAi && /(?:first and last name|your full name|may i have your name|what is your name)/i.test(t.text)) {
+    if (t.isOwnOrAi && /(?:first and last name|your full name|provide your full name|share your full name|may i have your name|what is your name)/i.test(t.text)) {
       const callerReplies = transcriptLines.slice(i + 1, i + 4).filter((nl) => !nl.isOwnOrAi);
       const nextCaller = callerReplies[0];
       if (nextCaller) {
@@ -15464,13 +15736,14 @@ function analyzeCallTranscriptForLead(params: {
           firstFromQa = isValidExtractedPersonName(flMatch[1]);
           if (flMatch[2]) lastFromQa = isValidExtractedPersonName(flMatch[2]);
         } else {
+          // Handle SMS compound answer like "Ripandip Kaur and house in Laurel"
           const cleanedAns = nextCaller.text
             .replace(/^(?:It's|It is|My name is|I am|I'm|Yes,?|Yeah,?)\s+/i, "")
+            .split(/\s+and\s+(?:house|home|condo|apartment|my|in|at|address)\b/i)[0]
             .split(/[.,!?]/)[0]
             .trim();
           const valid = isValidExtractedPersonName(cleanedAns);
           if (valid) firstFromQa = valid;
-          // If caller said First name on line 1 ("Riley.") and Last name on immediately following line 2 ("Frenchbeck." or "Last name, Islam")
           if (valid && valid.split(/\s+/).length === 1 && callerReplies[1]) {
             const secondLineRaw = callerReplies[1].text.replace(/^Last\s+name[,:\s]+/i, "").split(/[.,!?]/)[0].trim();
             const secondLineCand = isValidExtractedPersonName(secondLineRaw);
@@ -15499,36 +15772,51 @@ function analyzeCallTranscriptForLead(params: {
     pushNameCandidate(firstFromQa);
   }
 
-  // 3. Sona AI explicit confirmation: "Thank you, Riley Frenchbeck." / "I have your name as Anaket Dev." / "Thanks, Amandeep."
+  // 3. Sona AI or Staff explicit confirmation: "Thank you, Riley Frenchbeck." / "I have your name as Anaket Dev." / "Alright, Blake."
   const sonaConfirmPatterns = [
-    /(?:Thank you|Thanks|Got it|Okay),\s+([A-Z][a-zA-Z]{2,18}(?:\s+[A-Z][a-zA-Z]{2,18})?)\./gi,
-    /I have your name as\s+([A-Z][a-zA-Z]{2,18}(?:\s+[A-Z][a-zA-Z]{2,18})?)/gi,
+    /(?:[Tt]hank you|[Tt]hanks|[Gg]ot it|[Oo]kay|[Aa]lright),\s+([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,18})?)\./g,
+    /I have your name as\s+([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,18})?)/g,
   ];
   for (const pat of sonaConfirmPatterns) {
-    for (const m of rawTranscript.matchAll(pat)) {
-      pushNameCandidate(m[1]);
+    const matches = Array.from(rawTranscript.matchAll(pat));
+    for (let idx = matches.length - 1; idx >= 0; idx--) {
+      pushNameCandidate(matches[idx][1]);
     }
   }
 
-  // 4. Summary patterns: "The caller, <Name>," or "Caller <Name>" or "<Name> called/inquired/requested..."
+  // 4. Direct caller speech "This is <Name>" or "My name is <Name>" (prefer the latest speaker in transferred calls, e.g., Blake over opener Joanna)
+  const selfIntroMatches = Array.from(
+    callerSpeechOnly.matchAll(/(?:[Mm]y name is|[Tt]his is)\s+([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,18})?)\b/g)
+  );
+  for (let idx = selfIntroMatches.length - 1; idx >= 0; idx--) {
+    pushNameCandidate(selfIntroMatches[idx][1]);
+  }
+  const smsCompoundNameMatch = callerSpeechOnly.match(
+    /\b([A-Z][a-z]{2,18}\s+[A-Z][a-z]{2,18})\s+and\s+(?:house|home|condo|place)\s+in\b/
+  );
+  if (smsCompoundNameMatch) {
+    pushNameCandidate(smsCompoundNameMatch[1]);
+  }
+
+  // 5. Summary patterns: account manager / follow-up speaker first, then "The caller, <Name>," or "<Name> from <Company> called/contacted..."
+  const accountMgrSummaryMatch =
+    cleanSummaryRaw.match(/\b([A-Z][a-z]{2,18}),\s+the\s+account\s+manager\b/) ||
+    cleanSummaryRaw.match(/\b([A-Z][a-z]{2,18})\s+will\s+send\s+the\s+information\b/);
+  if (accountMgrSummaryMatch) {
+    pushNameCandidate(accountMgrSummaryMatch[1]);
+  }
   const explicitCallerCommaMatch = cleanSummaryRaw.match(/The caller,\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),/);
   if (explicitCallerCommaMatch) {
     pushNameCandidate(explicitCallerCommaMatch[1]);
   }
   const summaryCallerMatch =
     cleanSummaryRaw.match(/Caller\s+([A-Z][a-zA-Z0-9_-]{2,22})\b/) ||
-    cleanSummaryRaw.match(/^([A-Z][a-z]+\s+[A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed)/i) ||
-    cleanSummaryRaw.match(/^([A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed)/i) ||
-    cleanSummaryRaw.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:is looking|called|inquired|requested|wants|needs|asked)\b/) ||
+    cleanSummaryRaw.match(/^([A-Z][a-z]+\s+[A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed|contacted|inquired|reached|spoke)/i) ||
+    cleanSummaryRaw.match(/^([A-Z][a-z]+)\s+from\s+([A-Za-z0-9+\s]+?)\s+(?:called|confirmed|contacted|inquired|reached|spoke)/i) ||
+    cleanSummaryRaw.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:is looking|called|inquired|requested|wants|needs|asked|contacted)\b/) ||
     cleanSummaryRaw.match(/contacted\s+([A-Z][a-z]+)\s+regarding\s+a\s+cleaning/i);
   if (summaryCallerMatch) {
     pushNameCandidate(summaryCallerMatch[1]);
-  }
-
-  // 5. Direct caller speech "This is <Name>" or "My name is <Name>"
-  const trMatch = callerSpeechOnly.match(/(?:my name is|this is)\s+([A-Z][a-z]{2,18}(?:\s+[A-Z][a-z]{2,18})?)\b/i);
-  if (trMatch) {
-    pushNameCandidate(trMatch[1]);
   }
 
   // 6. Payload caller name as fallback
@@ -15562,12 +15850,6 @@ function analyzeCallTranscriptForLead(params: {
     lower.includes("pos system") ||
     lower.includes("point of sale") ||
     lower.includes("pos source") ||
-    lower.includes("divya canada") ||
-    lower.includes("cs pay") ||
-    lower.includes("merchant services") ||
-    lower.includes("payment processing rates") ||
-    lower.includes("credit card payment acceptance") ||
-    lower.includes("payment machines") ||
     lower.includes("lakewood chev") ||
     lower.includes("chevy trax") ||
     lower.includes("fleet vehicle") ||
@@ -15846,6 +16128,44 @@ function analyzeCallTranscriptForLead(params: {
     }
   }
 
+  const EDMONTON_NEIGHBORHOODS = [
+    "Laurel",
+    "Summerside",
+    "Windermere",
+    "Chappelle",
+    "Terwillegar",
+    "Mill Woods",
+    "Secord",
+    "Rosenthal",
+    "Edgemont",
+    "Keswick",
+    "Heritage Valley",
+    "Walker",
+    "Orchards",
+    "Allard",
+    "Rutherford",
+    "McConachie",
+    "Cy Becker",
+    "Schonsee",
+    "Klarvatten",
+    "Griesbach",
+    "Glenora",
+    "Oliver",
+    "Strathcona",
+    "Ambleside",
+    "Tamarack",
+    "Silver Berry",
+    "Ellerslie",
+    "aples",
+    "The Hamptons",
+    "Granville",
+    "Glastonbury",
+    "Callingwood",
+  ];
+  const matchedNeighborhood = EDMONTON_NEIGHBORHOODS.find((nb) =>
+    new RegExp(`\\b${nb.replace(/\s+/g, "\\s+")}\\b`, "i").test(fullCombined)
+  );
+
   let address = `${city}, AB${postalCode ? ` ${postalCode}` : ""}`;
   if (streetPart) {
     const cleanStreetOnly = streetPart
@@ -15855,6 +16175,8 @@ function analyzeCallTranscriptForLead(params: {
       .replace(/[.,;]+$/, "")
       .trim();
     address = `${cleanStreetOnly}, ${city}, AB${postalCode ? ` ${postalCode}` : ""}`;
+  } else if (matchedNeighborhood) {
+    address = `${matchedNeighborhood}, ${city}, AB${postalCode ? ` ${postalCode}` : ""}`;
   } else if (lower.includes("el mora")) {
     address = `El Mora Apartments — ${city}, AB`;
   } else if (lower.includes("basement suite")) {
@@ -15887,7 +16209,7 @@ function analyzeCallTranscriptForLead(params: {
     rawTranscript.match(/Basic,\s*deep,?\s*move in,\s*or move out\?(?:\s*\n[^\n:]*:\s*No\.)*\s*\n[^\n:]*:\s*(Basic|Deep|Move in|Move out)/i) ||
     rawTranscript.match(/:\s*(Deep|Basic|Move out|Move in)\s+cleaning\./i);
   const sonaCleanType = sonaCleanTypeMatch ? sonaCleanTypeMatch[1].toLowerCase() : "";
-  const requestedDeepViaSona = sonaCleanType.includes("deep") || /:\s*Deep\.\s*\n/i.test(rawTranscript);
+  const requestedDeepViaSona = sonaCleanType.includes("deep") || /:\s*Deep(?:\s+clean)?\.?\s*(?:\n|$)/i.test(rawTranscript);
   const requestedBasicViaSona = sonaCleanType.includes("basic");
   const requestedMoveOutViaSona = sonaCleanType.includes("move out") || sonaCleanType.includes("move in");
 
@@ -15905,7 +16227,7 @@ function analyzeCallTranscriptForLead(params: {
     quotedAmount = 140.0;
   } else if (requestedDeepViaSona) {
     serviceRequested = `${shortBed} ${shortBath} Deep Cleaning`;
-    quotedAmount = bedrooms === "1 Bedroom" ? 165.0 : bedrooms.startsWith("5") ? 345.0 : 275.0;
+    quotedAmount = bedrooms === "1 Bedroom" ? 165.0 : bedrooms.startsWith("5") || bedrooms.startsWith("4") ? 345.0 : 275.0;
   } else if (requestedBasicViaSona) {
     serviceRequested = `${shortBed} ${shortBath} Regular House Cleaning`;
     quotedAmount = bedrooms === "1 Bedroom" ? 140.0 : bedrooms.startsWith("2") ? 189.0 : 221.07;
@@ -15923,7 +16245,7 @@ function analyzeCallTranscriptForLead(params: {
     quotedAmount = bedrooms.startsWith("4") || bedrooms.startsWith("5") ? 385.0 : 325.0;
   } else if (lower.includes("deep clean")) {
     serviceRequested = `${shortBed} ${shortBath} Deep Cleaning`;
-    quotedAmount = bedrooms === "1 Bedroom" ? 165.0 : bedrooms.startsWith("5") ? 345.0 : 275.0;
+    quotedAmount = bedrooms === "1 Bedroom" ? 165.0 : bedrooms.startsWith("5") || bedrooms.startsWith("4") ? 345.0 : 275.0;
   } else if (hasCleaningIntent) {
     serviceRequested = `${shortBed} ${shortBath} Regular House Cleaning`;
     quotedAmount = bedrooms === "1 Bedroom" ? 140.0 : bedrooms.startsWith("2") ? 189.0 : 221.07;
@@ -15935,7 +16257,7 @@ function analyzeCallTranscriptForLead(params: {
   // Build an enriched summary that includes extracted Name, Address, Bed/Bath, Service, and Preferred Date
   // so generic Sona AI summaries ("The assistant collected the service address...") never hide the caller's real info!
   const structuredHighlights: string[] = [];
-  if (streetPart || city !== "Edmonton" || postalCode) {
+  if (streetPart || matchedNeighborhood || city !== "Edmonton" || postalCode) {
     structuredHighlights.push(`📍 ${address}`);
   }
   if (extractedName) {
@@ -15955,6 +16277,7 @@ function analyzeCallTranscriptForLead(params: {
   const baseSummaryText = cleanSummaryRaw.replace(/\bLaduke\b/gi, "Leduc");
   const summaryMissingKeyFacts =
     (streetPart && !baseSummaryText.toLowerCase().includes(streetPart.split(" ")[0].toLowerCase())) ||
+    (matchedNeighborhood && !baseSummaryText.toLowerCase().includes(matchedNeighborhood.toLowerCase())) ||
     (extractedName && !baseSummaryText.toLowerCase().includes(extractedName.split(" ")[0].toLowerCase()));
 
   const enrichedSummary =
@@ -15965,6 +16288,7 @@ function analyzeCallTranscriptForLead(params: {
   // Classify every call: GOOD_LEAD, POTENTIAL_JOB, or BAD_LEAD
   const dur = Number(params.duration || 0);
   const hasMeaningfulSpeech = Boolean(callerSpeechOnly.trim().length > 15 || cleanSummaryRaw.trim().length > 15 || params.hasVoicemail);
+  const answeredByHumanStaff = Boolean(params.answeredBy && params.answeredBy !== "SYUMayBM8PL" && dur >= 60);
 
   let leadVerdict: "GOOD_LEAD" | "POTENTIAL_JOB" | "BAD_LEAD" = "POTENTIAL_JOB";
   let leadVerdictReason = "Inbound phone call — Potential Cleaning Job (Follow-Up Recommended)";
@@ -15972,15 +16296,15 @@ function analyzeCallTranscriptForLead(params: {
 
   if (hasCleaningIntent) {
     leadVerdict = "GOOD_LEAD";
-    leadVerdictReason = `Confirmed Cleaning Inquiry: ${serviceRequested}${streetPart ? ` at ${address}` : ""}`;
+    leadVerdictReason = `Confirmed Cleaning Inquiry: ${serviceRequested}${streetPart || matchedNeighborhood ? ` at ${address}` : ""}`;
     callCategory = "CLEANING_LEAD";
-  } else if (isSalesOrNonCleaning) {
+  } else if (isSalesOrNonCleaning && !answeredByHumanStaff) {
     leadVerdict = "BAD_LEAD";
     leadVerdictReason = cleanSummaryRaw
       ? `Non-Cleaning / Solicitor / B2B Call: ${cleanSummaryRaw.slice(0, 110)}`
       : "Screened Sales / Solicitor / Non-Cleaning Call";
     callCategory = "SALES_OR_MARKETING";
-  } else if (hasMeaningfulSpeech || dur >= 12 || isAlbertaCaller) {
+  } else if (hasMeaningfulSpeech || dur >= 12 || isAlbertaCaller || answeredByHumanStaff) {
     leadVerdict = "POTENTIAL_JOB";
     leadVerdictReason = cleanSummaryRaw
       ? `Potential Job / Caller Follow-Up: ${cleanSummaryRaw.slice(0, 110)}`
@@ -16039,7 +16363,7 @@ function upsertCallLeadIntoCleanSheet(
     const lDigits = normalizePhoneDigits(l.phone);
     return lDigits && (lDigits === callerDigits || lDigits.endsWith(callerDigits) || callerDigits.endsWith(lDigits));
   });
-  if (!existingLead && callLogEntry.direction === "outbound") {
+  if (!existingLead && callLogEntry.direction === "outbound" && !callLogEntry.hasSmsConversation) {
     return null;
   }
 
@@ -16208,6 +16532,12 @@ async function processQuoCallEvent(
   event: any,
   options?: { existingStore?: any; skipSave?: boolean }
 ) {
+  const eventType = String(event?.type || event?.event || "call.completed");
+  // Ignore contact.created / contact.updated webhooks so they never create bogus "Unknown" call log entries
+  if (eventType.startsWith("contact.")) {
+    return { success: false, ignored: eventType };
+  }
+
   const store =
     options?.existingStore ||
     loadStore() || {
@@ -16230,10 +16560,12 @@ async function processQuoCallEvent(
   if (!store.scheduledVisits) store.scheduledVisits = [];
   if (!Array.isArray(store.adLeads)) store.adLeads = [];
 
-  const eventType = event.type || event.event || "call.completed";
   const dataObj = event.data?.object || event.call || event.data || event;
 
-  const rawIncomingCallId = String(dataObj.callId || dataObj.id || `call_${Date.now()}`);
+  const rawIncomingCallId = String(dataObj.callId || dataObj.id || "");
+  if (!rawIncomingCallId || rawIncomingCallId.startsWith("call_")) {
+    return { success: false, skipped: "Missing valid OpenPhone callId" };
+  }
   const callId = rawIncomingCallId.replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
   const openPhoneApiCallId = rawIncomingCallId.replace(/^QUO_([0-9a-f]{32})$/i, "AC$1");
   const apiKey = getEffectiveQuoApiKey();
@@ -16244,27 +16576,45 @@ async function processQuoCallEvent(
     return cid === callId;
   });
 
-  let remoteCall: any = dataObj.direction && dataObj.createdAt ? dataObj : null;
+  // Recognize both createdAt (raw OpenPhone API object) and timestamp (already-stored callLog object)
+  let remoteCall: any = dataObj.direction && (dataObj.createdAt || dataObj.timestamp) ? dataObj : null;
   let remoteTranscript: any = null;
   let remoteSummary: any = null;
 
+  const callDurationCheck = Number(remoteCall?.duration ?? dataObj.duration ?? cachedCallLog?.duration ?? 0);
   const needsTranscriptFetch =
-    !cachedCallLog ||
-    !cachedCallLog.transcriptText ||
-    eventType.includes("transcript") ||
-    eventType.includes("summary");
+    callDurationCheck > 0 &&
+    (!cachedCallLog ||
+      !cachedCallLog.transcriptText ||
+      eventType === "call.transcript.completed" ||
+      eventType === "call.summary.completed") &&
+    !dataObj.transcriptText;
 
-  if (apiKey && openPhoneApiCallId && String(openPhoneApiCallId).startsWith("AC") && (needsTranscriptFetch || !remoteCall)) {
+  if (
+    apiKey &&
+    openPhoneApiCallId &&
+    String(openPhoneApiCallId).startsWith("AC") &&
+    !String(callId).startsWith("QUO_SMS_") &&
+    (needsTranscriptFetch || !remoteCall)
+  ) {
     try {
       const [cRes, tRes, sRes] = await Promise.all([
         !remoteCall
-          ? fetch(`https://api.openphone.com/v1/calls/${openPhoneApiCallId}`, { headers: { Authorization: apiKey } }).catch(() => null)
+          ? fetchOpenPhoneWithRetry(`https://api.openphone.com/v1/calls/${openPhoneApiCallId}`, {
+              headers: { Authorization: apiKey },
+            })
           : Promise.resolve(null),
-        !cachedCallLog?.transcriptText
-          ? fetch(`https://api.openphone.com/v1/call-transcripts/${openPhoneApiCallId}`, { headers: { Authorization: apiKey } }).catch(() => null)
+        needsTranscriptFetch && !cachedCallLog?.transcriptText && !dataObj.transcriptText
+          ? fetchOpenPhoneWithRetry(`https://api.openphone.com/v1/call-transcripts/${openPhoneApiCallId}`, {
+              headers: { Authorization: apiKey },
+            })
           : Promise.resolve(null),
-        !cachedCallLog?.summary || cachedCallLog.summary === "Inbound voice call completed"
-          ? fetch(`https://api.openphone.com/v1/call-summaries/${openPhoneApiCallId}`, { headers: { Authorization: apiKey } }).catch(() => null)
+        needsTranscriptFetch &&
+        (!cachedCallLog?.summary || cachedCallLog.summary === "Inbound voice call completed") &&
+        (!dataObj.summary || dataObj.summary === "Inbound voice call completed")
+          ? fetchOpenPhoneWithRetry(`https://api.openphone.com/v1/call-summaries/${openPhoneApiCallId}`, {
+              headers: { Authorization: apiKey },
+            })
           : Promise.resolve(null),
       ]);
       if (cRes && cRes.ok) remoteCall = (await cRes.json()).data;
@@ -16310,10 +16660,17 @@ async function processQuoCallEvent(
     cachedCallLog?.callerPhone ||
     rawParticipants[0] ||
     "";
-  const rawTo = remoteCall?.to || dataObj.to || "";
+  const rawTo =
+    (!TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(remoteCall?.to)) ? remoteCall?.to : "") ||
+    (!TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(dataObj.to)) ? dataObj.to : "");
   const callerRaw = rawFrom || rawTo;
   const callerDigits = normalizePhoneDigits(callerRaw);
   const cleanCallerPhone = formatPhoneDisplay(callerRaw || "Unknown");
+
+  // Never create or save a call log entry if we couldn't resolve a real external phone number
+  if (!callerDigits || cleanCallerPhone === "Unknown" || TIDYUPS_OWN_PHONE_DIGITS.has(callerDigits)) {
+    return { success: false, skipped: "No valid external caller phone number" };
+  }
 
   const duration = Number(remoteCall?.duration ?? dataObj.duration ?? dataObj.durationSeconds ?? cachedCallLog?.duration ?? 0);
   const answeredBy = remoteCall?.answeredBy ?? dataObj.answeredBy ?? cachedCallLog?.answeredBy ?? null;
@@ -16325,9 +16682,10 @@ async function processQuoCallEvent(
     dataObj.dialogue ||
     null;
 
-  const rawTranscriptText =
+  const baseVoiceTranscript =
     dataObj.transcript?.text ||
     (typeof dataObj.transcript === "string" ? dataObj.transcript : "") ||
+    dataObj.transcriptText ||
     dataObj.text ||
     (Array.isArray(dialogueArr)
       ? dialogueArr
@@ -16341,7 +16699,14 @@ async function processQuoCallEvent(
     voicemailObj?.transcript ||
     cachedCallLog?.transcriptText ||
     "";
-  const transcriptText = String(rawTranscriptText || "").trim();
+
+  const incomingSmsTranscript = String(dataObj.smsTranscriptText || cachedCallLog?.smsTranscriptText || "").trim();
+  const combinedVoiceAndSmsTranscript =
+    baseVoiceTranscript && incomingSmsTranscript && !String(baseVoiceTranscript).includes(incomingSmsTranscript)
+      ? `${String(baseVoiceTranscript).trim()}\n${incomingSmsTranscript}`
+      : incomingSmsTranscript || String(baseVoiceTranscript || "").trim();
+  const transcriptText = combinedVoiceAndSmsTranscript.trim();
+  const hasSmsConversation = Boolean(incomingSmsTranscript || dataObj.hasSmsConversation || cachedCallLog?.hasSmsConversation);
 
   const rawSummaryVal = remoteSummary?.summary ?? dataObj.summary?.text ?? dataObj.summary ?? "";
   const fetchedSummaryText = Array.isArray(rawSummaryVal)
@@ -16373,7 +16738,9 @@ async function processQuoCallEvent(
     cachedCallLog?.recordingUrl ||
     "";
   const callerNameFromPayload = dataObj.callerName || dataObj.participants?.[0]?.name || "";
-  const timestamp = remoteCall?.createdAt || dataObj.createdAt || dataObj.completedAt || cachedCallLog?.timestamp || new Date().toISOString();
+  const rawCallCreated = remoteCall?.createdAt || dataObj.createdAt || dataObj.completedAt || dataObj.timestamp || cachedCallLog?.timestamp || new Date().toISOString();
+  const latestSmsTs = String(dataObj.latestSmsTimestamp || cachedCallLog?.latestSmsTimestamp || "");
+  const timestamp = latestSmsTs && latestSmsTs > String(rawCallCreated) ? latestSmsTs : rawCallCreated;
 
   const analysis = analyzeCallTranscriptForLead({
     summaryText: summary,
@@ -16512,6 +16879,7 @@ async function processQuoCallEvent(
       `Blocked by Spam Shield (${cleanCallerPhone})`;
   }
 
+  // Only auto-block confirmed SALES_OR_MARKETING solicitors or explicit Spam Shield rules (NEVER short hangups or missed calls!)
   const isAutoSolicitorOrSpam =
     !matchedJob &&
     !matchedQuote &&
@@ -16519,7 +16887,7 @@ async function processQuoCallEvent(
     !existingCallLog?.manuallyMarkedGoodLead &&
     (spamEval.isBlocked ||
       Boolean(existingCallLog?.manuallyBlocked) ||
-      (!analysis.isPotentialOrGoodLead && analysis.leadVerdict === "BAD_LEAD"));
+      (!analysis.isPotentialOrGoodLead && analysis.callCategory === "SALES_OR_MARKETING"));
 
   // Only remove from blockedNumbers if explicitly unblocked or matched to a real Jobber quote/visit (NEVER if matched by a blocked prefix/number)
   if (
@@ -16558,6 +16926,9 @@ async function processQuoCallEvent(
     duration,
     recordingUrl: mediaRecording,
     transcriptText,
+    smsTranscriptText: incomingSmsTranscript || undefined,
+    latestSmsTimestamp: latestSmsTs || undefined,
+    hasSmsConversation,
     summary: effectiveSummary,
     nextSteps: nextStepsArr,
     lineName,
@@ -16572,7 +16943,9 @@ async function processQuoCallEvent(
       ? "🚫 Bad Lead — Solicitor / Spam"
       : analysis.leadVerdict === "GOOD_LEAD"
       ? "✅ Good Lead — Potential Job"
-      : "🟡 Potential Job — Follow-Up",
+      : analysis.leadVerdict === "POTENTIAL_JOB"
+      ? "🟡 Potential Job — Follow-Up"
+      : "🚫 Short Hangup / Missed",
     leadVerdictReason: isAutoSolicitorOrSpam
       ? analysis.leadVerdictReason || `Screened Solicitor / Spam (${cleanCallerPhone})`
       : analysis.leadVerdictReason,
@@ -16865,8 +17238,6 @@ async function processQuoCallEvent(
       );
       if (exHudIdx >= 0) {
         const prev = activeList[exHudIdx];
-        // If this call first hit Twilio (preserving e.g. +1 (587) 900-7223 GMB Direct) before ringing the receiving Quo line (+1 (833) 843-9877),
-        // keep the original dialed line & campaign from the Twilio leg!
         const preserveOrigLine =
           prev.originalDialedNumber && prev.originalDialedNumber !== dialedFromLine
             ? prev.originalDialedNumber
@@ -16931,7 +17302,7 @@ async function processQuoCallEvent(
   };
 }
 
-// Pull ALL recent calls, voicemails, Sonia AI screening transcripts, and AI summaries across ALL 6 OpenPhone lines
+// Pull ALL recent calls, voicemails, Sonia AI screening transcripts, SMS threads, and AI summaries across ALL 6 OpenPhone lines
 async function syncLiveQuoCallsAndTranscripts() {
   const apiKey = getEffectiveQuoApiKey();
   if (!apiKey) {
@@ -16939,13 +17310,14 @@ async function syncLiveQuoCallsAndTranscripts() {
   }
   quoConfig.apiKey = apiKey;
   quoConfig.isConnected = true;
+  quoConfig.webhookSecret = getEffectiveQuoWebhookSecret();
 
   // 1. Refresh all live phone numbers from OpenPhone so all 6 lines are active
   try {
-    const pnRes = await fetch("https://api.openphone.com/v1/phone-numbers", {
+    const pnRes = await fetchOpenPhoneWithRetry("https://api.openphone.com/v1/phone-numbers", {
       headers: { Authorization: apiKey },
     });
-    if (pnRes.ok) {
+    if (pnRes && pnRes.ok) {
       const pnData = await pnRes.json();
       if (Array.isArray(pnData?.data) && pnData.data.length > 0) {
         quoConfig.phoneNumbers = pnData.data.map((pn: any, idx: number) => ({
@@ -16959,23 +17331,42 @@ async function syncLiveQuoCallsAndTranscripts() {
     }
   } catch {}
 
-  // 2. Ensure https://app.tidyupscleaning.com/api/quo/webhook is registered and enabled in OpenPhone
+  // 2. Ensure https://app.tidyupscleaning.com/api/quo/webhook is registered and clean up redundant duplicate webhooks
   try {
-    const whRes = await fetch("https://api.openphone.com/v1/webhooks", {
+    const whRes = await fetchOpenPhoneWithRetry("https://api.openphone.com/v1/webhooks", {
       headers: { Authorization: apiKey },
     });
-    if (whRes.ok) {
+    if (whRes && whRes.ok) {
       const whData = await whRes.json();
       const targetUrl = "https://app.tidyupscleaning.com/api/quo/webhook";
-      const hasProductionWh = (whData.data || []).some((w: any) => w.url === targetUrl && w.status === "enabled");
-      if (!hasProductionWh) {
-        const endpoints = [
-          { path: "/v1/webhooks/calls", events: ["call.completed", "call.ringing", "call.recording.completed"] },
-          { path: "/v1/webhooks/call-transcripts", events: ["call.transcript.completed"] },
-          { path: "/v1/webhooks/call-summaries", events: ["call.summary.completed"] },
-        ];
-        for (const ep of endpoints) {
-          await fetch(`https://api.openphone.com${ep.path}`, {
+      const allWebhooks: any[] = Array.isArray(whData?.data) ? whData.data : [];
+
+      // Keep at most 1 webhook per event signature on targetUrl and delete obsolete/duplicate ones so OpenPhone doesn't fire 8x bursts
+      const seenEventSigs = new Set<string>();
+      for (const w of allWebhooks) {
+        const wUrl = String(w?.url || "");
+        const evSig = Array.isArray(w?.events) ? [...w.events].sort().join(",") : "";
+        const isTarget = wUrl === targetUrl && w?.status === "enabled";
+        if (isTarget && !seenEventSigs.has(evSig)) {
+          seenEventSigs.add(evSig);
+        } else if (w?.id && (wUrl.includes("tidyupscleaning.com") || wUrl.includes("run.app"))) {
+          await fetchOpenPhoneWithRetry(`https://api.openphone.com/v1/webhooks/${w.id}`, {
+            method: "DELETE",
+            headers: { Authorization: apiKey },
+          }).catch(() => null);
+        }
+      }
+
+      const endpoints = [
+        { path: "/v1/webhooks/calls", events: ["call.completed", "call.ringing", "call.recording.completed"] },
+        { path: "/v1/webhooks/call-transcripts", events: ["call.transcript.completed"] },
+        { path: "/v1/webhooks/call-summaries", events: ["call.summary.completed"] },
+        { path: "/v1/webhooks/messages", events: ["message.received", "message.delivered"] },
+      ];
+      for (const ep of endpoints) {
+        const sig = [...ep.events].sort().join(",");
+        if (!seenEventSigs.has(sig)) {
+          await fetchOpenPhoneWithRetry(`https://api.openphone.com${ep.path}`, {
             method: "POST",
             headers: { Authorization: apiKey, "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -17000,30 +17391,24 @@ async function syncLiveQuoCallsAndTranscripts() {
   ).filter(Boolean);
 
   const updatedAfterIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-  const convResponses = await Promise.all([
-    fetch(`https://api.openphone.com/v1/conversations?maxResults=100&updatedAfter=${encodeURIComponent(updatedAfterIso)}`, {
-      headers: { Authorization: apiKey },
-    }).catch(() => null),
-    fetch("https://api.openphone.com/v1/conversations?maxResults=50", {
-      headers: { Authorization: apiKey },
-    }).catch(() => null),
-    ...allLineIds.map((pnId) =>
-      fetch(
-        `https://api.openphone.com/v1/conversations?phoneNumbers=${encodeURIComponent(pnId)}&maxResults=40&updatedAfter=${encodeURIComponent(updatedAfterIso)}`,
-        {
-          headers: { Authorization: apiKey },
-        }
-      ).catch(() => null)
+  const convUrls = [
+    `https://api.openphone.com/v1/conversations?maxResults=100&updatedAfter=${encodeURIComponent(updatedAfterIso)}`,
+    "https://api.openphone.com/v1/conversations?maxResults=50",
+    ...allLineIds.map(
+      (pnId) =>
+        `https://api.openphone.com/v1/conversations?phoneNumbers=${encodeURIComponent(pnId)}&maxResults=40&updatedAfter=${encodeURIComponent(updatedAfterIso)}`
     ),
-  ]);
+  ];
 
   const allConvsRaw: any[] = [];
-  for (const r of convResponses) {
+  for (const u of convUrls) {
+    const r = await fetchOpenPhoneWithRetry(u, { headers: { Authorization: apiKey } });
     if (r && r.ok) {
       const d = await r.json();
       if (Array.isArray(d?.data)) allConvsRaw.push(...d.data);
     }
   }
+
   const seenConvKeys = new Set<string>();
   const dedupedConvs = allConvsRaw.filter((conv) => {
     const part = (conv.participants || [])[0];
@@ -17057,37 +17442,74 @@ async function syncLiveQuoCallsAndTranscripts() {
     });
   }
 
-  // Keep all existing call logs & manual overrides so incremental sync only adds/updates new calls without dropping previous history
+  // Keep all valid existing call logs & manual overrides
   const previousLogsById = new Map<string, any>();
   if (Array.isArray(sharedStore.quoCallLogs)) {
     for (const oldCall of sharedStore.quoCallLogs) {
-      if (oldCall?.id) previousLogsById.set(oldCall.id, oldCall);
+      const cid = String(oldCall?.id || oldCall?.callId || "");
+      const cPhone = String(oldCall?.callerPhone || "").trim();
+      if (!cid || cid.startsWith("call_") || !cPhone || cPhone === "Unknown") continue;
+      if (String(oldCall?.eventType || "").startsWith("contact.")) continue;
+      previousLogsById.set(cid, oldCall);
     }
   }
   sharedStore.quoCallLogs = Array.from(previousLogsById.values());
 
   const syncedCalls: any[] = [];
   const syncedCleaningLeads: any[] = [];
+  const sevenDaysAgoIso = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
 
-  // Fetch calls for all conversations in batches of 8 for fast parallel execution
-  const batchSize = 8;
+  // Fetch calls and SMS threads for conversations in rate-limit-safe batches of 3
+  const batchSize = 3;
   for (let i = 0; i < dedupedConvs.length; i += batchSize) {
     const batch = dedupedConvs.slice(i, i + batchSize);
-    const batchCallsLists = await Promise.all(
+    const batchResults = await Promise.all(
       batch.map(async (conv) => {
         const participant = (conv.participants || [])[0];
         const pnId = conv.phoneNumberId;
-        const callsRes = await fetch(
+        const callsRes = await fetchOpenPhoneWithRetry(
           `https://api.openphone.com/v1/calls?phoneNumberId=${encodeURIComponent(pnId)}&participants=${encodeURIComponent(participant)}&maxResults=6`,
           { headers: { Authorization: apiKey } }
-        ).catch(() => null);
-        if (!callsRes || !callsRes.ok) return [];
-        const callsData = await callsRes.json();
-        return [...(callsData.data || [])].reverse();
+        );
+        const rawCalls = callsRes && callsRes.ok ? (await callsRes.json()).data || [] : [];
+        const orderedCalls = [...rawCalls].reverse();
+
+        // Also check SMS messages for conversations updated in the last 10 days (captures Sona AI text quote intake like Ripandip Kaur)
+        const convUpdated = String(conv.updatedAt || conv.lastActivityAt || "");
+        let smsInfo = { smsTranscriptText: "", latestSmsTimestamp: "", hasCustomerReply: false, hasSonaAi: false };
+        if (!convUpdated || convUpdated >= sevenDaysAgoIso) {
+          smsInfo = await fetchOpenPhoneConversationSmsText(apiKey, pnId, participant);
+        }
+
+        if (smsInfo.smsTranscriptText && smsInfo.hasCustomerReply) {
+          if (orderedCalls.length > 0) {
+            const latestCall = orderedCalls[orderedCalls.length - 1];
+            latestCall.smsTranscriptText = smsInfo.smsTranscriptText;
+            latestCall.latestSmsTimestamp = smsInfo.latestSmsTimestamp;
+            latestCall.hasSmsConversation = true;
+          } else {
+            const cleanDigits = normalizePhoneDigits(participant);
+            orderedCalls.push({
+              id: `QUO_SMS_${cleanDigits}_${pnId}`,
+              callId: `QUO_SMS_${cleanDigits}_${pnId}`,
+              direction: "incoming",
+              phoneNumberId: pnId,
+              participants: [participant],
+              from: participant,
+              duration: 0,
+              createdAt: smsInfo.latestSmsTimestamp || convUpdated || new Date().toISOString(),
+              smsTranscriptText: smsInfo.smsTranscriptText,
+              latestSmsTimestamp: smsInfo.latestSmsTimestamp,
+              hasSmsConversation: true,
+            });
+          }
+        }
+
+        return orderedCalls;
       })
     );
 
-    for (const orderedCalls of batchCallsLists) {
+    for (const orderedCalls of batchResults) {
       for (const call of orderedCalls) {
         const res = await processQuoCallEvent(
           {
@@ -17106,12 +17528,12 @@ async function syncLiveQuoCallsAndTranscripts() {
     }
   }
 
-  // Second pass: re-process any stored Quo call logs so multi-call customers (e.g. Amandeep Kaur) cross-enrich
+  // Second pass: re-process stored Quo call logs in memory (without re-hitting OpenPhone API) so multi-call customers cross-enrich
   if (Array.isArray(sharedStore.quoCallLogs)) {
     for (const existingLog of [...sharedStore.quoCallLogs]) {
       await processQuoCallEvent(
         {
-          type: "call.transcript.completed",
+          type: "call.completed",
           data: { object: existingLog },
         },
         { existingStore: sharedStore, skipSave: true }
@@ -17119,6 +17541,7 @@ async function syncLiveQuoCallsAndTranscripts() {
     }
     sharedStore.quoCallLogs.sort((a: any, b: any) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
   }
+  repairAndSyncStoreData(sharedStore);
   if (Array.isArray(sharedStore.adLeads)) {
     sharedStore.adLeads.sort((a: any, b: any) => String(b.dateReceived || "").localeCompare(String(a.dateReceived || "")));
   }
@@ -17150,21 +17573,75 @@ async function syncLiveQuoCallsAndTranscripts() {
   };
 }
 
-// Inbound webhook from Quo for completed calls & transcripts (supports both /api/quo/webhook and /api/webhooks/quo)
+// Inbound webhook from Quo for completed calls, transcripts & SMS messages (supports both /api/quo/webhook and /api/webhooks/quo)
 const handleQuoWebhookRequest = async (req: any, res: any) => {
   const event = req.body || {};
   const evType = String(event.type || event.event || "call.completed");
   console.log("Inbound Quo Webhook Event:", evType);
 
+  // Ignore contact.created / contact.updated webhooks so they never create bogus "Unknown" call logs
+  if (evType.startsWith("contact.")) {
+    return res.status(200).json({ received: true, ignored: evType });
+  }
+
   try {
+    // Handle SMS message.received / message.delivered webhooks by enriching the caller's conversation with SMS transcript
+    if (evType.startsWith("message.")) {
+      const msgObj = event.data?.object || event.message || event.data || event;
+      const pnId = String(msgObj.phoneNumberId || "");
+      const fromNum = String(msgObj.from || "");
+      const toRaw = Array.isArray(msgObj.to) ? msgObj.to[0] : String(msgObj.to || "");
+      const extPhone = !TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(fromNum)) ? fromNum : toRaw;
+      const extDigits = normalizePhoneDigits(extPhone);
+      if (!extDigits || TIDYUPS_OWN_PHONE_DIGITS.has(extDigits)) {
+        return res.status(200).json({ received: true, skipped: "Internal SMS" });
+      }
+      const apiKey = getEffectiveQuoApiKey();
+      const smsInfo = apiKey && pnId ? await fetchOpenPhoneConversationSmsText(apiKey, pnId, extPhone) : {
+        smsTranscriptText: `${fromNum || extPhone}: ${String(msgObj.text || msgObj.body || "").trim()}`,
+        latestSmsTimestamp: msgObj.createdAt || new Date().toISOString(),
+        hasCustomerReply: true,
+        hasSonaAi: false,
+      };
+      const store = loadStore();
+      const existingCall = (store?.quoCallLogs || []).find(
+        (c: any) => normalizePhoneDigits(c?.callerPhone) === extDigits && (!pnId || c?.phoneNumberId === pnId)
+      );
+      const synthCallObj = existingCall
+        ? {
+            ...existingCall,
+            smsTranscriptText: smsInfo.smsTranscriptText,
+            latestSmsTimestamp: smsInfo.latestSmsTimestamp || msgObj.createdAt || new Date().toISOString(),
+            hasSmsConversation: true,
+          }
+        : {
+            id: `QUO_SMS_${extDigits}_${pnId || "MAIN"}`,
+            callId: `QUO_SMS_${extDigits}_${pnId || "MAIN"}`,
+            direction: "incoming",
+            phoneNumberId: pnId,
+            participants: [extPhone],
+            from: extPhone,
+            duration: 0,
+            createdAt: smsInfo.latestSmsTimestamp || msgObj.createdAt || new Date().toISOString(),
+            smsTranscriptText: smsInfo.smsTranscriptText,
+            latestSmsTimestamp: smsInfo.latestSmsTimestamp,
+            hasSmsConversation: true,
+          };
+      const smsResult = await processQuoCallEvent({
+        type: "call.completed",
+        data: { object: synthCallObj },
+      });
+      return res.status(200).json({ received: true, ...smsResult });
+    }
+
     const result = await processQuoCallEvent(event);
     // OpenPhone generates transcripts & summaries 15–60s after call.completed / call.recording.completed.
-    // Automatically schedule delayed re-fetches (+12s, +35s, +75s) if the transcript wasn't ready yet!
+    // Automatically schedule delayed re-fetches (+15s, +40s, +80s) if the transcript wasn't ready yet!
     const callLog = result?.callLog;
     if (callLog && Number(callLog.duration || 0) >= 8 && !callLog.transcriptText) {
       const targetCallId = String(callLog.callId || callLog.id || "").replace(/^QUO_([0-9a-f]{32})$/i, "AC$1");
       if (targetCallId.startsWith("AC")) {
-        for (const delayMs of [12000, 35000, 75000]) {
+        for (const delayMs of [15000, 40000, 80000]) {
           setTimeout(() => {
             processQuoCallEvent({
               type: "call.transcript.completed",
@@ -18379,41 +18856,89 @@ async function pollRecentOpenPhoneCallsFast(projectId: string) {
   if (!apiKey) return;
   try {
     const updatedAfterIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const convRes = await fetch(
+    const convRes = await fetchOpenPhoneWithRetry(
       `https://api.openphone.com/v1/conversations?maxResults=15&updatedAfter=${encodeURIComponent(updatedAfterIso)}`,
-      {
-        headers: { Authorization: apiKey },
-      }
-    ).catch(() => null);
+      { headers: { Authorization: apiKey } }
+    );
     if (!convRes || !convRes.ok) return;
     const convData = await convRes.json();
-    const convs = Array.isArray(convData?.data) ? convData.data.slice(0, 10) : [];
+    const convs = Array.isArray(convData?.data) ? convData.data.slice(0, 12) : [];
     const currentStore = loadStore(projectId);
     if (!currentStore) return;
     let changed = false;
-    const callLists = await Promise.all(
-      convs.map(async (conv: any) => {
-        const participant = (conv.participants || [])[0];
-        const pnId = conv.phoneNumberId;
-        if (!participant || !pnId || TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(participant))) return [];
-        const cRes = await fetch(
-          `https://api.openphone.com/v1/calls?phoneNumberId=${encodeURIComponent(pnId)}&participants=${encodeURIComponent(participant)}&maxResults=5`,
-          { headers: { Authorization: apiKey } }
-        ).catch(() => null);
-        if (!cRes || !cRes.ok) return [];
-        const cData = await cRes.json();
-        return [...(cData.data || [])].reverse();
-      })
-    );
-    for (const calls of callLists) {
-      for (const call of calls) {
+
+    for (const conv of convs) {
+      const participant = (conv.participants || [])[0];
+      const pnId = conv.phoneNumberId;
+      if (!participant || !pnId || TIDYUPS_OWN_PHONE_DIGITS.has(normalizePhoneDigits(participant))) continue;
+
+      const cRes = await fetchOpenPhoneWithRetry(
+        `https://api.openphone.com/v1/calls?phoneNumberId=${encodeURIComponent(pnId)}&participants=${encodeURIComponent(participant)}&maxResults=6`,
+        { headers: { Authorization: apiKey } }
+      );
+      const cData = cRes && cRes.ok ? await cRes.json().catch(() => ({})) : {};
+      const calls = Array.isArray(cData?.data) ? [...cData.data].reverse() : [];
+      const smsThread = await fetchOpenPhoneConversationSmsText(apiKey, pnId, participant);
+
+      if (calls.length > 0) {
+        for (let i = 0; i < calls.length; i++) {
+          const call = calls[i];
+          const isLatestCallInConv = i === calls.length - 1;
+          const normId = String(call.id || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
+          const existingLog = (currentStore.quoCallLogs || []).find(
+            (q: any) => String(q?.id || q?.callId || "") === normId
+          );
+          const alreadyHasTranscript = Boolean(existingLog?.transcriptText && existingLog.transcriptText.length > 20);
+          const eventType = alreadyHasTranscript ? "call.completed" : "call.transcript.completed";
+
+          if (isLatestCallInConv && smsThread.smsTranscriptText && smsThread.hasCustomerReply) {
+            call.smsTranscriptText = smsThread.smsTranscriptText;
+            call.latestSmsTimestamp = smsThread.latestSmsTimestamp;
+            call.hasSmsConversation = true;
+          }
+
+          const res = await processQuoCallEvent(
+            { type: eventType, data: { object: call } },
+            {
+              existingStore: currentStore,
+              skipSave: true,
+            }
+          );
+          if (res?.callLog) changed = true;
+        }
+      } else if (smsThread.smsTranscriptText && smsThread.hasCustomerReply) {
+        const cleanDigits = normalizePhoneDigits(participant);
+        const syntheticSmsId = `QUO_SMS_${cleanDigits}_${pnId}`;
         const res = await processQuoCallEvent(
-          { type: "call.transcript.completed", data: { object: call } },
-          { existingStore: currentStore, skipSave: true }
+          {
+            type: "message.received",
+            data: {
+              object: {
+                id: syntheticSmsId,
+                callId: syntheticSmsId,
+                phoneNumberId: pnId,
+                direction: "incoming",
+                from: participant,
+                to: pnId,
+                participants: [participant],
+                duration: 0,
+                status: "completed",
+                createdAt: smsThread.latestSmsTimestamp || conv.updatedAt || new Date().toISOString(),
+                smsTranscriptText: smsThread.smsTranscriptText,
+                latestSmsTimestamp: smsThread.latestSmsTimestamp,
+                hasSmsConversation: true,
+              },
+            },
+          },
+          {
+            existingStore: currentStore,
+            skipSave: true,
+          }
         );
         if (res?.callLog) changed = true;
       }
     }
+
     if (changed) {
       if (Array.isArray(currentStore.quoCallLogs)) {
         currentStore.quoCallLogs.sort((a: any, b: any) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
@@ -18454,9 +18979,18 @@ app.get("/api/twilio/spam-shield", async (req, res) => {
         let storeUpdated = false;
         if (Array.isArray(remData.quoCallLogs)) {
           if (!Array.isArray(store.quoCallLogs)) store.quoCallLogs = [];
-          for (const rq of remData.quoCallLogs.slice(0, 35)) {
+          for (const rq of remData.quoCallLogs.slice(0, 60)) {
             const rqNormId = String(rq.callId || rq.id || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1");
-            if (!rqNormId) continue;
+            if (
+              !rqNormId ||
+              rqNormId.startsWith("call_") ||
+              !rq.callerPhone ||
+              rq.callerPhone === "Unknown" ||
+              String(rq.eventType || "").startsWith("contact.") ||
+              normalizePhoneDigits(rq.callerPhone).length < 7
+            ) {
+              continue;
+            }
             const existsIdx = store.quoCallLogs.findIndex(
               (lq: any) => String(lq.callId || lq.id || "").replace(/^AC([0-9a-f]{32})$/i, "QUO_$1") === rqNormId
             );
