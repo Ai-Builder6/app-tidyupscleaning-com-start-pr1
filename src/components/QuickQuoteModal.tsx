@@ -43,6 +43,9 @@ interface QuickQuoteModalProps {
     bathrooms?: string | number;
     source?: string;
     notes?: string;
+    isDefaultQuoteInfo?: boolean;
+    defaultInfoLabel?: string;
+    leadVerdict?: string;
   } | null;
   onSaveBooking?: (booking: any) => void;
   onCreateJobberQuote?: (quote: any, fullResponse?: any) => void;
@@ -483,6 +486,25 @@ ${depositAmount > 0 ? `• Deposit Required: $${Number(depositAmount).toFixed(2)
               onApplyDiscount={(percent) => handleApplyLoyaltyDiscount(percent)}
             />
           )}
+
+          {/* Default Placeholder Info Warning Banner when opened from a short/missed call with no room counts */}
+          {initialLead &&
+            (Boolean(initialLead.isDefaultQuoteInfo) ||
+              initialLead.leadVerdict === 'POTENTIAL_JOB' ||
+              String(initialLead.serviceRequested || '').includes('Default') ||
+              String(initialLead.serviceRequested || '').includes('Potential Cleaning Job') ||
+              String(initialLead.customerName || '').startsWith('Potential Job Caller') ||
+              String(initialLead.notes || '').includes('DEFAULT 3B/2B PLACEHOLDER')) && (
+              <div className="p-3 rounded-2xl bg-amber-950/70 border-2 border-amber-500/60 text-amber-200 text-xs space-y-1">
+                <div className="font-black text-amber-300 uppercase tracking-wide flex items-center gap-1.5">
+                  <span>⚠️ Default Placeholder Info — Not Real Caller Info</span>
+                </div>
+                <p className="text-[11px] text-amber-100/90 leading-relaxed">
+                  Caller <strong>{customerPhone || customerName}</strong> had a short/missed call and did not provide bedrooms, bathrooms, or address yet.{' '}
+                  <strong>3 Bedrooms / 2 Bathrooms ($221.07)</strong> is pre-filled as a <strong>default template only</strong> — confirm real home size with the caller before sending!
+                </p>
+              </div>
+            )}
 
           {/* 1. Hours Selector (Matches Screenshot 2) */}
           <div className="space-y-2">

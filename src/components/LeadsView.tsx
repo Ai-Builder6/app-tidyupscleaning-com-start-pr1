@@ -2388,16 +2388,43 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
                       {/* Bed / Bath & Service */}
                       <td className="py-3.5 px-3 align-top max-w-[260px] border-r border-slate-800/50">
-                        <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                          <span className="px-2 py-0.5 rounded bg-indigo-500/25 text-indigo-200 text-[10px] font-bold flex items-center gap-1">
-                            <BedDouble className="w-3 h-3" />
-                            {lead.bedrooms || '3 Bedrooms'}
-                          </span>
-                          <span className="px-2 py-0.5 rounded bg-cyan-500/25 text-cyan-200 text-[10px] font-bold flex items-center gap-1">
-                            <Bath className="w-3 h-3" />
-                            {lead.bathrooms || '2 Bathrooms'}
-                          </span>
-                        </div>
+                        {(() => {
+                          const isDefaultInfo =
+                            Boolean(lead.isDefaultQuoteInfo) ||
+                            (!lead.quoteId &&
+                              !lead.quoteNumber &&
+                              (lead.leadVerdict === 'POTENTIAL_JOB' ||
+                                String(lead.serviceRequested || '').includes('Potential Cleaning Job') ||
+                                String(lead.serviceRequested || '').includes('Default') ||
+                                String(lead.serviceRequested || '').includes('Unverified') ||
+                                String(lead.customerName || '').startsWith('Potential Job Caller') ||
+                                String(lead.customerName || '').startsWith('Cleaning Caller')));
+                          return (
+                            <>
+                              {isDefaultInfo ? (
+                                <div className="mb-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/25 border border-amber-400/50 text-amber-200 text-[10px] font-black uppercase tracking-tight">
+                                  <span>⚠️ Default Placeholder — Not Real Caller Info</span>
+                                </div>
+                              ) : rowTab === 'Quo' ? (
+                                <div className="mb-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[10px] font-black uppercase tracking-tight">
+                                  <span>✓ Verified Caller Info</span>
+                                </div>
+                              ) : null}
+                              <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                                <span className="px-2 py-0.5 rounded bg-indigo-500/25 text-indigo-200 text-[10px] font-bold flex items-center gap-1">
+                                  <BedDouble className="w-3 h-3" />
+                                  {lead.bedrooms || '3 Bedrooms'}
+                                  {isDefaultInfo ? ' (Default)' : ''}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-cyan-500/25 text-cyan-200 text-[10px] font-bold flex items-center gap-1">
+                                  <Bath className="w-3 h-3" />
+                                  {lead.bathrooms || '2 Bathrooms'}
+                                  {isDefaultInfo ? ' (Default)' : ''}
+                                </span>
+                              </div>
+                            </>
+                          );
+                        })()}
                         <div className="font-bold text-white">
                           {lead.serviceRequested || 'Residential Standard Cleaning'}
                         </div>
@@ -2445,6 +2472,16 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       {/* Quoted Total (Matches Master Quotes: Service + $20 Fuel - $10 Promo + 12.5% Tax) */}
                       <td className="py-3.5 px-3 align-top whitespace-nowrap border-r border-slate-800/50 bg-emerald-950/20">
                         {(() => {
+                          const isDefaultInfo =
+                            Boolean(lead.isDefaultQuoteInfo) ||
+                            (!lead.quoteId &&
+                              !lead.quoteNumber &&
+                              (lead.leadVerdict === 'POTENTIAL_JOB' ||
+                                String(lead.serviceRequested || '').includes('Potential Cleaning Job') ||
+                                String(lead.serviceRequested || '').includes('Default') ||
+                                String(lead.serviceRequested || '').includes('Unverified') ||
+                                String(lead.customerName || '').startsWith('Potential Job Caller') ||
+                                String(lead.customerName || '').startsWith('Cleaning Caller')));
                           const rowBreakdown = buildCanonicalQuoteBreakdown({
                             serviceRequested: lead.serviceRequested,
                             bedrooms: String(lead.bedrooms || '3 Bedrooms'),
@@ -2454,9 +2491,14 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                           });
                           return (
                             <div className="space-y-0.5">
-                              <div className="font-mono font-black text-sm text-emerald-300">
-                                ${rowBreakdown.total.toFixed(2)}
+                              <div className={`font-mono font-black text-sm ${isDefaultInfo ? 'text-amber-300' : 'text-emerald-300'}`}>
+                                {isDefaultInfo ? 'Est. ' : ''}${rowBreakdown.total.toFixed(2)}
                               </div>
+                              {isDefaultInfo && (
+                                <div className="text-[10px] font-black text-amber-200 bg-amber-500/20 border border-amber-400/40 px-1.5 py-0.5 rounded inline-block">
+                                  ⚠️ Default 3B/2B Info
+                                </div>
+                              )}
                               <div className="text-[10px] text-emerald-400/90 font-mono">
                                 ${rowBreakdown.serviceTotal.toFixed(0)} + $20 Fuel − $10 Promo
                               </div>

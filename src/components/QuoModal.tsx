@@ -741,6 +741,15 @@ export const QuoModal: React.FC<QuoModalProps> = ({
 
                           {(call.extractedService || (call.extractedAddress && call.extractedAddress !== 'Edmonton, AB')) && (
                             <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                              {(call.isDefaultQuoteInfo ?? !call.hasCleaningIntent) ? (
+                                <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-950 border border-amber-400 font-black">
+                                  ⚠️ Default Placeholder — Not Real Caller Info
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-black">
+                                  ✓ Verified Caller Info
+                                </span>
+                              )}
                               {call.extractedService && (
                                 <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
                                   🧹 {call.extractedService}
@@ -749,6 +758,7 @@ export const QuoModal: React.FC<QuoModalProps> = ({
                               {call.extractedBedrooms && (
                                 <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono">
                                   🛏️ {call.extractedBedrooms} • 🛁 {call.extractedBathrooms || '2 Bathrooms'}
+                                  {(call.isDefaultQuoteInfo ?? !call.hasCleaningIntent) ? ' (Default Template)' : ''}
                                 </span>
                               )}
                               {call.extractedAddress && call.extractedAddress !== 'Edmonton, AB' && (

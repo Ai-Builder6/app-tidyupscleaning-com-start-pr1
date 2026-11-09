@@ -5443,6 +5443,14 @@ function repairAndSyncStoreData(store: AppPersistentStore): boolean {
         qLog.estimatedQuote = analysis.quotedAmount;
         mutated = true;
       }
+      if (qLog.isDefaultQuoteInfo !== analysis.isDefaultQuoteInfo || qLog.defaultInfoLabel !== analysis.defaultInfoLabel) {
+        qLog.isDefaultQuoteInfo = analysis.isDefaultQuoteInfo;
+        qLog.defaultInfoLabel = analysis.defaultInfoLabel;
+        qLog.hasVerifiedBedrooms = analysis.hasVerifiedBedrooms;
+        qLog.hasVerifiedBathrooms = analysis.hasVerifiedBathrooms;
+        qLog.hasVerifiedAddress = analysis.hasVerifiedAddress;
+        mutated = true;
+      }
       if (analysis.enrichedSummary && qLog.summary !== analysis.enrichedSummary) {
         qLog.summary = analysis.enrichedSummary;
         mutated = true;
@@ -16015,18 +16023,24 @@ function analyzeCallTranscriptForLead(params: {
       const lastToken = allBedMentions[allBedMentions.length - 1][1].toLowerCase();
       const num = wordToNum[lastToken] || lastToken;
       bedrooms = num === "1" ? "1 Bedroom" : `${num} Bedrooms`;
+      foundExplicitBed = true;
     }
   }
 
   if (!foundExplicitBath) {
-    if (/\b(2\.5|two[\s-]*and[\s-]*a[\s-]*half|2\s+full\s+bathrooms?\s+and\s+a\s+half)/i.test(combined)) bathrooms = "2.5 Bathrooms";
-    else if (/\b(1\.5|one[\s-]*and[\s-]*a[\s-]*half|1\s+full\s+bathroom\s+and\s+a\s+half)/i.test(combined)) bathrooms = "1.5 Bathrooms";
-    else {
+    if (/\b(2\.5|two[\s-]*and[\s-]*a[\s-]*half|2\s+full\s+bathrooms?\s+and\s+a\s+half)/i.test(combined)) {
+      bathrooms = "2.5 Bathrooms";
+      foundExplicitBath = true;
+    } else if (/\b(1\.5|one[\s-]*and[\s-]*a[\s-]*half|1\s+full\s+bathroom\s+and\s+a\s+half)/i.test(combined)) {
+      bathrooms = "1.5 Bathrooms";
+      foundExplicitBath = true;
+    } else {
       const allBathMentions = Array.from(combined.matchAll(/\b(one|two|three|four|five|1|2|3|4|5)[\s-]*(?:full\s+)?(?:bath|washroom)/gi));
       if (allBathMentions.length > 0) {
         const lastToken = allBathMentions[allBathMentions.length - 1][1].toLowerCase();
         const num = wordToNum[lastToken] || lastToken;
         bathrooms = num === "1" ? "1 Bathroom" : `${num} Bathrooms`;
+        foundExplicitBath = true;
       } else if (bedrooms === "1 Bedroom") {
         bathrooms = "1 Bathroom";
       }
@@ -16219,6 +16233,14 @@ function analyzeCallTranscriptForLead(params: {
   const shortBed = bedrooms.replace(" Bedrooms", "Bed").replace(" Bedroom", "Bed");
   const shortBath = bathrooms.replace(" Bathrooms", "Bath").replace(" Bathroom", "Bath");
 
+  const hasVerifiedBedrooms = foundExplicitBed;
+  const hasVerifiedBathrooms = foundExplicitBath;
+  const hasVerifiedAddress = Boolean(streetPart || matchedNeighborhood || postalCode);
+  const isDefaultQuoteInfo = !foundExplicitBed && !foundExplicitBath;
+  const defaultInfoLabel = isDefaultQuoteInfo
+    ? "⚠️ Default Placeholder (Not Real Caller Info — 3 Bed / 2 Bath Base Estimate)"
+    : "✓ Verified Caller Info";
+
   if (lower.includes("airbnb") || lower.includes("basement suite")) {
     serviceRequested = `${shortBed} ${shortBath} Airbnb / Basement Suite Cleaning`;
     quotedAmount = 189.0;
@@ -16246,11 +16268,14 @@ function analyzeCallTranscriptForLead(params: {
   } else if (lower.includes("deep clean")) {
     serviceRequested = `${shortBed} ${shortBath} Deep Cleaning`;
     quotedAmount = bedrooms === "1 Bedroom" ? 165.0 : bedrooms.startsWith("5") || bedrooms.startsWith("4") ? 345.0 : 275.0;
-  } else if (hasCleaningIntent) {
+  } else if (hasCleaningIntent && !isDefaultQuoteInfo) {
     serviceRequested = `${shortBed} ${shortBath} Regular House Cleaning`;
     quotedAmount = bedrooms === "1 Bedroom" ? 140.0 : bedrooms.startsWith("2") ? 189.0 : 221.07;
+  } else if (hasCleaningIntent && isDefaultQuoteInfo) {
+    serviceRequested = `3Bed 2Bath Regular House Cleaning (Default Size — Unverified)`;
+    quotedAmount = 221.07;
   } else {
-    serviceRequested = "Inbound Phone Inquiry — Potential Cleaning Job (Follow-Up)";
+    serviceRequested = "⚠️ Default 3Bed 2Bath Placeholder (Not Real Caller Info — Call Back to Confirm)";
     quotedAmount = 221.07;
   }
 
@@ -16263,9 +16288,11 @@ function analyzeCallTranscriptForLead(params: {
   if (extractedName) {
     structuredHighlights.push(`👤 ${extractedName} (${params.callerPhone})`);
   }
-  if (hasCleaningIntent) {
+  if (hasCleaningIntent && !isDefaultQuoteInfo) {
     structuredHighlights.push(`🛏️ ${bedrooms}, ${bathrooms}`);
     structuredHighlights.push(`🧹 ${serviceRequested}`);
+  } else if (isDefaultQuoteInfo) {
+    structuredHighlights.push(`⚠️ Default 3B/2B Placeholder (No Room Info Given Yet)`);
   }
   if (preferredDate) {
     structuredHighlights.push(`📅 Preferred: ${preferredDate}`);
@@ -16339,6 +16366,11 @@ function analyzeCallTranscriptForLead(params: {
     enrichedSummary,
     serviceRequested,
     quotedAmount,
+    isDefaultQuoteInfo,
+    defaultInfoLabel,
+    hasVerifiedBedrooms,
+    hasVerifiedBathrooms,
+    hasVerifiedAddress,
   };
 }
 
@@ -16375,6 +16407,9 @@ function upsertCallLeadIntoCleanSheet(
     !summaryToUse.includes("This call had no actionable details");
 
   const formattedTranscriptNote = [
+    analysis.isDefaultQuoteInfo
+      ? "⚠️ DEFAULT 3B/2B PLACEHOLDER (NOT REAL CALLER INFO — Caller hung up / did not provide room counts yet)"
+      : "✓ VERIFIED CALLER INFO",
     callLogEntry.answeredByAi ? `🤖 Screened by Sonia AI (${callLogEntry.lineName})` : `📞 Quo Call (${callLogEntry.lineName})`,
     `Verdict: ${analysis.leadVerdict === "GOOD_LEAD" ? "✅ GOOD LEAD" : analysis.leadVerdict === "POTENTIAL_JOB" ? "🟡 POTENTIAL JOB (FOLLOW UP)" : "🚫 BAD LEAD"}`,
     hasRichSummary ? `AI Summary: ${summaryToUse}` : "",
@@ -16390,6 +16425,19 @@ function upsertCallLeadIntoCleanSheet(
     }
     (existingLead as any).leadVerdict = analysis.leadVerdict;
     (existingLead as any).leadVerdictReason = analysis.leadVerdictReason;
+    if (!existingLead.quoteId && !existingLead.quoteNumber) {
+      (existingLead as any).isDefaultQuoteInfo = analysis.isDefaultQuoteInfo;
+      (existingLead as any).defaultInfoLabel = analysis.defaultInfoLabel;
+      (existingLead as any).hasVerifiedBedrooms = analysis.hasVerifiedBedrooms;
+      (existingLead as any).hasVerifiedBathrooms = analysis.hasVerifiedBathrooms;
+      (existingLead as any).hasVerifiedAddress = analysis.hasVerifiedAddress;
+      if (analysis.isDefaultQuoteInfo && existingLead.serviceRequested === "Inbound Phone Inquiry — Potential Cleaning Job (Follow-Up)") {
+        existingLead.serviceRequested = analysis.serviceRequested;
+      }
+    } else {
+      (existingLead as any).isDefaultQuoteInfo = false;
+      (existingLead as any).defaultInfoLabel = "✓ Verified Quote Info";
+    }
     existingLead.sourceTab = "Quo";
     if (
       callLogEntry.timestamp &&
@@ -16521,6 +16569,11 @@ function upsertCallLeadIntoCleanSheet(
     aiSummary: hasRichSummary ? summaryToUse : "",
     answeredByAi: Boolean(callLogEntry.answeredByAi),
     lineName: callLogEntry.lineName,
+    isDefaultQuoteInfo: analysis.isDefaultQuoteInfo,
+    defaultInfoLabel: analysis.defaultInfoLabel,
+    hasVerifiedBedrooms: analysis.hasVerifiedBedrooms,
+    hasVerifiedBathrooms: analysis.hasVerifiedBathrooms,
+    hasVerifiedAddress: analysis.hasVerifiedAddress,
   };
 
   store.adLeads.unshift(newSheetLead);
@@ -16958,6 +17011,11 @@ async function processQuoCallEvent(
     preferredDate: analysis.preferredDate,
     specialRequests: analysis.specialRequests,
     estimatedQuote: analysis.quotedAmount,
+    isDefaultQuoteInfo: analysis.isDefaultQuoteInfo,
+    defaultInfoLabel: analysis.defaultInfoLabel,
+    hasVerifiedBedrooms: analysis.hasVerifiedBedrooms,
+    hasVerifiedBathrooms: analysis.hasVerifiedBathrooms,
+    hasVerifiedAddress: analysis.hasVerifiedAddress,
     timestamp,
     matchedJobId: matchedJob ? matchedJob.id : null,
     matchedJobTitle: matchedJob ? matchedJob.title : null,

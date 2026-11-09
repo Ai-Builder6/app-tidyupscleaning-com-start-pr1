@@ -77,6 +77,11 @@ export interface AdLeadItem {
   missingPhone?: boolean;
   quotedAmount?: number;
   convertedJobId?: string;
+  isDefaultQuoteInfo?: boolean;
+  defaultInfoLabel?: string;
+  hasVerifiedBedrooms?: boolean;
+  hasVerifiedBathrooms?: boolean;
+  hasVerifiedAddress?: boolean;
 }
 
 export interface QuickQuoteCalculation {

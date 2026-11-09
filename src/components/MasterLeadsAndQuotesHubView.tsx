@@ -987,10 +987,36 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
             </button>
           </td>
           <td className="px-3 py-2.5 max-w-[260px]">
-            <div className="text-xs font-extrabold text-slate-900">{lead.serviceRequested || 'Residential Cleaning'}</div>
-            <div className="text-[11px] text-slate-600 font-medium">
-              {lead.bedrooms || '3 Bedrooms'} • {lead.bathrooms || '2 Bathrooms'}
-            </div>
+            {(() => {
+              const isDefaultInfo =
+                Boolean(lead.isDefaultQuoteInfo) ||
+                (!lead.quoteId &&
+                  !lead.quoteNumber &&
+                  (lead.leadVerdict === 'POTENTIAL_JOB' ||
+                    String(lead.serviceRequested || '').includes('Potential Cleaning Job') ||
+                    String(lead.serviceRequested || '').includes('Default') ||
+                    String(lead.serviceRequested || '').includes('Unverified') ||
+                    String(lead.customerName || '').startsWith('Potential Job Caller') ||
+                    String(lead.customerName || '').startsWith('Cleaning Caller')));
+              return (
+                <>
+                  {isDefaultInfo ? (
+                    <div className="mb-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 text-amber-950 border border-amber-400 text-[10px] font-black uppercase tracking-tight">
+                      <span>⚠️ Default Placeholder — Not Real Caller Info</span>
+                    </div>
+                  ) : resolvedTab === 'Quo' ? (
+                    <div className="mb-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black uppercase tracking-tight">
+                      <span>✓ Verified Caller Info</span>
+                    </div>
+                  ) : null}
+                  <div className="text-xs font-extrabold text-slate-900">{lead.serviceRequested || 'Residential Cleaning'}</div>
+                  <div className="text-[11px] text-slate-600 font-medium">
+                    {lead.bedrooms || '3 Bedrooms'} • {lead.bathrooms || '2 Bathrooms'}
+                    {isDefaultInfo ? ' (Default 3B/2B Base)' : ''}
+                  </div>
+                </>
+              );
+            })()}
             {lead.notes && (
               <div className="text-[10px] text-slate-500 line-clamp-1 mt-0.5" title={lead.notes}>
                 {lead.notes}
@@ -1007,14 +1033,35 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
             )}
           </td>
           <td className="px-3 py-2.5 whitespace-nowrap">
-            <div className="text-xs sm:text-sm font-black font-mono text-emerald-800">
-              ${Number(lead.quotedAmount || 221.07).toFixed(2)}
-            </div>
-            {lead.quoteNumber && (
-              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                {lead.quoteNumber}
-              </span>
-            )}
+            {(() => {
+              const isDefaultInfo =
+                Boolean(lead.isDefaultQuoteInfo) ||
+                (!lead.quoteId &&
+                  !lead.quoteNumber &&
+                  (lead.leadVerdict === 'POTENTIAL_JOB' ||
+                    String(lead.serviceRequested || '').includes('Potential Cleaning Job') ||
+                    String(lead.serviceRequested || '').includes('Default') ||
+                    String(lead.serviceRequested || '').includes('Unverified') ||
+                    String(lead.customerName || '').startsWith('Potential Job Caller') ||
+                    String(lead.customerName || '').startsWith('Cleaning Caller')));
+              return (
+                <>
+                  <div className={`text-xs sm:text-sm font-black font-mono ${isDefaultInfo ? 'text-amber-800' : 'text-emerald-800'}`}>
+                    {isDefaultInfo ? 'Est. ' : ''}${Number(lead.quotedAmount || 221.07).toFixed(2)}
+                  </div>
+                  {isDefaultInfo && (
+                    <div className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 mt-0.5">
+                      ⚠️ Default 3B/2B Info
+                    </div>
+                  )}
+                  {lead.quoteNumber && (
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      {lead.quoteNumber}
+                    </span>
+                  )}
+                </>
+              );
+            })()}
           </td>
           <td className="px-3 py-2.5 whitespace-nowrap">
             <span
@@ -2174,7 +2221,7 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                       postalCode: 'T5J 0N3',
                       propertyType: 'Single Family Home',
                       bedrooms: call.extractedBedrooms || '3 Bedrooms',
-                      bathrooms: call.extractedBathrooms || '2.5 Bathrooms',
+                      bathrooms: call.extractedBathrooms || '2 Bathrooms',
                       sqft: 1850,
                       serviceRequested: call.extractedService || 'Residential Standard Cleaning',
                       frequency: 'One-Time',
@@ -2189,9 +2236,18 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                       leadVerdictLabel:
                         call.leadVerdictLabel ||
                         (isConfirmedCleaning ? '✅ Good Lead — Potential Job' : '🟡 Potential Job — Follow-Up'),
+                      isDefaultQuoteInfo: Boolean(call.isDefaultQuoteInfo ?? !call.hasCleaningIntent),
+                      defaultInfoLabel:
+                        call.defaultInfoLabel ||
+                        (call.isDefaultQuoteInfo ?? !call.hasCleaningIntent
+                          ? '⚠️ Default Placeholder (Not Real Caller Info — 3 Bed / 2 Bath Base Estimate)'
+                          : '✓ Verified Caller Info'),
                       callTranscript: call.transcriptText || '',
                       callSummary: call.summary || '',
                       notes: [
+                        call.isDefaultQuoteInfo ?? !call.hasCleaningIntent
+                          ? '⚠️ DEFAULT 3B/2B PLACEHOLDER (NOT REAL CALLER INFO — Confirm room counts with caller)'
+                          : '✓ VERIFIED CALLER INFO',
                         call.summary ? `Sona AI Summary: ${call.summary}` : '',
                         call.transcriptText ? `Transcript: ${call.transcriptText}` : '',
                       ]
@@ -2220,6 +2276,11 @@ export const MasterLeadsAndQuotesHubView: React.FC<MasterLeadsAndQuotesHubViewPr
                                 {call.answeredByAi && (
                                   <span className="px-1.5 py-0.5 rounded bg-purple-500/30 border border-purple-400/40 text-purple-200 text-[10px] font-bold">
                                     🤖 Sonia AI
+                                  </span>
+                                )}
+                                {!blocked && (call.isDefaultQuoteInfo ?? !call.hasCleaningIntent) && (
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-500/25 border border-amber-400/50 text-amber-200 text-[10px] font-black">
+                                    ⚠️ Default 3B/2B Placeholder (Not Real Info)
                                   </span>
                                 )}
                               </div>
